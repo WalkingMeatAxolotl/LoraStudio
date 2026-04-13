@@ -15,7 +15,7 @@ t5_tokenizer_path: "models/t5_tokenizer"  # 本地 T5 tokenizer，避免联网
 # ============================================================================
 data_dir: "./dataset"
 resolution: 1024
-repeats: 1
+# repeat 通过文件夹名定义，如 5_concept → repeat 5
 shuffle_caption: true      # 分类打乱（JSON: appearance/tags/environment 内部打乱）
 keep_tokens: 6             # 保留前 N 个 tokens 不打乱（仅对 TXT 模式生效）
 flip_augment: true         # 随机水平翻转

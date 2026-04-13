@@ -1396,32 +1396,93 @@ class ImageDataset(Dataset):
         self.samples = self._scan()
         json_count = sum(1 for s in self.samples if s.get("json_path"))
         txt_count = len(self.samples) - json_count
-        logger.info(f"数据集: {len(self.samples)} 样本 (JSON: {json_count}, TXT: {txt_count})")
+        unique_count = len(set(id(s) for s in self.samples))
+        logger.info(f"数据集: {unique_count} 张图 → {len(self.samples)} 样本（含 repeat）(JSON: {json_count}, TXT: {txt_count})")
+
+    @staticmethod
+    def _parse_repeats_from_dir(name: str) -> int:
+        """从文件夹名解析 Kohya 风格重复次数，如 '5_concept' → 5"""
+        prefix = name.split("_", 1)[0]
+        if prefix.isdigit():
+            return max(int(prefix), 1)
+        return 1
+
+    def _make_sample(self, img_path):
+        """为单张图构建 sample dict，找不到 caption 返回 None"""
+        sample = {"image": img_path}
+        json_path = img_path.with_suffix(".json")
+        if self.prefer_json and json_path.exists():
+            sample["json_path"] = json_path
+            sample["txt_path"] = None
+        else:
+            txt_path = img_path.with_suffix(".txt")
+            if not txt_path.exists():
+                txt_path = img_path.with_suffix(".caption")
+            if not txt_path.exists():
+                return None
+            sample["json_path"] = None
+            sample["txt_path"] = txt_path
+        return sample
 
     def _scan(self):
-        samples = []
-        for img_path in self.data_dir.rglob("*"):
-            if img_path.suffix.lower() not in self.EXTS:
+        """扫描数据集目录，支持 Kohya 风格文件夹重复。
+
+        目录结构示例::
+
+            dataset/
+            ├── 1_old/       ← repeat 1
+            │   ├── img.jpg
+            │   └── img.txt
+            └── 5_new/       ← repeat 5
+                ├── img.jpg
+                └── img.txt
+
+        没有数字前缀的文件夹或根目录下的图片按 repeat=1 处理。
+        """
+        unique_samples = []
+        folder_info = []  # (folder_name, repeat, count) for logging
+
+        # 收集根目录下的图片（repeat=1）
+        root_count = 0
+        for p in sorted(self.data_dir.iterdir()):
+            if p.is_file() and p.suffix.lower() in self.EXTS:
+                s = self._make_sample(p)
+                if s:
+                    s["_repeat"] = 1
+                    unique_samples.append(s)
+                    root_count += 1
+        if root_count:
+            folder_info.append(("(root)", 1, root_count))
+
+        # 收集子文件夹中的图片（解析 repeat）
+        for subdir in sorted(self.data_dir.iterdir()):
+            if not subdir.is_dir():
                 continue
-            
-            sample = {"image": img_path}
-            
-            # 优先查找 JSON
-            json_path = img_path.with_suffix(".json")
-            if self.prefer_json and json_path.exists():
-                sample["json_path"] = json_path
-                sample["txt_path"] = None
-            else:
-                # 回退到 TXT
-                txt_path = img_path.with_suffix(".txt")
-                if not txt_path.exists():
-                    txt_path = img_path.with_suffix(".caption")
-                if not txt_path.exists():
+            repeats = self._parse_repeats_from_dir(subdir.name)
+            count = 0
+            for img_path in sorted(subdir.rglob("*")):
+                if img_path.suffix.lower() not in self.EXTS:
                     continue
-                sample["json_path"] = None
-                sample["txt_path"] = txt_path
-            
-            samples.append(sample)
+                s = self._make_sample(img_path)
+                if s:
+                    s["_repeat"] = repeats
+                    unique_samples.append(s)
+                    count += 1
+            if count:
+                folder_info.append((subdir.name, repeats, count))
+
+        # 展开 repeat：将每个样本按其 repeat 次数复制
+        samples = []
+        for s in unique_samples:
+            r = s.pop("_repeat", 1)
+            for _ in range(r):
+                samples.append(s)
+
+        # 日志：每个文件夹的 repeat 信息
+        if folder_info:
+            for name, rep, cnt in folder_info:
+                logger.info(f"  文件夹 {name}: {cnt} 张 × repeat {rep} = {cnt * rep} 样本")
+
         return samples
 
     def _process_caption_txt(self, caption):
@@ -1965,7 +2026,7 @@ def parse_args():
     p.add_argument("--num-workers", type=int, default=0, help="DataLoader workers")
 
     # 数据集参数
-    p.add_argument("--repeats", type=int, default=1, help="数据集重复次数 (Kohya 风格)")
+    p.add_argument("--repeats", type=int, default=1, help="(已弃用，改用文件夹名定义 repeat，如 5_concept)")
     p.add_argument("--reg-data-dir", default="", help="正则数据集目录（防过拟合，Kohya 风格）")
     p.add_argument("--reg-repeats", type=int, default=1, help="正则集每张图重复次数")
     p.add_argument("--reg-caption", default="", help="正则集统一 caption，如 1girl, solo（空则用各图自带）")
@@ -2092,7 +2153,6 @@ def prompt_for_args(args):
     args.batch_size = _ask_int("Batch size", args.batch_size)
     args.grad_accum = _ask_int("梯度累积", args.grad_accum)
     args.lr = _ask_float("学习率", args.lr)
-    args.repeats = _ask_int("数据集重复次数", args.repeats)
     args.grad_checkpoint = _ask_bool("启用梯度检查点?", args.grad_checkpoint)
     args.epochs = _ask_int("Epochs", args.epochs)
     args.max_steps = _ask_int("最大步数 (0=无限制)", args.max_steps)
@@ -2277,9 +2337,8 @@ def main():
     if reg_dataset is not None and use_cached:
         reg_dataset = CachedLatentDataset(reg_dataset, vae, device, dtype)
 
-    # repeat 放在缓存之后
-    if args.repeats > 1:
-        dataset = RepeatDataset(dataset, repeats=args.repeats)
+    # repeat: 主数据集已通过文件夹名 Kohya 风格 repeat（如 5_concept），无需全局 repeat
+    # 正则数据集仍使用 RepeatDataset 包装
     if reg_dataset is not None:
         reg_repeats = max(1, int(getattr(args, "reg_repeats", 1)) or 1)
         reg_dataset = RepeatDataset(reg_dataset, repeats=reg_repeats)

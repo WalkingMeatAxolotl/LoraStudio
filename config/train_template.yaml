@@ -19,7 +19,11 @@ t5_tokenizer_path: "models/t5_tokenizer"  # 内置 tokenizer，无需联网
 # ============================================================================
 data_dir: "./dataset"                # 数据集目录
 resolution: 1024                     # 训练分辨率
-repeats: 1                           # 数据重复次数（小数据集增加）
+# repeat 通过文件夹名 Kohya 风格定义，如:
+#   dataset/
+#   ├── 1_old/    ← 每张图 repeat 1
+#   └── 5_new/    ← 每张图 repeat 5
+# 没有数字前缀的文件夹或根目录下的图片按 repeat=1 处理
 
 # 正则数据集（Kohya 风格，防过拟合）
 # reg_data_dir: ""                   # 正则图目录（通用 1girl 等，不含角色）
