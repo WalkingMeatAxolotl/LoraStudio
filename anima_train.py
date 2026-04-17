@@ -144,6 +144,7 @@ def apply_yaml_config(args, config):
         "lr_scheduler_t_mult": "lr_scheduler_t_mult",
         "lr_scheduler_eta_min": "lr_scheduler_eta_min",
         "weight_decay": "weight_decay",
+        "optimizer_type": "optimizer_type",
         "grad_clip_max_norm": "grad_clip_max_norm",
         "mixed_precision": "mixed_precision",
         "grad_checkpoint": "grad_checkpoint",
@@ -212,6 +213,7 @@ def apply_yaml_config(args, config):
         "lr_scheduler_t_mult": 2.0,
         "lr_scheduler_eta_min": 0.0,
         "weight_decay": 0.01,
+        "optimizer_type": "adamw",
         "grad_clip_max_norm": 1.0,
         "mixed_precision": "bf16",
         "grad_checkpoint": False,
@@ -2026,6 +2028,7 @@ def parse_args():
     p.add_argument("--lr-scheduler-t0", type=int, default=500, help="cosine_with_restart: 首次 restart 周期 (step)")
     p.add_argument("--lr-scheduler-t-mult", type=float, default=2.0, help="cosine_with_restart: 每次 restart 周期倍数")
     p.add_argument("--lr-scheduler-eta-min", type=float, default=0.0, help="cosine/cosine_with_restart: 最小学习率")
+    p.add_argument("--optimizer-type", default="adamw", choices=["adamw", "prodigy"], help="优化器类型：adamw (默认) 或 prodigy (需 pip install prodigyopt，自适应 lr，需设 lr=1.0)")
     p.add_argument("--weight-decay", type=float, default=0.01, help="AdamW 权重衰减 (L2 正则, 0=禁用)")
     p.add_argument("--grad-clip-max-norm", type=float, default=1.0, help="梯度裁剪最大范数 (0=禁用)")
     p.add_argument("--resolution", type=int, default=1024)
@@ -2394,9 +2397,16 @@ def main():
     # 优化器
     weight_decay = float(getattr(args, "weight_decay", 0.01) or 0.0)
     param_groups = injector.get_param_groups(weight_decay)
-    optimizer = torch.optim.AdamW(param_groups, lr=args.lr)
+    optimizer_type = (getattr(args, "optimizer_type", "adamw") or "adamw").lower()
+    from utils.optimizer_utils import create_optimizer
+    optimizer = create_optimizer(
+        optimizer_type=optimizer_type,
+        params=param_groups,
+        learning_rate=args.lr,
+        weight_decay=weight_decay,
+    )
     if weight_decay > 0:
-        wd_info = f"AdamW weight_decay={weight_decay}"
+        wd_info = f"{optimizer_type} weight_decay={weight_decay}"
         if injector.use_lokr:
             wd_info += "（w1 排除 weight_decay）"
         logger.info(wd_info)

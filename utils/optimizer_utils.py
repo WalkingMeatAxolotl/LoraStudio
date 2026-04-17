@@ -2,8 +2,9 @@
 Optimizer Utils Module - 优化器创建
 ===================================
 支持多种优化器：
-1. 8-bit AdamW (bitsandbytes) - 内存高效
-2. 标准 AdamW - 后备选项
+1. 标准 AdamW - PyTorch 内置
+2. 8-bit AdamW (bitsandbytes) - 内存高效
+3. Prodigy (prodigyopt) - 无需调 lr 的自适应优化器
 """
 
 from typing import List, Dict, Any, Optional, Iterator
@@ -36,7 +37,7 @@ def create_optimizer(
     将优化器创建逻辑集中管理，便于维护和扩展。
 
     Args:
-        optimizer_type: 优化器类型 ("adamw8bit", "adamw")
+        optimizer_type: 优化器类型 ("adamw", "adamw8bit", "prodigy")
         params: 模型参数迭代器
         learning_rate: 学习率
         betas: Adam beta 参数 (beta1, beta2)
@@ -73,10 +74,20 @@ def create_optimizer(
             **kwargs
         )
 
+    elif optimizer_type == "prodigy":
+        return create_prodigy(
+            params=params,
+            lr=learning_rate,
+            betas=betas,
+            weight_decay=weight_decay,
+            eps=eps,
+            **kwargs
+        )
+
     else:
         raise ValueError(
             f"Unknown optimizer type: {optimizer_type}. "
-            f"Choose from: adamw8bit, adamw"
+            f"Choose from: adamw, adamw8bit, prodigy"
         )
 
 
@@ -196,7 +207,79 @@ def create_standard_adamw(
     )
     
     print("  [OK] AdamW optimizer created")
-    
+
+    return optimizer
+
+
+def create_prodigy(
+    params: Iterator[nn.Parameter],
+    lr: float,
+    betas: tuple = (0.9, 0.999),
+    weight_decay: float = 0.01,
+    eps: float = 1e-8,
+    d_coef: float = 1.0,
+    safeguard_warmup: bool = True,
+    use_bias_correction: bool = True,
+    **kwargs,
+) -> Optimizer:
+    """
+    创建 Prodigy 优化器 (https://github.com/konstmish/prodigy)
+
+    Prodigy 自适应估计学习率，lr 应设为 1.0（这里的 lr 是 d 的放大系数）。
+    如果传入的 lr != 1.0，会强制覆盖为 1.0 并打印警告。
+
+    推荐默认：safeguard_warmup=True, use_bias_correction=True, d_coef=1.0。
+    使用 constant 或 cosine scheduler 即可，不建议叠 restart。
+
+    Args:
+        params: 模型参数
+        lr: 学习率（Prodigy 要求 1.0）
+        betas: Adam beta 参数
+        weight_decay: 权重衰减
+        eps: epsilon
+        d_coef: d 的初始缩放系数
+        safeguard_warmup: warmup 期间保护 d 不过快增长
+        use_bias_correction: 是否使用偏差修正
+
+    Returns:
+        Prodigy: Prodigy 优化器
+    """
+    try:
+        from prodigyopt import Prodigy
+    except ImportError as e:
+        raise ImportError(
+            "prodigyopt is required for Prodigy optimizer. "
+            "Install with: pip install prodigyopt"
+        ) from e
+
+    if abs(lr - 1.0) > 1e-9:
+        print(
+            f"[WARN] Prodigy requires lr=1.0 (received {lr}); forcing lr=1.0. "
+            f"Tune d_coef/weight_decay instead of lr."
+        )
+        lr = 1.0
+
+    print(
+        f"Creating Prodigy optimizer (lr={lr}, weight_decay={weight_decay}, "
+        f"d_coef={d_coef}, safeguard_warmup={safeguard_warmup})"
+    )
+
+    param_list = list(params)
+
+    optimizer = Prodigy(
+        param_list,
+        lr=lr,
+        betas=betas,
+        eps=eps,
+        weight_decay=weight_decay,
+        d_coef=d_coef,
+        safeguard_warmup=safeguard_warmup,
+        use_bias_correction=use_bias_correction,
+        **kwargs,
+    )
+
+    print("  [OK] Prodigy optimizer created")
+
     return optimizer
 
 

@@ -16,6 +16,7 @@ from .optimizer_utils import (
     create_optimizer,
     create_8bit_adamw,
     create_standard_adamw,
+    create_prodigy,
     get_optimizer_info,
 )
 from .checkpoint import CheckpointManager, save_final_model
@@ -41,6 +42,7 @@ __all__ = [
     "create_optimizer",
     "create_8bit_adamw",
     "create_standard_adamw",
+    "create_prodigy",
     "get_optimizer_info",
     # Checkpoint
     "CheckpointManager",
