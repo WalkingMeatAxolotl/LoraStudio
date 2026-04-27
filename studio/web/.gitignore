@@ -4,3 +4,8 @@ dist/
 .env*
 *.log
 .DS_Store
+
+# tsc -b incremental cache + emit-by-product of vite.config.ts compilation
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
