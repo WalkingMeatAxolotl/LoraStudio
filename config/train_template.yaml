@@ -65,6 +65,9 @@ optimizer_type: "adamw"              # 优化器：
                                      #   "adamw"   - PyTorch 内置，默认
                                      #   "prodigy" - 自适应学习率，需 pip install prodigyopt
                                      #               选 prodigy 时请把 learning_rate 设为 1.0
+# Prodigy 专用参数（仅 optimizer_type=prodigy 时生效）
+prodigy_d_coef: 1.0                  # d 初始缩放系数 (默认 1.0；小数据集可降到 0.5 加速，过拟合可调到 2.0)
+prodigy_safeguard_warmup: true       # warmup 期间保护 d 不过快增长（配合外部 warmup scheduler 时可关）
 weight_decay: 0                  # 权重衰减 (L2 正则, 0=禁用; LoKr 模式下 w1 自动排除)
 grad_clip_max_norm: 0              # 梯度裁剪最大范数 (0=禁用)
 mixed_precision: "bf16"              # 混合精度 ("bf16", "fp16", "no")

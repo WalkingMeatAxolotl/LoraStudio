@@ -145,6 +145,8 @@ def apply_yaml_config(args, config):
         "lr_scheduler_eta_min": "lr_scheduler_eta_min",
         "weight_decay": "weight_decay",
         "optimizer_type": "optimizer_type",
+        "prodigy_d_coef": "prodigy_d_coef",
+        "prodigy_safeguard_warmup": "prodigy_safeguard_warmup",
         "grad_clip_max_norm": "grad_clip_max_norm",
         "mixed_precision": "mixed_precision",
         "grad_checkpoint": "grad_checkpoint",
@@ -214,6 +216,8 @@ def apply_yaml_config(args, config):
         "lr_scheduler_eta_min": 0.0,
         "weight_decay": 0.01,
         "optimizer_type": "adamw",
+        "prodigy_d_coef": 1.0,
+        "prodigy_safeguard_warmup": True,
         "grad_clip_max_norm": 1.0,
         "mixed_precision": "bf16",
         "grad_checkpoint": False,
@@ -1114,10 +1118,15 @@ class LoRAInjector:
 
     def inject(self, model):
         """注入 LoRA 到模型"""
+        skipped_llm_adapter = 0
         for name, module in list(model.named_modules()):
             if not isinstance(module, torch.nn.Linear):
                 continue
             if not any(t in name for t in self.targets):
+                continue
+            # 跳过 llm_adapter：作者明确建议不要训练它（容易降级文本理解能力）
+            if "llm_adapter" in name:
+                skipped_llm_adapter += 1
                 continue
 
             lora_linear = LoRALinear(
@@ -1134,6 +1143,8 @@ class LoRAInjector:
             self.injected[name] = lora_linear
 
         logger.info(f"注入 {'LoKr' if self.use_lokr else 'LoRA'} 到 {len(self.injected)} 层")
+        if skipped_llm_adapter > 0:
+            logger.info(f"已跳过 llm_adapter 的 {skipped_llm_adapter} 层（避免破坏文本理解）")
         return self.injected
 
     def get_params(self):
@@ -2029,6 +2040,8 @@ def parse_args():
     p.add_argument("--lr-scheduler-t-mult", type=float, default=2.0, help="cosine_with_restart: 每次 restart 周期倍数")
     p.add_argument("--lr-scheduler-eta-min", type=float, default=0.0, help="cosine/cosine_with_restart: 最小学习率")
     p.add_argument("--optimizer-type", default="adamw", choices=["adamw", "prodigy"], help="优化器类型：adamw (默认) 或 prodigy (需 pip install prodigyopt，自适应 lr，需设 lr=1.0)")
+    p.add_argument("--prodigy-d-coef", type=float, default=1.0, help="Prodigy d 初始缩放系数 (默认 1.0；小数据集可降到 0.5 加速，过拟合可调到 2.0)")
+    p.add_argument("--prodigy-safeguard-warmup", action=argparse.BooleanOptionalAction, default=True, help="Prodigy warmup 期间保护 d 不过快增长 (配合外部 warmup scheduler 时可关)")
     p.add_argument("--weight-decay", type=float, default=0.01, help="AdamW 权重衰减 (L2 正则, 0=禁用)")
     p.add_argument("--grad-clip-max-norm", type=float, default=1.0, help="梯度裁剪最大范数 (0=禁用)")
     p.add_argument("--resolution", type=int, default=1024)
@@ -2399,11 +2412,16 @@ def main():
     param_groups = injector.get_param_groups(weight_decay)
     optimizer_type = (getattr(args, "optimizer_type", "adamw") or "adamw").lower()
     from utils.optimizer_utils import create_optimizer
+    optimizer_extra = {}
+    if optimizer_type == "prodigy":
+        optimizer_extra["d_coef"] = float(getattr(args, "prodigy_d_coef", 1.0))
+        optimizer_extra["safeguard_warmup"] = bool(getattr(args, "prodigy_safeguard_warmup", True))
     optimizer = create_optimizer(
         optimizer_type=optimizer_type,
         params=param_groups,
         learning_rate=args.lr,
         weight_decay=weight_decay,
+        **optimizer_extra,
     )
     if weight_decay > 0:
         wd_info = f"{optimizer_type} weight_decay={weight_decay}"
