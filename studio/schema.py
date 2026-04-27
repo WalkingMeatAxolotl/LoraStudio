@@ -31,22 +31,22 @@ class TrainingConfig(BaseModel):
     transformer_path: str = Field(
         "models/transformers/anima-preview.safetensors",
         description="主 transformer 权重 (.safetensors)",
-        json_schema_extra=_meta("model", "path"),
+        json_schema_extra=_meta("model", "path", cli_alias="--transformer"),
     )
     vae_path: str = Field(
         "models/vae/qwen_image_vae.safetensors",
         description="VAE 权重",
-        json_schema_extra=_meta("model", "path"),
+        json_schema_extra=_meta("model", "path", cli_alias="--vae"),
     )
     text_encoder_path: str = Field(
         "models/text_encoders",
         description="Qwen 文本编码器目录",
-        json_schema_extra=_meta("model", "path"),
+        json_schema_extra=_meta("model", "path", cli_alias="--qwen"),
     )
     t5_tokenizer_path: str = Field(
         "models/t5_tokenizer",
         description="T5 tokenizer 目录",
-        json_schema_extra=_meta("model", "path"),
+        json_schema_extra=_meta("model", "path", cli_alias="--t5-tokenizer"),
     )
 
     # ----------------------------------------------------------------- 数据集
@@ -154,7 +154,7 @@ class TrainingConfig(BaseModel):
     learning_rate: float = Field(
         1e-4, gt=0.0,
         description="学习率（Prodigy 必须为 1.0）",
-        json_schema_extra=_meta("training"),
+        json_schema_extra=_meta("training", cli_alias="--lr"),
     )
     lr_scheduler: Literal["none", "cosine", "cosine_with_restart"] = Field(
         "none",

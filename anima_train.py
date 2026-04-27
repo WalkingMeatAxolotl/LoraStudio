@@ -106,168 +106,15 @@ def load_yaml_config(config_path):
 
 
 def apply_yaml_config(args, config):
-    """将 YAML 配置应用到 args，命令行参数优先"""
-    # 字段映射: YAML key -> args attribute
-    mapping = {
-        # 模型路径
-        "transformer_path": "transformer",
-        "vae_path": "vae",
-        "text_encoder_path": "qwen",
-        "t5_tokenizer_path": "t5_tokenizer",
-        # 数据集
-        "data_dir": "data_dir",
-        "reg_data_dir": "reg_data_dir",
-        "reg_caption": "reg_caption",
-        "reg_weight": "reg_weight",
-        "resolution": "resolution",
-        "repeats": "repeats",
-        "shuffle_caption": "shuffle_caption",
-        "keep_tokens": "keep_tokens",
-        "flip_augment": "flip_augment",
-        "tag_dropout": "tag_dropout",
-        "prefer_json": "prefer_json",
-        "cache_latents": "cache_latents",
-        # LoRA 配置
-        "lora_type": "lora_type",
-        "lora_rank": "lora_rank",
-        "lora_alpha": "lora_alpha",
-        "lokr_factor": "lokr_factor",
-        "resume_lora": "resume_lora",
-        # 训练参数
-        "epochs": "epochs",
-        "max_steps": "max_steps",
-        "batch_size": "batch_size",
-        "grad_accum": "grad_accum",
-        "learning_rate": "lr",
-        "lr_scheduler": "lr_scheduler",
-        "lr_scheduler_t0": "lr_scheduler_t0",
-        "lr_scheduler_t_mult": "lr_scheduler_t_mult",
-        "lr_scheduler_eta_min": "lr_scheduler_eta_min",
-        "weight_decay": "weight_decay",
-        "optimizer_type": "optimizer_type",
-        "prodigy_d_coef": "prodigy_d_coef",
-        "prodigy_safeguard_warmup": "prodigy_safeguard_warmup",
-        "grad_clip_max_norm": "grad_clip_max_norm",
-        "mixed_precision": "mixed_precision",
-        "grad_checkpoint": "grad_checkpoint",
-        "xformers": "xformers",
-        "num_workers": "num_workers",
-        # 输出与保存
-        "output_dir": "output_dir",
-        "output_name": "output_name",
-        "save_every": "save_every",
-        "save_every_steps": "save_every_steps",
-        "save_state_every": "save_state_every",
-        "resume_state": "resume_state",
-        "seed": "seed",
-        # 采样
-        "sample_every": "sample_every",
-        "sample_steps": "sample_steps",
-        "sample_prompt": "sample_prompt",
-        "sample_prompts": "sample_prompts",
-        "sample_cfg_scale": "sample_cfg_scale",
-        "sample_negative_prompt": "sample_negative_prompt",
-        "sample_width": "sample_width",
-        "sample_height": "sample_height",
-        "sample_seed": "sample_seed",
-        "sample_infer_steps": "sample_infer_steps",
-        "sample_sampler_name": "sample_sampler_name",
-        "sample_scheduler": "sample_scheduler",
-        # 进度显示与监控
-        "loss_curve_steps": "loss_curve_steps",
-        "no_progress": "no_progress",
-        "log_every": "log_every",
-        "no_monitor": "no_monitor",
-        "monitor_host": "monitor_host",
-        "monitor_port": "monitor_port",
-        "no_browser": "no_browser",
-    }
+    """将 YAML 配置应用到 args；命令行显式参数优先于 YAML。
 
-    # 需要特殊处理的默认值（用于判断命令行是否显式设置）
-    defaults = {
-        "transformer": "",
-        "vae": "",
-        "qwen": "",
-        "t5_tokenizer": "",
-        "data_dir": "",
-        "reg_data_dir": "",
-        "reg_caption": "",
-        "resolution": 1024,
-        "repeats": 1,
-        "shuffle_caption": False,
-        "keep_tokens": 0,
-        "flip_augment": False,
-        "tag_dropout": 0.0,
-        "prefer_json": True,
-        "cache_latents": False,
-        "lora_type": "lokr",
-        "lora_rank": 32,
-        "lora_alpha": 32.0,
-        "lokr_factor": 8,
-        "resume_lora": "",
-        "epochs": 10,
-        "max_steps": 0,
-        "batch_size": 1,
-        "grad_accum": 1,
-        "lr": 1e-4,
-        "lr_scheduler": "none",
-        "lr_scheduler_t0": 500,
-        "lr_scheduler_t_mult": 2.0,
-        "lr_scheduler_eta_min": 0.0,
-        "weight_decay": 0.01,
-        "optimizer_type": "adamw",
-        "prodigy_d_coef": 1.0,
-        "prodigy_safeguard_warmup": True,
-        "grad_clip_max_norm": 1.0,
-        "mixed_precision": "bf16",
-        "grad_checkpoint": False,
-        "xformers": False,
-        "num_workers": 0,
-        "output_dir": "./output",
-        "output_name": "anima_lora",
-        "save_every": 0,
-        "save_every_steps": 0,
-        "save_state_every": 0,
-        "resume_state": "",
-        "seed": 42,
-        "sample_every": 0,
-        "sample_steps": 0,
-        "sample_prompt": "1girl, masterpiece",
-        "sample_prompts": [],
-        "sample_cfg_scale": 4.0,
-        "sample_negative_prompt": "",
-        "sample_width": 0,
-        "sample_height": 0,
-        "sample_seed": 0,
-        "sample_infer_steps": 25,
-        "sample_sampler_name": "er_sde",
-        "sample_scheduler": "simple",
-        "loss_curve_steps": 100,
-        "no_progress": False,
-        "log_every": 10,
-        "no_monitor": False,
-        "monitor_host": "127.0.0.1",
-        "monitor_port": 8765,
-        "no_browser": False,
-    }
-
-    for yaml_key, arg_attr in mapping.items():
-        if yaml_key not in config:
-            continue
-        yaml_value = config[yaml_key]
-        if yaml_value is None:
-            continue
-
-        # 检查命令行是否显式设置了该参数（与默认值不同）
-        current_value = getattr(args, arg_attr, None)
-        default_value = defaults.get(arg_attr)
-
-        # 如果当前值等于默认值，或者属性不存在（current_value 为 None），则使用 YAML 配置
-        # 特殊处理：列表类型的默认值用 [] 表示，但 argparse 未定义时返回 None
-        if current_value == default_value or current_value is None:
-            setattr(args, arg_attr, yaml_value)
-
-    return args
+    实现走 studio.argparse_bridge.merge_yaml_into_namespace —— 字段名 / 默认值
+    都从 studio.schema.TrainingConfig 这一份单一权威源派生，避免与 parse_args
+    脱节。未在 schema 中的 YAML 键会被忽略（拼写错误一目了然）。
+    """
+    from studio.argparse_bridge import merge_yaml_into_namespace
+    from studio.schema import TrainingConfig
+    return merge_yaml_into_namespace(args, config or {}, TrainingConfig)
 
 
 # Lazy imports after dependency check
@@ -2018,91 +1865,21 @@ def collate_fn_cached(batch):
 # ============================================================================
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Anima LoRA Trainer v2")
-    # 配置文件
-    p.add_argument("--config", default="", help="YAML 配置文件路径")
-    # 路径
-    p.add_argument("--data-dir", default="", help="数据集目录")
-    p.add_argument("--transformer", default="", help="transformer safetensors")
-    p.add_argument("--vae", default="", help="VAE safetensors")
-    p.add_argument("--qwen", default="", help="Qwen 模型目录")
-    p.add_argument("--t5-tokenizer", default="", help="T5 tokenizer 目录")
-    p.add_argument("--output-dir", default="./output", help="输出目录")
-    p.add_argument("--output-name", default="anima_lora", help="输出名称")
+    """从 studio.schema.TrainingConfig 自动生成 parser；额外补 schema 之外的
+    CLI-only 开关（auto-install / interactive / no-live-curve / 已弃用的
+    --repeats 和 --reg-repeats）。
+    """
+    from studio.argparse_bridge import build_parser
+    from studio.schema import TrainingConfig
 
-    # 训练参数
-    p.add_argument("--epochs", type=int, default=10)
-    p.add_argument("--batch-size", type=int, default=1)
-    p.add_argument("--grad-accum", type=int, default=1)
-    p.add_argument("--lr", type=float, default=1e-4)
-    p.add_argument("--lr-scheduler", default="none", choices=["none", "cosine", "cosine_with_restart"], help="学习率调度器")
-    p.add_argument("--lr-scheduler-t0", type=int, default=500, help="cosine_with_restart: 首次 restart 周期 (step)")
-    p.add_argument("--lr-scheduler-t-mult", type=float, default=2.0, help="cosine_with_restart: 每次 restart 周期倍数")
-    p.add_argument("--lr-scheduler-eta-min", type=float, default=0.0, help="cosine/cosine_with_restart: 最小学习率")
-    p.add_argument("--optimizer-type", default="adamw", choices=["adamw", "prodigy"], help="优化器类型：adamw (默认) 或 prodigy (需 pip install prodigyopt，自适应 lr，需设 lr=1.0)")
-    p.add_argument("--prodigy-d-coef", type=float, default=1.0, help="Prodigy d 初始缩放系数 (默认 1.0；小数据集可降到 0.5 加速，过拟合可调到 2.0)")
-    p.add_argument("--prodigy-safeguard-warmup", action=argparse.BooleanOptionalAction, default=True, help="Prodigy warmup 期间保护 d 不过快增长 (配合外部 warmup scheduler 时可关)")
-    p.add_argument("--weight-decay", type=float, default=0.01, help="AdamW 权重衰减 (L2 正则, 0=禁用)")
-    p.add_argument("--grad-clip-max-norm", type=float, default=1.0, help="梯度裁剪最大范数 (0=禁用)")
-    p.add_argument("--resolution", type=int, default=1024)
-    p.add_argument("--mixed-precision", choices=["fp32", "bf16"], default="bf16")
-    p.add_argument("--grad-checkpoint", action="store_true", help="启用梯度检查点减少显存")
-    p.add_argument("--xformers", action="store_true", help="启用 xformers memory efficient attention")
-    p.add_argument("--max-steps", type=int, default=0, help="最大训练步数 (0=无限制)")
-    p.add_argument("--num-workers", type=int, default=0, help="DataLoader workers")
-
-    # 数据集参数
-    p.add_argument("--repeats", type=int, default=1, help="(已弃用，改用文件夹名定义 repeat，如 5_concept)")
-    p.add_argument("--reg-data-dir", default="", help="正则数据集目录（防过拟合，Kohya 风格）")
-    p.add_argument("--reg-repeats", type=int, default=1, help="正则集每张图重复次数")
-    p.add_argument("--reg-caption", default="", help="正则集统一 caption，如 1girl, solo（空则用各图自带）")
-    p.add_argument("--shuffle-caption", action="store_true", help="打乱 caption tags（分类 shuffle）")
-    p.add_argument("--keep-tokens", type=int, default=0, help="保留前 N 个 tokens 不打乱")
-    p.add_argument("--flip-augment", action="store_true", help="随机水平翻转增强")
-    p.add_argument("--tag-dropout", type=float, default=0.0, help="Tag dropout 概率 (0-1)")
-    p.add_argument("--no-prefer-json", action="store_true", help="禁用 JSON 优先模式")
-    p.add_argument("--cache-latents", action="store_true", help="缓存 VAE latent 加速训练")
-
-    # LoRA 参数
-    p.add_argument("--lora-type", choices=["lora", "lokr"], default="lokr")
-    p.add_argument("--lora-rank", type=int, default=32)
-    p.add_argument("--lora-alpha", type=float, default=32.0)
-    p.add_argument("--lokr-factor", type=int, default=8)
-    p.add_argument("--resume-lora", default="", help="从已有 LoRA 继续训练（safetensors 路径）")
-
-    # 采样参数
-    p.add_argument("--sample-every", type=int, default=0, help="每 N 个 epoch 采样一次 (0=禁用)")
-    p.add_argument("--sample-steps", type=int, default=0, help="每 N 个 step 采样一次 (0=禁用)")
-    p.add_argument("--sample-prompt", default="1girl, masterpiece", help="采样提示词")
-    p.add_argument("--sample-cfg-scale", type=float, default=4.0, help="采样 CFG（设为 1 表示不做 CFG，仅用正面条件）")
-    p.add_argument("--sample-negative-prompt", default="", help="采样负面提示词（留空使用默认负面）")
-    p.add_argument("--sample-width", type=int, default=0, help="采样宽度（0=跟随 resolution）")
-    p.add_argument("--sample-height", type=int, default=0, help="采样高度（0=跟随 resolution）")
-    p.add_argument("--sample-seed", type=int, default=0, help="采样随机种子（0=不固定）")
-    p.add_argument("--sample-infer-steps", type=int, default=25, help="采样推理步数（对齐 ComfyUI 默认 25）")
-    p.add_argument("--sample-sampler-name", default="er_sde", help="采样器名称（对齐 ComfyUI: er_sde）")
-    p.add_argument("--sample-scheduler", default="simple", help="采样 scheduler（对齐 ComfyUI: simple）")
-
-    # 保存参数
-    p.add_argument("--save-every", type=int, default=0, help="每 N 个 epoch 保存 (0=仅结束时)")
-    p.add_argument("--save-state-every", type=int, default=0, help="每 N 步保存完整训练状态（可断点续训）")
-    p.add_argument("--resume-state", default="", help="从训练状态恢复（.pt 文件路径）")
-    p.add_argument("--seed", type=int, default=42)
-
-    # 进度显示
-    p.add_argument("--no-progress", action="store_true", help="禁用动态进度显示")
-    p.add_argument("--loss-curve-steps", type=int, default=100, help="Loss 曲线显示步数 (0=禁用)")
-    p.add_argument("--no-live-curve", action="store_true", help="禁用实时 Loss 曲线刷新")
-    p.add_argument("--no-monitor", action="store_true", help="禁用 Web 监控面板")
-    p.add_argument("--monitor-host", default="127.0.0.1", help="监控面板绑定地址（默认仅本机；局域网/云端访问用 0.0.0.0）")
-    p.add_argument("--monitor-port", type=int, default=8765, help="监控面板端口")
-    p.add_argument("--no-browser", action="store_true", help="不自动打开监控面板浏览器")
-    p.add_argument("--log-every", type=int, default=10, help="日志输出间隔")
-
-    # 依赖和交互
+    p = build_parser(TrainingConfig, prog="anima_train", description="Anima LoRA Trainer v2")
+    # schema 之外的 CLI-only 开关
     p.add_argument("--auto-install", action="store_true", help="自动安装缺失依赖")
     p.add_argument("--interactive", action="store_true", help="交互模式，提示输入缺失参数")
-
+    p.add_argument("--no-live-curve", action="store_true", help="禁用实时 Loss 曲线刷新")
+    # 已弃用，保留是为了不破坏旧脚本（每图重复改用文件夹名前缀，如 5_concept）
+    p.add_argument("--repeats", type=int, default=1, help=argparse.SUPPRESS)
+    p.add_argument("--reg-repeats", type=int, default=1, help=argparse.SUPPRESS)
     return p.parse_args()
 
 
@@ -2170,15 +1947,15 @@ def prompt_for_args(args):
     """交互式提示输入缺失参数"""
     defaults = _guess_default_paths()
     args.data_dir = args.data_dir or _ask_str("数据集目录 (images + .txt)", "")
-    args.transformer = args.transformer or _ask_str("Transformer 路径 (.safetensors)", defaults["transformer"])
-    args.vae = args.vae or _ask_str("VAE 路径 (.safetensors)", defaults["vae"])
-    args.qwen = args.qwen or _ask_str("Qwen 模型目录", defaults["qwen"])
+    args.transformer_path = args.transformer_path or _ask_str("Transformer 路径 (.safetensors)", defaults["transformer"])
+    args.vae_path = args.vae_path or _ask_str("VAE 路径 (.safetensors)", defaults["vae"])
+    args.text_encoder_path = args.text_encoder_path or _ask_str("Qwen 模型目录", defaults["qwen"])
     args.output_dir = _ask_str("输出目录", args.output_dir)
     args.output_name = _ask_str("输出名称", args.output_name)
     args.resolution = _ask_int("分辨率", args.resolution)
     args.batch_size = _ask_int("Batch size", args.batch_size)
     args.grad_accum = _ask_int("梯度累积", args.grad_accum)
-    args.lr = _ask_float("学习率", args.lr)
+    args.learning_rate = _ask_float("学习率", args.learning_rate)
     args.grad_checkpoint = _ask_bool("启用梯度检查点?", args.grad_checkpoint)
     args.epochs = _ask_int("Epochs", args.epochs)
     args.max_steps = _ask_int("最大步数 (0=无限制)", args.max_steps)
@@ -2208,14 +1985,11 @@ def main():
         config = load_yaml_config(args.config)
         args = apply_yaml_config(args, config)
 
-    # 处理 --no-prefer-json 参数
-    if getattr(args, "no_prefer_json", False):
-        args.prefer_json = False
-    elif not hasattr(args, "prefer_json"):
-        args.prefer_json = True  # 默认启用
+    # bridge 已为 prefer_json bool 自动产生 --prefer-json / --no-prefer-json，
+    # 此处无需再做兼容处理。
 
     # 交互模式检查
-    required = [args.data_dir, args.transformer, args.vae, args.qwen]
+    required = [args.data_dir, args.transformer_path, args.vae_path, args.text_encoder_path]
     if args.interactive or any(not x for x in required):
         args = prompt_for_args(args)
 
@@ -2258,7 +2032,7 @@ def main():
                 "epochs": args.epochs,
                 "batch_size": args.batch_size,
                 "grad_accum": args.grad_accum,
-                "lr": args.lr,
+                "lr": args.learning_rate,
                 "resolution": args.resolution,
                 "data_dir": str(args.data_dir),
             })
@@ -2280,10 +2054,10 @@ def main():
         repo_root,
         repo_root.parent,
     ]
-    args.transformer = resolve_path_best_effort(args.transformer, bases)
-    args.vae = resolve_path_best_effort(args.vae, bases)
-    args.qwen = resolve_path_best_effort(args.qwen, bases)
-    args.t5_tokenizer = resolve_path_best_effort(getattr(args, "t5_tokenizer", ""), bases)
+    args.transformer_path = resolve_path_best_effort(args.transformer_path, bases)
+    args.vae_path = resolve_path_best_effort(args.vae_path, bases)
+    args.text_encoder_path = resolve_path_best_effort(args.text_encoder_path, bases)
+    args.t5_tokenizer_path = resolve_path_best_effort(getattr(args, "t5_tokenizer", ""), bases)
     args.data_dir = resolve_path_best_effort(args.data_dir, bases)
     reg_data_dir = getattr(args, "reg_data_dir", "") or ""
     if reg_data_dir:
@@ -2291,18 +2065,18 @@ def main():
 
     # 加载模型
     logger.info("加载 Transformer...")
-    model = load_anima_model(args.transformer, device, dtype, repo_root)
+    model = load_anima_model(args.transformer_path, device, dtype, repo_root)
 
     # 启用 xformers
     if args.xformers:
         enable_xformers(model)
 
     logger.info("加载 VAE...")
-    vae = load_vae(args.vae, device, dtype, repo_root)
+    vae = load_vae(args.vae_path, device, dtype, repo_root)
 
     logger.info("加载文本编码器...")
     qwen_model, qwen_tok, t5_tok = load_text_encoders(
-        args.qwen, args.t5_tokenizer, device, dtype
+        args.text_encoder_path, args.t5_tokenizer_path, device, dtype
     )
 
     # 注入 LoRA
@@ -2419,7 +2193,7 @@ def main():
     optimizer = create_optimizer(
         optimizer_type=optimizer_type,
         params=param_groups,
-        learning_rate=args.lr,
+        learning_rate=args.learning_rate,
         weight_decay=weight_decay,
         **optimizer_extra,
     )
