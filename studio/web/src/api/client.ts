@@ -41,6 +41,29 @@ export interface ConfigSummary {
 
 export type ConfigData = Record<string, unknown>
 
+export type TaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'canceled'
+
+export interface Task {
+  id: number
+  name: string
+  config_name: string
+  status: TaskStatus
+  priority: number
+  created_at: number
+  started_at: number | null
+  finished_at: number | null
+  pid: number | null
+  exit_code: number | null
+  output_dir: string | null
+  error_msg: string | null
+}
+
+export interface LogResponse {
+  task_id: number
+  content: string
+  size: number
+}
+
 async function req<T>(
   path: string,
   init?: RequestInit
@@ -87,4 +110,30 @@ export const api = {
       `/api/configs/${src}/duplicate`,
       { method: 'POST', body: JSON.stringify({ new_name: newName }) }
     ),
+
+  // Queue --------------------------------------------------------------
+  listQueue: (status?: TaskStatus) => {
+    const qs = status ? `?status=${status}` : ''
+    return req<{ items: Task[] }>(`/api/queue${qs}`).then((r) => r.items)
+  },
+  getTask: (id: number) => req<Task>(`/api/queue/${id}`),
+  enqueue: (payload: { config_name: string; name?: string; priority?: number }) =>
+    req<Task>('/api/queue', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  cancelTask: (id: number) =>
+    req<{ task_id: number; canceled: boolean }>(`/api/queue/${id}/cancel`, {
+      method: 'POST',
+    }),
+  retryTask: (id: number) =>
+    req<Task>(`/api/queue/${id}/retry`, { method: 'POST' }),
+  deleteTask: (id: number) =>
+    req<{ deleted: number }>(`/api/queue/${id}`, { method: 'DELETE' }),
+  reorderQueue: (orderedIds: number[]) =>
+    req<{ reordered: number }>('/api/queue/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ ordered_ids: orderedIds }),
+    }),
+  getLog: (id: number) => req<LogResponse>(`/api/logs/${id}`),
 }

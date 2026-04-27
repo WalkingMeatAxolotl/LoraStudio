@@ -3,8 +3,8 @@ import { NavLink } from 'react-router-dom'
 const links: Array<{ to: string; label: string; phase?: string }> = [
   { to: '/', label: '监控' },
   { to: '/configs', label: '配置' },
+  { to: '/queue', label: '队列' },
   { to: '/datasets', label: '数据集', phase: 'P4' },
-  { to: '/queue', label: '队列', phase: 'P3' },
 ]
 
 export default function Sidebar() {
