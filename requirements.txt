@@ -35,3 +35,7 @@ pydantic>=2.5.0
 pyyaml>=6.0.1
 psutil>=5.9.0
 rich>=13.7.0
+
+# Dev / tests (optional)
+# pytest>=8.0
+# httpx>=0.27   # required by FastAPI's TestClient

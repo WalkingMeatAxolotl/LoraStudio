@@ -166,7 +166,7 @@ http://localhost:8080
 
 1. ✅ 验证模型文件完整
    ```bash
-   python validate_local_models.py
+   python tools/validate_local_models.py
    ```
 
 2. ✅ 检查数据集

@@ -23,6 +23,14 @@ config/autosave/
 *.log
 wandb/
 
+# Studio runtime data (SQLite, user configs, task logs)
+studio_data/
+
+# Studio frontend (Node deps and build artifacts)
+studio/web/node_modules/
+studio/web/dist/
+studio/web/.vite/
+
 # User-specific training configs (keep templates only)
 config/train_*.yaml
 !config/train_template.yaml
