@@ -1,6 +1,6 @@
 # PP4 — 打标（WD14 + JoyCaption）+ 标签编辑
 
-**状态**：计划中
+**状态**：已完成
 **前置依赖**：PP3
 **预估工作量**：3 工作日（最大的一个 PP）
 **外部脚本来源**：`C:\Users\Mei\Desktop\SD\danbooru\dev\joycaption_tagger.py`
@@ -395,6 +395,13 @@ def batch(pid, vid, body): ...
 ```
 
 ## 前端
+
+> **手测后调整（2026-04-27）**：原始 spec 是单页「Tagging」混合自动打标 + 标签编辑。实际落地拆成 pipeline 两个 step：
+>
+> - **③ 打标** (`/v/:vid/tag`)：只跑 tagger，无 folder 选择，无图片网格 — 控制条 + job 进度。永远扫 `train/` 下全部 repeat 子目录。
+> - **④ 标签编辑** (`/v/:vid/edit`)：默认列出 train/ 下全部图片，前端不展示 folder 概念；单图编辑 + BulkTagPanel（scope = all / 当前选中）。
+>
+> 因此 stepper 从 5 步扩成 6 步（① 下载 ② 筛选 ③ 打标 ④ 标签编辑 ⑤ 正则集 ⑥ 训练）。`tag_worker.params` 删掉 `folders` 字段；`/captions` 端点 `folder` 改成可选，缺省返回所有 folder 合并的列表（每项含 `folder` 字段）；`BatchScope` 的 `files` 形式从 `{folder, names}` 改成 `{items: [{folder, name}]}` 以支持跨 folder 选择。
 
 ### A. `pages/Project/steps/Tagging.tsx`
 

@@ -117,6 +117,7 @@ export type VersionStage =
 
 export interface VersionStats {
   train_image_count: number
+  tagged_image_count: number
   train_folders: Array<{ name: string; image_count: number }>
   reg_image_count: number
   has_output: boolean
@@ -191,6 +192,77 @@ export interface CopyResult {
   copied: string[]
   skipped: string[]
   missing: string[]
+}
+
+// ---- tagging (PP4) --------------------------------------------------------
+
+export type TaggerName = 'wd14' | 'joycaption'
+
+export interface TaggerStatus {
+  name: TaggerName
+  ok: boolean
+  msg: string
+  requires_service: boolean
+}
+
+export interface CaptionPreview {
+  name: string
+  folder: string
+  tag_count: number
+  tags_preview: string[]
+  has_caption: boolean
+}
+
+/** full=1 时返回的 caption 列表项；含完整 tags + format。 */
+export interface CaptionEntry extends CaptionPreview {
+  tags: string[]
+  format: 'txt' | 'json' | 'none'
+}
+
+export interface CommitItem {
+  folder: string
+  name: string
+  tags: string[]
+}
+
+export interface CommitResult {
+  snapshot: CaptionSnapshot
+  written: number
+  skipped: string[]
+}
+
+export interface CaptionFull {
+  name: string
+  tags: string[]
+  format: 'txt' | 'json' | 'none'
+}
+
+export type BatchScope =
+  | { kind: 'all' }
+  | { kind: 'folder'; name: string }
+  | { kind: 'files'; items: Array<{ folder: string; name: string }> }
+
+export interface BatchOpRequest {
+  op: 'add' | 'remove' | 'replace' | 'dedupe' | 'stats'
+  scope: BatchScope
+  tags?: string[]
+  old?: string
+  new?: string
+  position?: 'front' | 'back'
+  top?: number
+}
+
+export interface BatchOpResult {
+  op: string
+  affected?: number
+  items?: Array<[string, number]>
+}
+
+export interface CaptionSnapshot {
+  id: string
+  created_at: number
+  size: number
+  file_count: number
 }
 
 export type TaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'canceled'
@@ -442,6 +514,76 @@ export const api = {
     req<{ job_id: number; canceled: boolean }>(`/api/jobs/${jid}/cancel`, {
       method: 'POST',
     }),
+
+  // Tagging (PP4) --------------------------------------------------------
+  checkTagger: (name: TaggerName) =>
+    req<TaggerStatus>(`/api/tagger/${name}/check`),
+  startTag: (
+    pid: number,
+    vid: number,
+    body: {
+      tagger: TaggerName
+      output_format?: 'txt' | 'json'
+    }
+  ) =>
+    req<Job>(`/api/projects/${pid}/versions/${vid}/tag`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  listCaptions: (pid: number, vid: number, folder?: string) => {
+    const qs = folder ? `?folder=${encodeURIComponent(folder)}` : ''
+    return req<{ folder: string | null; items: CaptionPreview[] }>(
+      `/api/projects/${pid}/versions/${vid}/captions${qs}`
+    )
+  },
+  listCaptionsFull: (pid: number, vid: number) =>
+    req<{ folder: null; items: CaptionEntry[] }>(
+      `/api/projects/${pid}/versions/${vid}/captions?full=1`
+    ),
+  commitCaptions: (pid: number, vid: number, items: CommitItem[]) =>
+    req<CommitResult>(
+      `/api/projects/${pid}/versions/${vid}/captions/commit`,
+      { method: 'POST', body: JSON.stringify({ items }) }
+    ),
+  getCaption: (pid: number, vid: number, folder: string, filename: string) =>
+    req<CaptionFull>(
+      `/api/projects/${pid}/versions/${vid}/captions/${encodeURIComponent(folder)}/${encodeURIComponent(filename)}`
+    ),
+  putCaption: (
+    pid: number,
+    vid: number,
+    folder: string,
+    filename: string,
+    tags: string[]
+  ) =>
+    req<CaptionFull>(
+      `/api/projects/${pid}/versions/${vid}/captions/${encodeURIComponent(folder)}/${encodeURIComponent(filename)}`,
+      { method: 'PUT', body: JSON.stringify({ tags }) }
+    ),
+  batchTag: (pid: number, vid: number, body: BatchOpRequest) =>
+    req<BatchOpResult>(
+      `/api/projects/${pid}/versions/${vid}/captions/batch`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+  createCaptionSnapshot: (pid: number, vid: number) =>
+    req<CaptionSnapshot>(
+      `/api/projects/${pid}/versions/${vid}/captions/snapshot`,
+      { method: 'POST' }
+    ),
+  listCaptionSnapshots: (pid: number, vid: number) =>
+    req<{ items: CaptionSnapshot[] }>(
+      `/api/projects/${pid}/versions/${vid}/captions/snapshots`
+    ).then((r) => r.items),
+  restoreCaptionSnapshot: (pid: number, vid: number, sid: string) =>
+    req<{ id: string; written: number; removed_old: number; skipped: string[] }>(
+      `/api/projects/${pid}/versions/${vid}/captions/snapshots/${sid}/restore`,
+      { method: 'POST' }
+    ),
+  deleteCaptionSnapshot: (pid: number, vid: number, sid: string) =>
+    req<{ deleted: string }>(
+      `/api/projects/${pid}/versions/${vid}/captions/snapshots/${sid}`,
+      { method: 'DELETE' }
+    ),
 
   // Curation (PP3) -------------------------------------------------------
   getCuration: (pid: number, vid: number) =>

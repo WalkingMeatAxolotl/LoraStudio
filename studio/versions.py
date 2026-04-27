@@ -257,18 +257,22 @@ def advance_stage(
 
 
 def stats_for_version(p: dict[str, Any], v: dict[str, Any]) -> dict[str, Any]:
-    """train 子文件夹与图片计数 / reg 计数 / output 是否存在。"""
+    """train 子文件夹与图片计数 / 已打标计数 / reg 计数 / output 是否存在。"""
     vdir = version_dir(p["id"], p["slug"], v["label"])
     train_dir = vdir / "train"
     train_folders: list[dict[str, Any]] = []
     train_total = 0
+    tagged_total = 0
     if train_dir.exists():
         for sub in sorted(train_dir.iterdir()):
             if sub.is_dir():
-                cnt = sum(
-                    1 for f in sub.iterdir()
-                    if f.is_file() and f.suffix.lower() in IMAGE_EXTS
-                )
+                cnt = 0
+                for f in sub.iterdir():
+                    if not (f.is_file() and f.suffix.lower() in IMAGE_EXTS):
+                        continue
+                    cnt += 1
+                    if f.with_suffix(".txt").exists() or f.with_suffix(".json").exists():
+                        tagged_total += 1
                 train_folders.append({"name": sub.name, "image_count": cnt})
                 train_total += cnt
     reg_dir = vdir / "reg"
@@ -284,6 +288,7 @@ def stats_for_version(p: dict[str, Any], v: dict[str, Any]) -> dict[str, Any]:
     has_output = output_dir.exists() and any(output_dir.iterdir())
     return {
         "train_image_count": train_total,
+        "tagged_image_count": tagged_total,
         "train_folders": train_folders,
         "reg_image_count": reg_total,
         "has_output": has_output,

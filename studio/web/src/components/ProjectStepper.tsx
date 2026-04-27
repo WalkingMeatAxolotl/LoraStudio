@@ -11,8 +11,9 @@ const STEPS: Step[] = [
   { key: 'download', label: '① 下载', scope: 'project' },
   { key: 'curate', label: '② 筛选', scope: 'version' },
   { key: 'tag', label: '③ 打标', scope: 'version' },
-  { key: 'reg', label: '④ 正则集', scope: 'version' },
-  { key: 'train', label: '⑤ 训练', scope: 'version' },
+  { key: 'edit', label: '④ 标签编辑', scope: 'version' },
+  { key: 'reg', label: '⑤ 正则集', scope: 'version' },
+  { key: 'train', label: '⑥ 训练', scope: 'version' },
 ]
 
 /** 根据 project.stage 推断各步状态：✓ 完成 / ● 当前 / ○ 未开始 */
@@ -22,35 +23,48 @@ function statusFor(
   version: Version | null
 ): 'done' | 'active' | 'pending' {
   // 极简：项目 stage > 该步对应 stage 阈值 → done；等于 → active；小于 → pending
+  // tag / edit 都映射到后端 stage "tagging"（编辑只是 tagging 阶段的子步骤）
   const order = ['created', 'downloading', 'curating', 'tagging', 'regularizing', 'configured', 'training', 'done']
   const stepIdx: Record<string, number> = {
     download: 1, // downloading
     curate: 2,
     tag: 3,
+    edit: 3,
     reg: 4,
     train: 6, // configured/training
   }
   const projIdx = order.indexOf(project.stage)
   const target = stepIdx[step.key] ?? 0
-  if (projIdx > target) return 'done'
-  if (projIdx === target) return 'active'
+  let status: 'done' | 'active' | 'pending' = 'pending'
+  if (projIdx > target) status = 'done'
+  else if (projIdx === target) status = 'active'
+
   // version 级 stage 也参考（active version 进入 tagging 时 step3 标 done）
-  if (step.scope === 'version' && version) {
+  if (status !== 'done' && step.scope === 'version' && version) {
     const vorder = ['curating', 'tagging', 'regularizing', 'ready', 'training', 'done']
     const vstepIdx: Record<string, number> = {
       curate: 0,
       tag: 1,
+      edit: 1,
       reg: 2,
       train: 3,
     }
     const vIdx = vorder.indexOf(version.stage)
     const vt = vstepIdx[step.key] ?? -1
     if (vt >= 0) {
-      if (vIdx > vt) return 'done'
-      if (vIdx === vt) return 'active'
+      if (vIdx > vt) status = 'done'
+      else if (vIdx === vt && status === 'pending') status = 'active'
     }
   }
-  return 'pending'
+
+  // tag / edit 派生覆盖：train 有图 && 全部已打标 → done
+  if ((step.key === 'tag' || step.key === 'edit') && version?.stats) {
+    const s = version.stats
+    if (s.train_image_count > 0 && s.tagged_image_count >= s.train_image_count) {
+      return 'done'
+    }
+  }
+  return status
 }
 
 export default function ProjectStepper({

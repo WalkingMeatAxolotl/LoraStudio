@@ -62,8 +62,52 @@ describe('ProjectStepper (PP1)', () => {
     const list = screen.getByRole('list', { name: 'pipeline-stepper' })
     const items = within(list).getAllByRole('listitem')
     // 没 version 时，version 级 step 应该 disabled（用 span 而不是 link）
-    // 至少：筛选/打标/正则集/训练 4 个 listitem 没有 link
+    // 至少：筛选/打标/编辑/正则集/训练 5 个 listitem 没有 link
     const linkCount = list.querySelectorAll('a').length
     expect(linkCount).toBeLessThan(items.length)
+  })
+
+  it('exposes 6 steps including the split tag/edit pair', () => {
+    renderStepper(project('curating'), version('curating'))
+    const list = screen.getByRole('list', { name: 'pipeline-stepper' })
+    const items = within(list).getAllByRole('listitem')
+    expect(items).toHaveLength(6)
+    expect(items[2].textContent).toMatch(/打标/)
+    expect(items[3].textContent).toMatch(/标签编辑/)
+  })
+
+  it('marks tag/edit done when all train images have captions', () => {
+    const v: Version = {
+      ...version('tagging'),
+      stats: {
+        train_image_count: 10,
+        tagged_image_count: 10,
+        train_folders: [],
+        reg_image_count: 0,
+        has_output: false,
+      },
+    }
+    renderStepper(project('tagging'), v)
+    const list = screen.getByRole('list', { name: 'pipeline-stepper' })
+    const items = within(list).getAllByRole('listitem')
+    expect(items[2].textContent).toMatch(/✓.*打标/)
+    expect(items[3].textContent).toMatch(/✓.*标签编辑/)
+  })
+
+  it('keeps tag active while some images lack captions', () => {
+    const v: Version = {
+      ...version('tagging'),
+      stats: {
+        train_image_count: 10,
+        tagged_image_count: 5,
+        train_folders: [],
+        reg_image_count: 0,
+        has_output: false,
+      },
+    }
+    renderStepper(project('tagging'), v)
+    const list = screen.getByRole('list', { name: 'pipeline-stepper' })
+    const items = within(list).getAllByRole('listitem')
+    expect(items[2].textContent).toMatch(/●.*打标/)
   })
 })

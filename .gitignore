@@ -59,8 +59,10 @@ scripts/
 *.pt
 *.pth
 *.npz
+*.onnx
 models/text_encoders/tokenizer.json
 models/text_encoders/vocab.json
+models/wd14/
 
 # Dataset (training images)
 dataset/

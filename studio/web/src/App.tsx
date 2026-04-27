@@ -8,6 +8,8 @@ import ProjectOverview from './pages/project/Overview'
 import CurationPage from './pages/project/steps/Curation'
 import DownloadPage from './pages/project/steps/Download'
 import StepPlaceholder from './pages/project/steps/Placeholder'
+import TagEditPage from './pages/project/steps/TagEdit'
+import TaggingPage from './pages/project/steps/Tagging'
 import MonitorPage from './pages/tools/Monitor'
 import PresetsPage from './pages/tools/Presets'
 import SettingsPage from './pages/tools/Settings'
@@ -29,17 +31,15 @@ export default function App() {
               <Route path="download" element={<DownloadPage />} />
               <Route path="v/:vid">
                 <Route path="curate" element={<CurationPage />} />
-                <Route
-                  path="tag"
-                  element={<StepPlaceholder step="③ 打标" doc="PP4" />}
-                />
+                <Route path="tag" element={<TaggingPage />} />
+                <Route path="edit" element={<TagEditPage />} />
                 <Route
                   path="reg"
-                  element={<StepPlaceholder step="④ 正则集" doc="PP5" />}
+                  element={<StepPlaceholder step="⑤ 正则集" doc="PP5" />}
                 />
                 <Route
                   path="train"
-                  element={<StepPlaceholder step="⑤ 训练" doc="PP6" />}
+                  element={<StepPlaceholder step="⑥ 训练" doc="PP6" />}
                 />
               </Route>
             </Route>

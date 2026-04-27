@@ -42,7 +42,8 @@ from . import (
     versions,
 )
 from .event_bus import bus
-from .services import downloader
+from .services import caption_snapshot, downloader, tagedit
+from .services.tagger import VALID_TAGGER_NAMES, get_tagger
 from .paths import (
     LEGACY_MONITOR_HTML,
     LOGS_DIR,
@@ -767,6 +768,245 @@ def folder_op(
             raise HTTPException(400, f"unknown op: {body.op}")
         except curation.CurationError as exc:
             raise HTTPException(_curation_err_code(exc), str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# /api/tagger/{name}/check + /api/projects/{pid}/versions/{vid}/tag
+# /api/projects/{pid}/versions/{vid}/captions/*  (PP4)
+# ---------------------------------------------------------------------------
+
+
+class TagJobRequest(BaseModel):
+    tagger: str = "wd14"
+    output_format: str = "txt"                # "txt" | "json"
+
+
+class CaptionEdit(BaseModel):
+    tags: list[str]
+
+
+class CommitItem(BaseModel):
+    folder: str
+    name: str
+    tags: list[str]
+
+
+class CommitRequest(BaseModel):
+    items: list[CommitItem]
+
+
+class BatchOp(BaseModel):
+    op: str                                   # add|remove|replace|dedupe|stats
+    scope: dict[str, Any]                     # {kind, folder?, names?}
+    tags: Optional[list[str]] = None          # add/remove
+    old: Optional[str] = None                 # replace
+    new: Optional[str] = None                 # replace
+    position: Optional[str] = "back"          # add: front|back
+    top: int = 50                             # stats
+
+
+@app.get("/api/tagger/{name}/check")
+def check_tagger(name: str) -> dict[str, Any]:
+    if name not in VALID_TAGGER_NAMES:
+        raise HTTPException(400, f"unknown tagger: {name}")
+    try:
+        t = get_tagger(name)
+    except Exception as exc:  # noqa: BLE001
+        return {"name": name, "ok": False, "msg": str(exc)}
+    ok, msg = t.is_available()
+    return {
+        "name": name,
+        "ok": ok,
+        "msg": msg,
+        "requires_service": getattr(t, "requires_service", False),
+    }
+
+
+def _version_train_dir_or_404(pid: int, vid: int):
+    with db.connection_for() as conn:
+        v = versions.get_version(conn, vid)
+        if not v or v["project_id"] != pid:
+            raise HTTPException(404, f"版本不存在: id={vid}")
+        p = projects.get_project(conn, pid)
+    assert p is not None
+    return p, v, versions.version_dir(p["id"], p["slug"], v["label"]) / "train"
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/tag")
+def start_tag(pid: int, vid: int, body: TagJobRequest) -> dict[str, Any]:
+    if body.tagger not in VALID_TAGGER_NAMES:
+        raise HTTPException(400, f"unknown tagger: {body.tagger}")
+    if body.output_format not in {"txt", "json"}:
+        raise HTTPException(400, "output_format must be txt|json")
+    _, v, _ = _version_train_dir_or_404(pid, vid)
+
+    with db.connection_for() as conn:
+        job = project_jobs.create_job(
+            conn,
+            project_id=pid,
+            version_id=vid,
+            kind="tag",
+            params={
+                "tagger": body.tagger,
+                "version_id": vid,
+                "output_format": body.output_format,
+            },
+        )
+        # 推 stage：tagging
+        if v["stage"] in ("curating",):
+            updated = versions.advance_stage(conn, vid, "tagging")
+            _publish_version_state(updated)
+        p = projects.get_project(conn, pid)
+        if p and p["stage"] in ("created", "downloading", "curating"):
+            up = projects.advance_stage(conn, pid, "tagging")
+            _publish_project_state(up)
+    _publish_job_state(job)
+    return job
+
+
+@app.get("/api/projects/{pid}/versions/{vid}/captions")
+def list_captions_endpoint(
+    pid: int, vid: int, folder: Optional[str] = None, full: bool = False
+) -> dict[str, Any]:
+    _, _, train = _version_train_dir_or_404(pid, vid)
+    if folder is None:
+        return {"folder": None, "items": tagedit.list_all_captions(train, full=full)}
+    if not folder or "/" in folder or "\\" in folder or ".." in folder:
+        raise HTTPException(400, "invalid folder")
+    return {
+        "folder": folder,
+        "items": tagedit.list_captions_in_folder(train, folder, full=full),
+    }
+
+
+@app.get("/api/projects/{pid}/versions/{vid}/captions/{folder}/{filename}")
+def get_caption_endpoint(
+    pid: int, vid: int, folder: str, filename: str
+) -> dict[str, Any]:
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(400, "invalid filename")
+    if "/" in folder or "\\" in folder or ".." in folder:
+        raise HTTPException(400, "invalid folder")
+    _, _, train = _version_train_dir_or_404(pid, vid)
+    try:
+        return tagedit.read_one(train, folder, filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.put("/api/projects/{pid}/versions/{vid}/captions/{folder}/{filename}")
+def put_caption_endpoint(
+    pid: int, vid: int, folder: str, filename: str, body: CaptionEdit
+) -> dict[str, Any]:
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(400, "invalid filename")
+    if "/" in folder or "\\" in folder or ".." in folder:
+        raise HTTPException(400, "invalid folder")
+    _, _, train = _version_train_dir_or_404(pid, vid)
+    try:
+        return tagedit.write_one(train, folder, filename, body.tags)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Caption snapshots（PP4 拆分后新增）
+# ---------------------------------------------------------------------------
+
+
+def _version_dir_or_404(pid: int, vid: int):
+    with db.connection_for() as conn:
+        v = versions.get_version(conn, vid)
+        if not v or v["project_id"] != pid:
+            raise HTTPException(404, f"版本不存在: id={vid}")
+        p = projects.get_project(conn, pid)
+    assert p is not None
+    return p, v, versions.version_dir(p["id"], p["slug"], v["label"])
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/captions/snapshot")
+def create_caption_snapshot(pid: int, vid: int) -> dict[str, Any]:
+    _, _, vdir = _version_dir_or_404(pid, vid)
+    return caption_snapshot.create_snapshot(vdir)
+
+
+@app.get("/api/projects/{pid}/versions/{vid}/captions/snapshots")
+def list_caption_snapshots(pid: int, vid: int) -> dict[str, Any]:
+    _, _, vdir = _version_dir_or_404(pid, vid)
+    return {"items": caption_snapshot.list_snapshots(vdir)}
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/captions/snapshots/{sid}/restore")
+def restore_caption_snapshot(pid: int, vid: int, sid: str) -> dict[str, Any]:
+    _, _, vdir = _version_dir_or_404(pid, vid)
+    try:
+        return caption_snapshot.restore_snapshot(vdir, sid)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except caption_snapshot.SnapshotError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.delete("/api/projects/{pid}/versions/{vid}/captions/snapshots/{sid}")
+def delete_caption_snapshot(pid: int, vid: int, sid: str) -> dict[str, Any]:
+    _, _, vdir = _version_dir_or_404(pid, vid)
+    try:
+        caption_snapshot.delete_snapshot(vdir, sid)
+        return {"deleted": sid}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except caption_snapshot.SnapshotError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/captions/commit")
+def commit_captions(pid: int, vid: int, body: CommitRequest) -> dict[str, Any]:
+    """一次性写入多个 caption；写之前自动生成快照作还原点。"""
+    _, _, vdir = _version_dir_or_404(pid, vid)
+    train = vdir / "train"
+    snap = caption_snapshot.create_snapshot(vdir)
+    written = 0
+    skipped: list[str] = []
+    for it in body.items:
+        if "/" in it.folder or "\\" in it.folder or ".." in it.folder:
+            skipped.append(f"{it.folder}/{it.name}")
+            continue
+        if "/" in it.name or "\\" in it.name or ".." in it.name:
+            skipped.append(f"{it.folder}/{it.name}")
+            continue
+        img = train / it.folder / it.name
+        if not img.exists():
+            skipped.append(f"{it.folder}/{it.name}")
+            continue
+        tagedit.write_tags(img, it.tags)
+        written += 1
+    return {"snapshot": snap, "written": written, "skipped": skipped}
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/captions/batch")
+def batch_caption_endpoint(
+    pid: int, vid: int, body: BatchOp
+) -> dict[str, Any]:
+    _, _, train = _version_train_dir_or_404(pid, vid)
+    op = body.op
+    scope = body.scope
+    if op == "add":
+        n = tagedit.add_tags(
+            scope, train, body.tags or [],
+            position="front" if body.position == "front" else "back",
+        )
+        return {"op": op, "affected": n}
+    if op == "remove":
+        return {"op": op, "affected": tagedit.remove_tags(scope, train, body.tags or [])}
+    if op == "replace":
+        if not body.old or not body.new:
+            raise HTTPException(400, "replace 需要 old 和 new")
+        return {"op": op, "affected": tagedit.replace_tag(scope, train, body.old, body.new)}
+    if op == "dedupe":
+        return {"op": op, "affected": tagedit.dedupe(scope, train)}
+    if op == "stats":
+        return {"op": op, "items": tagedit.stats(scope, train, top=max(1, body.top))}
+    raise HTTPException(400, f"unknown op: {op}")
 
 
 # version 级缩略图：bucket = train | reg | samples（PP3 加 train，reg/samples 留作 PP4-5）

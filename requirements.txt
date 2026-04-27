@@ -35,6 +35,11 @@ pydantic>=2.5.0
 pyyaml>=6.0.1
 psutil>=5.9.0
 rich>=13.7.0
+requests>=2.31.0
+
+# PP4 — WD14 打标（CPU ONNX；GPU 视用户环境额外装 onnxruntime-gpu）
+onnxruntime>=1.16.0
+huggingface_hub>=0.20.0
 
 # Dev / tests (optional)
 # pytest>=8.0

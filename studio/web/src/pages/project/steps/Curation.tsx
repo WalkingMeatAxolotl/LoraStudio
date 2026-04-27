@@ -133,7 +133,10 @@ export default function CurationPage() {
   })
 
   const folderNames = view?.folders ?? []
-  const trainList = (view && rightFolder ? view.right[rightFolder] : []) ?? []
+  const trainList = useMemo(
+    () => (view && rightFolder ? view.right[rightFolder] ?? [] : []),
+    [view, rightFolder]
+  )
 
   const leftItems = useMemo(
     () =>
