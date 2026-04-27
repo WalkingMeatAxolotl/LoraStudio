@@ -172,12 +172,12 @@ export default function QueuePage() {
         <h2 className="text-sm font-semibold text-slate-200 mb-3">入队新任务</h2>
         {configs.length === 0 ? (
           <p className="text-slate-500 text-sm">
-            还没有配置。先去{' '}
+            还没有预设。先去{' '}
             <Link
-              to="/configs"
+              to="/tools/presets"
               className="text-cyan-400 hover:underline"
             >
-              配置
+              预设
             </Link>{' '}
             页面新建一个。
           </p>

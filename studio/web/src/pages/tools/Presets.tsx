@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   api,
   type ConfigData,
-  type ConfigSummary,
+  type PresetSummary,
   type SchemaResponse,
-} from '../api/client'
-import SchemaForm from '../components/SchemaForm'
+} from '../../api/client'
+import SchemaForm from '../../components/SchemaForm'
 
-export default function ConfigsPage() {
+export default function PresetsPage() {
   const [schema, setSchema] = useState<SchemaResponse | null>(null)
-  const [list, setList] = useState<ConfigSummary[]>([])
+  const [list, setList] = useState<PresetSummary[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [values, setValues] = useState<ConfigData>({})
   const [original, setOriginal] = useState<ConfigData>({})
@@ -22,9 +22,9 @@ export default function ConfigsPage() {
     refreshList()
   }, [])
 
-  const refreshList = () => api.listConfigs().then(setList).catch(() => {})
+  const refreshList = () => api.listPresets().then(setList).catch(() => {})
 
-  // 选中某个配置：拉详情填表 ---------------------------------------------
+  // 选中某个预设：拉详情填表 ---------------------------------------------
   useEffect(() => {
     if (!selected) {
       setValues({})
@@ -32,7 +32,7 @@ export default function ConfigsPage() {
       return
     }
     api
-      .getConfig(selected)
+      .getPreset(selected)
       .then((data) => {
         setValues(data)
         setOriginal(data)
@@ -63,12 +63,12 @@ export default function ConfigsPage() {
   }
 
   const handleSave = async () => {
-    const name = selected ?? prompt('配置名（字母/数字/下划线/连字符）：')
+    const name = selected ?? prompt('预设名（字母/数字/下划线/连字符）：')
     if (!name) return
     setBusy(true)
     setError(null)
     try {
-      await api.saveConfig(name, values)
+      await api.savePreset(name, values)
       setSelected(name)
       setOriginal(values)
       await refreshList()
@@ -85,7 +85,7 @@ export default function ConfigsPage() {
     if (!name) return
     setBusy(true)
     try {
-      await api.duplicateConfig(selected, name)
+      await api.duplicatePreset(selected, name)
       await refreshList()
       setSelected(name)
     } catch (e) {
@@ -100,7 +100,7 @@ export default function ConfigsPage() {
     if (!confirm(`删除 ${selected}?`)) return
     setBusy(true)
     try {
-      await api.deleteConfig(selected)
+      await api.deletePreset(selected)
       setSelected(null)
       await refreshList()
     } catch (e) {
@@ -116,7 +116,7 @@ export default function ConfigsPage() {
       {/* 左侧列表 */}
       <aside className="border border-slate-700 rounded-lg bg-slate-800/40 p-3 flex flex-col">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-slate-200">配置</h2>
+          <h2 className="text-sm font-semibold text-slate-200">预设</h2>
           <button
             onClick={handleNew}
             className="text-xs px-2 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white"
@@ -127,7 +127,7 @@ export default function ConfigsPage() {
         <div className="flex-1 overflow-y-auto space-y-1">
           {list.length === 0 && (
             <p className="text-slate-500 text-sm py-4 text-center">
-              还没有配置
+              还没有预设
             </p>
           )}
           {list.map((c) => (
@@ -155,7 +155,7 @@ export default function ConfigsPage() {
           <>
             <header className="flex items-center gap-2 mb-4 sticky top-0 bg-slate-900 py-2 z-10">
               <h1 className="text-xl font-semibold flex-1">
-                {selected ? selected : '新配置'}
+                {selected ? selected : '新预设'}
                 {dirty && (
                   <span className="ml-2 text-amber-400 text-sm">●未保存</span>
                 )}
@@ -201,7 +201,7 @@ export default function ConfigsPage() {
             )}
             {!selected && Object.keys(values).length === 0 && (
               <p className="text-slate-500 mt-12 text-center">
-                左侧选一个配置来编辑，或点「+ 新建」开始。
+                左侧选一个预设来编辑，或点「+ 新建」开始。
               </p>
             )}
           </>

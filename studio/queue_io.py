@@ -15,7 +15,7 @@
       ]
     }
 
-导入：对每个 task，把 config 写到 USER_CONFIGS_DIR/{config_name}.yaml（若已存在
+导入：对每个 task，把 config 写到 USER_PRESETS_DIR/{config_name}.yaml（若已存在
 则在名字后加 _imported_{n} 后缀），然后创建 pending 任务。
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import configs_io, db
+from . import db, presets_io
 
 
 EXPORT_VERSION = 1
@@ -44,8 +44,8 @@ def export_tasks(
             if not t:
                 continue
             try:
-                cfg = configs_io.read_config(t["config_name"], base=configs_base)
-            except configs_io.ConfigError:
+                cfg = presets_io.read_preset(t["config_name"], base=configs_base)
+            except presets_io.PresetError:
                 cfg = None
             out_tasks.append({
                 "name": t["name"],
@@ -62,9 +62,9 @@ def export_tasks(
 
 def _unique_config_name(base_name: str, configs_base: Path | None) -> str:
     """如果 base_name 已存在，加 _imported_N 直到不冲突。"""
-    if not configs_io.list_configs(base=configs_base):
+    if not presets_io.list_presets(base=configs_base):
         return base_name
-    existing = {c["name"] for c in configs_io.list_configs(base=configs_base)}
+    existing = {c["name"] for c in presets_io.list_presets(base=configs_base)}
     if base_name not in existing:
         return base_name
     n = 1
@@ -96,13 +96,13 @@ def import_tasks(
             if cfg is None:
                 # 没有附带 config —— 必须能在本地找到同名 config
                 try:
-                    configs_io.read_config(entry["config_name"], base=configs_base)
+                    presets_io.read_preset(entry["config_name"], base=configs_base)
                     final_name = entry["config_name"]
-                except configs_io.ConfigError:
+                except presets_io.PresetError:
                     continue  # 忽略此任务
             else:
                 final_name = _unique_config_name(entry["config_name"], configs_base)
-                configs_io.write_config(final_name, cfg, base=configs_base)
+                presets_io.write_preset(final_name, cfg, base=configs_base)
                 if final_name != entry["config_name"]:
                     rename_map[entry["config_name"]] = final_name
             tid = db.create_task(

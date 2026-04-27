@@ -24,11 +24,11 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import browse, configs_io, datasets, db, queue_io
+from . import browse, datasets, db, presets_io, queue_io, secrets
 from .event_bus import bus
 from .paths import (
     LEGACY_MONITOR_HTML,
@@ -37,7 +37,7 @@ from .paths import (
     OUTPUT_DIR,
     REPO_ROOT,
     STUDIO_DB,
-    USER_CONFIGS_DIR,
+    USER_PRESETS_DIR,
     WEB_DIST,
     ensure_dirs,
 )
@@ -100,7 +100,7 @@ def get_state() -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
-# /api/schema, /api/configs/*
+# /api/schema, /api/presets/*  ( + 旧 /api/configs/* 308 redirect)
 # ---------------------------------------------------------------------------
 
 
@@ -117,54 +117,92 @@ def get_schema() -> dict[str, Any]:
     }
 
 
-@app.get("/api/configs")
-def list_configs_endpoint() -> dict[str, Any]:
-    return {"items": configs_io.list_configs()}
+@app.get("/api/presets")
+def list_presets_endpoint() -> dict[str, Any]:
+    return {"items": presets_io.list_presets()}
 
 
-@app.get("/api/configs/{name}")
-def get_config(name: str) -> dict[str, Any]:
+@app.get("/api/presets/{name}")
+def get_preset(name: str) -> dict[str, Any]:
     try:
-        return configs_io.read_config(name)
-    except configs_io.ConfigError as exc:
+        return presets_io.read_preset(name)
+    except presets_io.PresetError as exc:
         raise HTTPException(status_code=_err_code(exc), detail=str(exc)) from exc
 
 
-@app.put("/api/configs/{name}")
-def put_config(name: str, body: dict[str, Any]) -> dict[str, str]:
+@app.put("/api/presets/{name}")
+def put_preset(name: str, body: dict[str, Any]) -> dict[str, str]:
     try:
-        path = configs_io.write_config(name, body)
-    except configs_io.ConfigError as exc:
+        path = presets_io.write_preset(name, body)
+    except presets_io.PresetError as exc:
         raise HTTPException(status_code=_err_code(exc), detail=str(exc)) from exc
     return {"name": name, "path": str(path)}
 
 
-@app.delete("/api/configs/{name}")
-def delete_config_endpoint(name: str) -> dict[str, str]:
+@app.delete("/api/presets/{name}")
+def delete_preset_endpoint(name: str) -> dict[str, str]:
     try:
-        configs_io.delete_config(name)
-    except configs_io.ConfigError as exc:
+        presets_io.delete_preset(name)
+    except presets_io.PresetError as exc:
         raise HTTPException(status_code=_err_code(exc), detail=str(exc)) from exc
     return {"deleted": name}
 
 
-@app.post("/api/configs/{name}/duplicate")
-def duplicate_config_endpoint(name: str, body: DuplicateRequest) -> dict[str, str]:
+@app.post("/api/presets/{name}/duplicate")
+def duplicate_preset_endpoint(name: str, body: DuplicateRequest) -> dict[str, str]:
     try:
-        path = configs_io.duplicate_config(name, body.new_name)
-    except configs_io.ConfigError as exc:
+        path = presets_io.duplicate_preset(name, body.new_name)
+    except presets_io.PresetError as exc:
         raise HTTPException(status_code=_err_code(exc), detail=str(exc)) from exc
     return {"name": body.new_name, "path": str(path)}
 
 
-def _err_code(exc: configs_io.ConfigError) -> int:
-    """ConfigError → HTTP 状态码：'不存在' → 404，名字非法 → 400，其它 → 422。"""
+def _err_code(exc: presets_io.PresetError) -> int:
+    """PresetError → HTTP 状态码：'不存在' → 404，名字非法/已存在 → 400，其它 → 422。"""
     msg = str(exc)
     if "不存在" in msg:
         return 404
-    if "非法配置名" in msg or "已存在" in msg:
+    if "非法预设名" in msg or "已存在" in msg:
         return 400
     return 422
+
+
+# 旧 /api/configs/* 端点保留为 308 redirect（保护任何外部脚本）。
+# 308 保持 method + body，所以 PUT/POST/DELETE 都能透明转发。
+@app.api_route(
+    "/api/configs",
+    methods=["GET", "POST", "PUT", "DELETE"],
+    include_in_schema=False,
+)
+def _configs_root_redirect(request: Request) -> RedirectResponse:
+    qs = ("?" + request.url.query) if request.url.query else ""
+    return RedirectResponse(url=f"/api/presets{qs}", status_code=308)
+
+
+@app.api_route(
+    "/api/configs/{rest:path}",
+    methods=["GET", "POST", "PUT", "DELETE"],
+    include_in_schema=False,
+)
+def _configs_redirect(rest: str, request: Request) -> RedirectResponse:
+    qs = ("?" + request.url.query) if request.url.query else ""
+    return RedirectResponse(url=f"/api/presets/{rest}{qs}", status_code=308)
+
+
+# ---------------------------------------------------------------------------
+# /api/secrets  (PP0 全局凭证 / 服务配置)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/secrets")
+def get_secrets() -> dict[str, Any]:
+    return secrets.to_masked_dict(secrets.load())
+
+
+@app.put("/api/secrets")
+def put_secrets(body: dict[str, Any]) -> dict[str, Any]:
+    new = secrets.update(body)
+    return secrets.to_masked_dict(new)
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +251,7 @@ def export_queue(ids: str = "") -> dict[str, Any]:
 def import_queue(body: ImportRequest) -> dict[str, Any]:
     try:
         return queue_io.import_tasks(body.payload)
-    except (ValueError, configs_io.ConfigError) as exc:
+    except (ValueError, presets_io.PresetError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
@@ -228,9 +266,9 @@ def list_queue(status: Optional[str] = None) -> dict[str, Any]:
 
 @app.post("/api/queue")
 def enqueue(body: EnqueueRequest) -> dict[str, Any]:
-    cfg_path = USER_CONFIGS_DIR / f"{body.config_name}.yaml"
+    cfg_path = USER_PRESETS_DIR / f"{body.config_name}.yaml"
     if not cfg_path.exists():
-        raise HTTPException(404, f"config not found: {body.config_name}")
+        raise HTTPException(404, f"preset not found: {body.config_name}")
     name = body.name or body.config_name
     with db.connection_for() as conn:
         task_id = db.create_task(

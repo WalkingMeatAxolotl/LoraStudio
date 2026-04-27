@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from . import db
-from .paths import LOGS_DIR, REPO_ROOT, STUDIO_DB, USER_CONFIGS_DIR
+from .paths import LOGS_DIR, REPO_ROOT, STUDIO_DB, USER_PRESETS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ class Supervisor:
         self._cmd_builder: CmdBuilder = cmd_builder or _default_cmd_builder
         self._db_path = db_path or STUDIO_DB
         self._logs_dir = logs_dir or LOGS_DIR
-        self._configs_dir = configs_dir or USER_CONFIGS_DIR
+        self._configs_dir = configs_dir or USER_PRESETS_DIR
         self._poll = poll_interval if poll_interval is not None else self.POLL_INTERVAL
         self._grace = terminate_grace if terminate_grace is not None else self.TERMINATE_GRACE
 

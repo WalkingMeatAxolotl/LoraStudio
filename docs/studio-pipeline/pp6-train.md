@@ -163,15 +163,64 @@ monitor 端点改动：
 
 ```python
 @app.get("/api/state")
-def get_state(project_id: Optional[int] = None, version_id: Optional[int] = None):
+def get_state(project_id: Optional[int] = None, version_id: Optional[int] = None,
+              task_id: Optional[int] = None):
     """
-    缺省：找当前 active 的训练任务对应的 version，读它的 monitor_state.json。
+    优先级：task_id > (project_id, version_id) > 默认（当前在跑的）。
     显式给 ids：读对应 version 的状态。
     都没找到：返回空状态。
     """
 ```
 
 `Monitor.tsx` 工具页加个下拉选 project + version（缺省 = 当前在跑的）。
+
+### E.1 监控持久化 + Queue 行嵌监控（**用户要求**）
+
+**问题**：当前 `monitor_data/state.json` 是全局单文件，每个训练任务启动时
+覆盖写。任务一换，旧 loss/lr 曲线就丢，已 done/failed 的历史任务无法回看
+训练曲线。
+
+**目标**：
+1. 每个训练任务（task）写**自己的** monitor 状态，跑完保留，可回看。
+2. Queue 页每行任务可以点开看「那个任务」的 monitor 曲线，无论 status。
+3. `/tools/monitor` 工具页改为：默认锁定当前 running 的 task；没有则显示
+   最近一次完成的；提供下拉切到任意历史任务。
+
+**落地方式**：本 PP（PP6）已经把 `monitor_state.json` 拆到
+`versions/{label}/`，所以「per-version 持久化」自然带过来 —— 等价于
+「per-task 持久化」（一个 version 同时只能有一个 active task）。在 PP6
+完成时同时实现：
+
+- `tasks` 表加 `monitor_state_path TEXT`（任务结束时定位 state 文件）。
+  （PP1 已加 `version_id`；从 version 即可推 path，但 task 级 column
+  让查询更直接，且兼容历史「无 version_id」的旧任务。）
+- supervisor 启动 worker 时：
+  - 有 `version_id` → `--monitor-state-file versions/{label}/monitor_state.json`
+  - 无 `version_id`（兼容老任务路径）→
+    `--monitor-state-file studio_data/monitors/task_{id}/state.json`
+  - 写 `tasks.monitor_state_path` 入 db
+- samples 也按任务隔离：`versions/{label}/samples/` 或
+  `studio_data/monitors/task_{id}/samples/`（PP6 已规划进 version dir）
+- Queue 页加「监控」按钮：跳 `/queue/:id/monitor`，嵌 monitor HTML +
+  `?task_id={id}` query → monitor 页向 `/api/state?task_id={id}` 拉 state
+- `/api/state` 加 `task_id` query 优先级最高
+- 全局 `monitor_data/state.json` **保留兼容**：无 `--monitor-state-file`
+  参数时仍写它（旧脚本 / 用户手动跑 `anima_train.py` 时仍可见）
+
+**前端改动**：
+- `pages/Queue.tsx`：每行加「📊 监控」按钮（已结束任务也能点）
+- `pages/QueueMonitor.tsx`（新）：iframe + `?task_id=...`
+- `pages/tools/Monitor.tsx`：加任务下拉（拉 `/api/queue` 列表，按
+  `started_at` desc），缺省锁定 running 的；切换时改 iframe `src`
+- `monitor_smooth.html`：从 `URLSearchParams` 读 `task_id`，传给所有
+  `/api/state` 与 `/samples/*` 调用
+
+**测试**：
+- supervisor: `--monitor-state-file` 路径正确 + db 回填
+- `/api/state?task_id=X` 端到端
+- Queue 行点监控跳转
+
+写在 PP6 一起做，不单独开 PR。
 
 ### F. 删除 Preset 时的反向引用
 

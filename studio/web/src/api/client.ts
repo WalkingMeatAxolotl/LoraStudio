@@ -33,13 +33,56 @@ export interface SchemaResponse {
   groups: Array<{ key: string; label: string }>
 }
 
-export interface ConfigSummary {
+export interface PresetSummary {
   name: string
   path: string
   updated_at: number
 }
 
+/** PP0 之前叫 ConfigSummary —— 保留别名一段时间，避免外部代码炸掉。 */
+export type ConfigSummary = PresetSummary
+
 export type ConfigData = Record<string, unknown>
+
+// ---- secrets (settings) ---------------------------------------------------
+
+export interface GelbooruConfig {
+  user_id: string
+  api_key: string
+  save_tags: boolean
+  convert_to_png: boolean
+  remove_alpha_channel: boolean
+}
+
+export interface HuggingFaceConfig {
+  token: string
+}
+
+export interface JoyCaptionConfig {
+  base_url: string
+  model: string
+  prompt_template: string
+}
+
+export interface WD14Config {
+  model_id: string
+  local_dir: string | null
+  threshold_general: number
+  threshold_character: number
+  blacklist_tags: string[]
+}
+
+export interface Secrets {
+  gelbooru: GelbooruConfig
+  huggingface: HuggingFaceConfig
+  joycaption: JoyCaptionConfig
+  wd14: WD14Config
+}
+
+/** PUT /api/secrets 的 body：嵌套的 partial dict；MASK ("***") 表示「保持不变」。 */
+export type SecretsPatch = Partial<{
+  [K in keyof Secrets]: Partial<Secrets[K]>
+}>
 
 export type TaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'canceled'
 
@@ -130,21 +173,47 @@ export const api = {
 
   schema: () => req<SchemaResponse>('/api/schema'),
 
+  // Presets (PP0+) -----------------------------------------------------
+  listPresets: () =>
+    req<{ items: PresetSummary[] }>('/api/presets').then((r) => r.items),
+  getPreset: (name: string) => req<ConfigData>(`/api/presets/${name}`),
+  savePreset: (name: string, data: ConfigData) =>
+    req<{ name: string; path: string }>(`/api/presets/${name}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deletePreset: (name: string) =>
+    req<{ deleted: string }>(`/api/presets/${name}`, { method: 'DELETE' }),
+  duplicatePreset: (src: string, newName: string) =>
+    req<{ name: string; path: string }>(`/api/presets/${src}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify({ new_name: newName }),
+    }),
+
+  // 兼容别名：PP0 之前叫 listConfigs / getConfig / ...。保留一段时间。
   listConfigs: () =>
-    req<{ items: ConfigSummary[] }>('/api/configs').then((r) => r.items),
-  getConfig: (name: string) => req<ConfigData>(`/api/configs/${name}`),
+    req<{ items: PresetSummary[] }>('/api/presets').then((r) => r.items),
+  getConfig: (name: string) => req<ConfigData>(`/api/presets/${name}`),
   saveConfig: (name: string, data: ConfigData) =>
-    req<{ name: string; path: string }>(`/api/configs/${name}`, {
+    req<{ name: string; path: string }>(`/api/presets/${name}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
   deleteConfig: (name: string) =>
-    req<{ deleted: string }>(`/api/configs/${name}`, { method: 'DELETE' }),
+    req<{ deleted: string }>(`/api/presets/${name}`, { method: 'DELETE' }),
   duplicateConfig: (src: string, newName: string) =>
-    req<{ name: string; path: string }>(
-      `/api/configs/${src}/duplicate`,
-      { method: 'POST', body: JSON.stringify({ new_name: newName }) }
-    ),
+    req<{ name: string; path: string }>(`/api/presets/${src}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify({ new_name: newName }),
+    }),
+
+  // Secrets ------------------------------------------------------------
+  getSecrets: () => req<Secrets>('/api/secrets'),
+  updateSecrets: (patch: SecretsPatch) =>
+    req<Secrets>('/api/secrets', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
 
   // Queue --------------------------------------------------------------
   listQueue: (status?: TaskStatus) => {

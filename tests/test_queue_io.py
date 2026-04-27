@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from studio import configs_io, db, queue_io, server
+from studio import db, presets_io, queue_io, server
 from studio.schema import TrainingConfig
 
 
@@ -18,12 +18,13 @@ def _payload() -> dict:
 def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     dbfile = tmp_path / "studio.db"
     db.init_db(dbfile)
-    configs = tmp_path / "configs"
-    configs.mkdir()
+    presets = tmp_path / "presets"
+    presets.mkdir()
     # 把所有模块的指针都换到 tmp_path
     monkeypatch.setattr(server.db, "STUDIO_DB", dbfile)
-    monkeypatch.setattr(configs_io, "USER_CONFIGS_DIR", configs)
-    return {"db": dbfile, "configs": configs}
+    monkeypatch.setattr(presets_io, "USER_PRESETS_DIR", presets)
+    monkeypatch.setattr(server, "USER_PRESETS_DIR", presets)
+    return {"db": dbfile, "presets": presets}
 
 
 @pytest.fixture
@@ -40,7 +41,7 @@ def client(isolated) -> TestClient:
 def test_export_then_import_roundtrip(isolated) -> None:
     payload = _payload()
     payload["epochs"] = 7
-    configs_io.write_config("alpha", payload)
+    presets_io.write_preset("alpha", payload)
 
     with db.connection_for(isolated["db"]) as conn:
         tid = db.create_task(conn, name="run1", config_name="alpha", priority=3)
@@ -51,14 +52,14 @@ def test_export_then_import_roundtrip(isolated) -> None:
     assert exported["tasks"][0]["config"]["epochs"] == 7
 
     # 把现有删掉，再 import
-    configs_io.delete_config("alpha")
+    presets_io.delete_preset("alpha")
     with db.connection_for(isolated["db"]) as conn:
         db.delete_task(conn, tid)
 
     result = queue_io.import_tasks(exported, db_path=isolated["db"])
     assert result["imported_count"] == 1
     # 配置和任务都被还原
-    assert configs_io.read_config("alpha")["epochs"] == 7
+    assert presets_io.read_preset("alpha")["epochs"] == 7
     with db.connection_for(isolated["db"]) as conn:
         all_tasks = db.list_tasks(conn)
     assert len(all_tasks) == 1
@@ -66,10 +67,10 @@ def test_export_then_import_roundtrip(isolated) -> None:
 
 
 def test_import_renames_on_conflict(isolated) -> None:
-    """同名 config 已存在时自动加 _imported_N 后缀。"""
+    """同名 preset 已存在时自动加 _imported_N 后缀。"""
     base = _payload()
     base["epochs"] = 3
-    configs_io.write_config("alpha", base)  # 占位
+    presets_io.write_preset("alpha", base)  # 占位
 
     incoming = {
         "version": 1,
@@ -86,8 +87,8 @@ def test_import_renames_on_conflict(isolated) -> None:
     assert result["imported_count"] == 1
     assert result["renamed"]["alpha"].startswith("alpha_imported_")
     new_name = result["renamed"]["alpha"]
-    assert configs_io.read_config(new_name)["epochs"] == 99
-    assert configs_io.read_config("alpha")["epochs"] == 3  # 原来的不变
+    assert presets_io.read_preset(new_name)["epochs"] == 99
+    assert presets_io.read_preset("alpha")["epochs"] == 3  # 原来的不变
 
 
 def test_import_rejects_unknown_version(isolated) -> None:
@@ -114,7 +115,7 @@ def test_import_skips_tasks_without_config_when_local_missing(isolated) -> None:
 
 
 def test_api_export_all(client: TestClient, isolated) -> None:
-    configs_io.write_config("a", _payload())
+    presets_io.write_preset("a", _payload())
     with db.connection_for(isolated["db"]) as conn:
         db.create_task(conn, name="t1", config_name="a")
         db.create_task(conn, name="t2", config_name="a")
@@ -126,7 +127,7 @@ def test_api_export_all(client: TestClient, isolated) -> None:
 
 
 def test_api_export_subset(client: TestClient, isolated) -> None:
-    configs_io.write_config("a", _payload())
+    presets_io.write_preset("a", _payload())
     with db.connection_for(isolated["db"]) as conn:
         a = db.create_task(conn, name="t1", config_name="a")
         db.create_task(conn, name="t2", config_name="a")
@@ -153,7 +154,7 @@ def test_api_import(client: TestClient, isolated) -> None:
     resp = client.post("/api/queue/import", json={"payload": payload})
     assert resp.status_code == 200, resp.text
     assert resp.json()["imported_count"] == 1
-    assert configs_io.read_config("fresh") is not None
+    assert presets_io.read_preset("fresh") is not None
 
 
 def test_api_import_bad_version_400(client: TestClient) -> None:

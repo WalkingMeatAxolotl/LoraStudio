@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, type HealthResponse } from '../api/client'
+import { api, type HealthResponse } from '../../api/client'
 
 export default function MonitorPage() {
   const [health, setHealth] = useState<HealthResponse | null>(null)

@@ -1,7 +1,7 @@
 """/api/queue/* 端点测试。
 
 不启动真正的 supervisor —— 用 monkeypatch 把 server 模块里的 db 路径、
-configs 目录、logs 目录都指到 tmp_path，禁用 lifespan（跳过 supervisor 启动），
+presets 目录、logs 目录都指到 tmp_path，禁用 lifespan（跳过 supervisor 启动），
 单独构造 Supervisor 注入到 app.state.supervisor。
 """
 from __future__ import annotations
@@ -16,18 +16,18 @@ from studio import db, server
 
 @pytest.fixture
 def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """隔离 db / configs / logs 到 tmp_path。"""
+    """隔离 db / presets / logs 到 tmp_path。"""
     dbfile = tmp_path / "studio.db"
     db.init_db(dbfile)
-    configs = tmp_path / "configs"
+    presets = tmp_path / "presets"
     logs = tmp_path / "logs"
-    configs.mkdir()
+    presets.mkdir()
     logs.mkdir()
-    (configs / "good.yaml").write_text("epochs: 1\n", encoding="utf-8")
+    (presets / "good.yaml").write_text("epochs: 1\n", encoding="utf-8")
 
-    # server 端点引用 STUDIO_DB / USER_CONFIGS_DIR / LOGS_DIR 三个常量
+    # server 端点引用 STUDIO_DB / USER_PRESETS_DIR / LOGS_DIR 三个常量
     monkeypatch.setattr(server, "STUDIO_DB", dbfile)
-    monkeypatch.setattr(server, "USER_CONFIGS_DIR", configs)
+    monkeypatch.setattr(server, "USER_PRESETS_DIR", presets)
     monkeypatch.setattr(server, "LOGS_DIR", logs)
     monkeypatch.setattr(server.db, "STUDIO_DB", dbfile)  # connect() 默认路径
     return tmp_path
