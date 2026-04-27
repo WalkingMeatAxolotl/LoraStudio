@@ -6,6 +6,8 @@ import { useToast } from '../../components/Toast'
 import VersionTabs from '../../components/VersionTabs'
 import { useEventStream } from '../../lib/useEventStream'
 
+const SIDEBAR_COLLAPSE_KEY = 'studio.projectSidebar.collapsed'
+
 export default function ProjectLayout() {
   const { pid } = useParams()
   const projectId = pid ? Number(pid) : NaN
@@ -14,8 +16,27 @@ export default function ProjectLayout() {
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
   const projectRef = useRef<ProjectDetail | null>(null)
   projectRef.current = project
+
+  const toggleSidebar = () => {
+    setCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSE_KEY, next ? '1' : '0')
+      } catch {
+        /* ignore */
+      }
+      return next
+    })
+  }
 
   const reload = useCallback(async () => {
     if (!Number.isFinite(projectId)) return
@@ -98,33 +119,57 @@ export default function ProjectLayout() {
   }
 
   return (
-    <div className="grid grid-cols-[260px_1fr] gap-6 h-full">
-      <aside className="flex flex-col gap-4 border-r border-slate-800 pr-4">
-        <Link
-          to="/"
-          className="text-xs text-slate-400 hover:text-slate-200"
+    <div className="flex gap-3 h-full relative">
+      {/* 抽屉折叠时彻底隐藏 sidebar，只留贴在主区左缘的触发按钮（绝对定位，不占 flow）。
+       * 之前用 grid + absolute button + 单一 section 子项，grid 把 section 塞进
+       * 第一列的 0px 槽里导致主区不可见，这里改用 flex 兜底。 */}
+      {collapsed ? (
+        <button
+          onClick={toggleSidebar}
+          title="展开项目侧栏"
+          aria-label="展开项目侧栏"
+          className="absolute left-0 top-2 z-10 w-5 h-7 rounded-r bg-slate-800 border border-l-0 border-slate-700 text-slate-300 hover:bg-slate-700 text-xs flex items-center justify-center"
         >
-          ← 返回项目列表
-        </Link>
-        <div>
-          <h1 className="text-base font-semibold text-slate-100 truncate">
-            {project.title}
-          </h1>
-          <div className="text-xs text-slate-500 font-mono truncate">
-            {project.slug}
+          ›
+        </button>
+      ) : (
+        <aside className="w-[220px] shrink-0 flex flex-col gap-3 border-r border-slate-800 pr-2 overflow-hidden">
+          <div className="flex items-center gap-2">
+            <Link
+              to="/"
+              className="text-xs text-slate-400 hover:text-slate-200 flex-1 truncate"
+            >
+              ← 返回项目列表
+            </Link>
+            <button
+              onClick={toggleSidebar}
+              title="收起侧栏"
+              aria-label="收起侧栏"
+              className="text-slate-500 hover:text-slate-200 text-sm px-1"
+            >
+              ‹
+            </button>
           </div>
-        </div>
-        <VersionTabs
-          versions={project.versions}
-          activeId={activeVersion?.id ?? null}
-          onSelect={handleSelectVersion}
-          onCreate={() => setCreating(true)}
-          onDelete={handleDeleteVersion}
-        />
-        <ProjectStepper project={project} version={activeVersion} />
-      </aside>
+          <div>
+            <h1 className="text-sm font-semibold text-slate-100 truncate">
+              {project.title}
+            </h1>
+            <div className="text-[10px] text-slate-500 font-mono truncate">
+              {project.slug}
+            </div>
+          </div>
+          <VersionTabs
+            versions={project.versions}
+            activeId={activeVersion?.id ?? null}
+            onSelect={handleSelectVersion}
+            onCreate={() => setCreating(true)}
+            onDelete={handleDeleteVersion}
+          />
+          <ProjectStepper project={project} version={activeVersion} />
+        </aside>
+      )}
 
-      <section className="overflow-y-auto pr-2">
+      <section className="flex-1 min-w-0 min-h-0 flex flex-col">
         <Outlet
           context={{
             project,

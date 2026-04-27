@@ -160,6 +160,7 @@ def test_stats_for_version_counts_train_and_reg(isolated) -> None:
     with db.connection_for(isolated["db"]) as conn:
         v = versions.create_version(conn, project_id=p["id"], label="v1")
     vdir = versions.version_dir(p["id"], p["slug"], "v1")
+    # 默认 1_data 已存在；这里加一个 5_concept 验证多 folder 计数
     (vdir / "train" / "5_concept").mkdir(parents=True)
     (vdir / "train" / "5_concept" / "a.png").write_bytes(b"x")
     (vdir / "train" / "5_concept" / "b.png").write_bytes(b"x")
@@ -168,5 +169,18 @@ def test_stats_for_version_counts_train_and_reg(isolated) -> None:
     stats = versions.stats_for_version(p, v)
     assert stats["train_image_count"] == 2
     assert stats["reg_image_count"] == 1
-    assert stats["train_folders"] == [{"name": "5_concept", "image_count": 2}]
+    folder_names = {f["name"] for f in stats["train_folders"]}
+    assert folder_names == {"1_data", "5_concept"}
+    assert {f["name"]: f["image_count"] for f in stats["train_folders"]} == {
+        "1_data": 0,
+        "5_concept": 2,
+    }
     assert stats["has_output"] is False
+
+
+def test_create_version_provisions_default_train_folder(isolated) -> None:
+    p = _new_project(isolated)
+    with db.connection_for(isolated["db"]) as conn:
+        versions.create_version(conn, project_id=p["id"], label="v1")
+    vdir = versions.version_dir(p["id"], p["slug"], "v1")
+    assert (vdir / "train" / versions.DEFAULT_TRAIN_FOLDER).is_dir()

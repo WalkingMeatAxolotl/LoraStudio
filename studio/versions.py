@@ -50,9 +50,15 @@ def _write_version_json(v: dict[str, Any], pdir_label_path: Path) -> None:
     )
 
 
+# 默认训练子文件夹：Kohya 风格 N_label，repeat=1。
+# 之所以默认建一个：用户进 Curation 页就能直接复制图，不需要先「+ 新建文件夹」。
+DEFAULT_TRAIN_FOLDER = "1_data"
+
+
 def _ensure_version_tree(vdir: Path) -> None:
     for sub in ("train", "reg", "output", "samples"):
         (vdir / sub).mkdir(parents=True, exist_ok=True)
+    (vdir / "train" / DEFAULT_TRAIN_FOLDER).mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------

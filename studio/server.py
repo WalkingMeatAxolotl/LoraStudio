@@ -30,6 +30,7 @@ from pydantic import BaseModel
 
 from . import (
     browse,
+    curation,
     datasets,
     db,
     presets_io,
@@ -37,6 +38,7 @@ from . import (
     projects,
     queue_io,
     secrets,
+    thumb_cache,
     versions,
 )
 from .event_bus import bus
@@ -590,8 +592,17 @@ def list_files(pid: int, bucket: str = "download") -> dict[str, Any]:
 
 
 @app.get("/api/projects/{pid}/thumb")
-def project_thumb(pid: int, bucket: str = "download", name: str = "") -> FileResponse:
-    """直接 serve 原图（不缩；前端 CSS 缩）。PP3 加缩略缓存。"""
+def project_thumb(
+    pid: int,
+    bucket: str = "download",
+    name: str = "",
+    size: int = 256,
+) -> FileResponse:
+    """缩略图：默认 256px JPEG（缓存）；size=0 → 原图。
+
+    缓存路径：`studio_data/thumb_cache/{sha1(src+mtime+size)}.jpg`。
+    源文件 mtime 变化会自动 invalidate（hash 变）。
+    """
     if bucket != "download":
         raise HTTPException(400, "PP2 仅支持 bucket=download")
     if "/" in name or "\\" in name or ".." in name or not name:
@@ -603,7 +614,8 @@ def project_thumb(pid: int, bucket: str = "download", name: str = "") -> FileRes
     f = projects.project_dir(p["id"], p["slug"]) / "download" / name
     if not f.exists() or f.suffix.lower() not in datasets.IMAGE_EXTS:
         raise HTTPException(404)
-    return FileResponse(f)
+    out = thumb_cache.get_or_make_thumb(f, size)
+    return FileResponse(out, headers={"Cache-Control": "public, max-age=86400"})
 
 
 # /api/jobs/* —————————————————————————————————————————————————————————
@@ -650,6 +662,143 @@ def cancel_job_endpoint(jid: int) -> dict[str, Any]:
             raise HTTPException(400, f"job 已 {job['status']}")
         raise HTTPException(409, "cancel rejected (state mismatch)")
     return {"job_id": jid, "canceled": True}
+
+
+# ---------------------------------------------------------------------------
+# /api/projects/{pid}/versions/{vid}/curation  (PP3)
+# ---------------------------------------------------------------------------
+
+
+class CopyRequest(BaseModel):
+    files: list[str]
+    dest_folder: str
+
+
+class RemoveRequest(BaseModel):
+    folder: str
+    files: list[str]
+
+
+class FolderOp(BaseModel):
+    op: str  # "create" | "rename" | "delete"
+    name: str
+    new_name: Optional[str] = None
+
+
+def _curation_err_code(exc: curation.CurationError) -> int:
+    msg = str(exc)
+    if "不存在" in msg:
+        return 404
+    if "已存在" in msg or "非法" in msg:
+        return 400
+    return 422
+
+
+def _maybe_advance_after_train_change(conn, pid: int, vid: int) -> None:
+    """copy/remove 后视情况推进 stage：train 有图 → curating → tagging 提示位。"""
+    if curation.has_train_images(conn, pid, vid):
+        v = versions.get_version(conn, vid)
+        if v and v["stage"] == "curating":
+            updated = versions.advance_stage(conn, vid, "tagging")
+            _publish_version_state(updated)
+        p = projects.get_project(conn, pid)
+        if p and p["stage"] in ("created", "downloading", "curating"):
+            updated_p = projects.advance_stage(conn, pid, "tagging")
+            _publish_project_state(updated_p)
+
+
+@app.get("/api/projects/{pid}/versions/{vid}/curation")
+def get_curation(pid: int, vid: int) -> dict[str, Any]:
+    with db.connection_for() as conn:
+        try:
+            return curation.curation_view(conn, pid, vid)
+        except curation.CurationError as exc:
+            raise HTTPException(_curation_err_code(exc), str(exc)) from exc
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/curation/copy")
+def copy_to_train(
+    pid: int, vid: int, body: CopyRequest
+) -> dict[str, Any]:
+    with db.connection_for() as conn:
+        try:
+            result = curation.copy_to_train(
+                conn, pid, vid, body.files, body.dest_folder
+            )
+        except curation.CurationError as exc:
+            raise HTTPException(_curation_err_code(exc), str(exc)) from exc
+        _maybe_advance_after_train_change(conn, pid, vid)
+    return result
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/curation/remove")
+def remove_from_train(
+    pid: int, vid: int, body: RemoveRequest
+) -> dict[str, Any]:
+    with db.connection_for() as conn:
+        try:
+            result = curation.remove_from_train(
+                conn, pid, vid, body.folder, body.files
+            )
+        except curation.CurationError as exc:
+            raise HTTPException(_curation_err_code(exc), str(exc)) from exc
+    return result
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/curation/folder")
+def folder_op(
+    pid: int, vid: int, body: FolderOp
+) -> dict[str, Any]:
+    with db.connection_for() as conn:
+        try:
+            if body.op == "create":
+                p = curation.create_folder(conn, pid, vid, body.name)
+                return {"path": str(p)}
+            if body.op == "rename":
+                if not body.new_name:
+                    raise HTTPException(400, "rename 需要 new_name")
+                p = curation.rename_folder(
+                    conn, pid, vid, body.name, body.new_name
+                )
+                return {"path": str(p)}
+            if body.op == "delete":
+                curation.delete_folder(conn, pid, vid, body.name)
+                return {"deleted": body.name}
+            raise HTTPException(400, f"unknown op: {body.op}")
+        except curation.CurationError as exc:
+            raise HTTPException(_curation_err_code(exc), str(exc)) from exc
+
+
+# version 级缩略图：bucket = train | reg | samples（PP3 加 train，reg/samples 留作 PP4-5）
+@app.get("/api/projects/{pid}/versions/{vid}/thumb")
+def version_thumb(
+    pid: int,
+    vid: int,
+    bucket: str = "train",
+    folder: str = "",
+    name: str = "",
+    size: int = 256,
+) -> FileResponse:
+    if bucket not in {"train", "reg", "samples"}:
+        raise HTTPException(400, f"非法 bucket: {bucket}")
+    if "/" in name or "\\" in name or ".." in name or not name:
+        raise HTTPException(400, "invalid name")
+    with db.connection_for() as conn:
+        v = versions.get_version(conn, vid)
+        p = projects.get_project(conn, pid)
+    if not v or not p or v["project_id"] != pid:
+        raise HTTPException(404, "版本不存在")
+    vdir = versions.version_dir(p["id"], p["slug"], v["label"]) / bucket
+    if bucket in {"train", "reg"}:
+        if not folder or "/" in folder or "\\" in folder or ".." in folder:
+            raise HTTPException(400, "invalid folder")
+        f = vdir / folder / name
+    else:
+        f = vdir / name
+    if not f.exists() or f.suffix.lower() not in datasets.IMAGE_EXTS:
+        raise HTTPException(404)
+    out = thumb_cache.get_or_make_thumb(f, size)
+    return FileResponse(out, headers={"Cache-Control": "public, max-age=86400"})
 
 
 # ---------------------------------------------------------------------------
@@ -888,9 +1037,37 @@ def get_sample(filename: str) -> FileResponse:
 # 静态资源
 # ---------------------------------------------------------------------------
 
+
+class SPAStaticFiles(StaticFiles):
+    """SPA 路由兜底：未命中实际文件且不像静态资产时，返回 index.html。
+
+    这样直接刷新 `/studio/projects/1/v/1/curate` 这种 react-router 路由
+    也能拿到 index.html，让 BrowserRouter 在前端解析路径。
+    带文件扩展名的请求（.js/.css/.png 等）保持原 404 行为，避免把缺失的
+    资源吞成 200 误导浏览器。
+    """
+
+    async def get_response(self, path, scope):  # type: ignore[override]
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            # 末段含 "." → 视为静态资产请求，不兜底
+            last = path.rsplit("/", 1)[-1]
+            if "." in last:
+                raise
+            return FileResponse(Path(self.directory) / "index.html")
+
+
 # React 应用：构建后通过 /studio 访问。开发期请用 `npm run dev` 起 5173。
 if WEB_DIST.exists():
-    app.mount("/studio", StaticFiles(directory=str(WEB_DIST), html=True), name="studio")
+    app.mount(
+        "/studio",
+        SPAStaticFiles(directory=str(WEB_DIST), html=True),
+        name="studio",
+    )
 
 
 @app.get("/", response_model=None)
@@ -923,7 +1100,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print(f"[AnimaStudio] http://{args.host}:{args.port}")
+    # 真正给用户看的入口是 /studio/（前端 SPA），裸根路径只是兼容旧 monitor。
+    print(f"[AnimaStudio] http://{args.host}:{args.port}/studio/")
     uvicorn.run(
         "studio.server:app",
         host=args.host,

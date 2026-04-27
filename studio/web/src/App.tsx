@@ -5,6 +5,7 @@ import ProjectsPage from './pages/Projects'
 import QueuePage from './pages/Queue'
 import ProjectLayout from './pages/project/Layout'
 import ProjectOverview from './pages/project/Overview'
+import CurationPage from './pages/project/steps/Curation'
 import DownloadPage from './pages/project/steps/Download'
 import StepPlaceholder from './pages/project/steps/Placeholder'
 import MonitorPage from './pages/tools/Monitor'
@@ -16,7 +17,7 @@ export default function App() {
     <BrowserRouter basename="/studio">
       <div className="min-h-screen flex">
         <Sidebar />
-        <main className="flex-1 px-8 py-6 overflow-auto h-screen">
+        <main className="flex-1 px-4 py-4 overflow-auto h-screen min-w-0">
           <Routes>
             <Route path="/" element={<ProjectsPage />} />
             <Route path="/queue" element={<QueuePage />} />
@@ -27,10 +28,7 @@ export default function App() {
               <Route index element={<ProjectOverview />} />
               <Route path="download" element={<DownloadPage />} />
               <Route path="v/:vid">
-                <Route
-                  path="curate"
-                  element={<StepPlaceholder step="② 筛选" doc="PP3" />}
-                />
+                <Route path="curate" element={<CurationPage />} />
                 <Route
                   path="tag"
                   element={<StepPlaceholder step="③ 打标" doc="PP4" />}

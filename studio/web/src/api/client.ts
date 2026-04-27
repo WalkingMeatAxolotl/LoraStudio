@@ -177,6 +177,22 @@ export interface DownloadFile {
   has_meta: boolean
 }
 
+// ---- curation (PP3) -------------------------------------------------------
+
+export interface CurationView {
+  left: string[] // download − train
+  right: Record<string, string[]> // folder → filenames
+  download_total: number
+  train_total: number
+  folders: string[]
+}
+
+export interface CopyResult {
+  copied: string[]
+  skipped: string[]
+  missing: string[]
+}
+
 export type TaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'canceled'
 
 export interface Task {
@@ -413,8 +429,8 @@ export const api = {
     req<{ items: DownloadFile[]; count: number }>(
       `/api/projects/${pid}/files?bucket=${encodeURIComponent(bucket)}`
     ),
-  projectThumbUrl: (pid: number, name: string, bucket = 'download') =>
-    `/api/projects/${pid}/thumb?bucket=${encodeURIComponent(bucket)}&name=${encodeURIComponent(name)}`,
+  projectThumbUrl: (pid: number, name: string, bucket = 'download', size = 256) =>
+    `/api/projects/${pid}/thumb?bucket=${encodeURIComponent(bucket)}&name=${encodeURIComponent(name)}&size=${size}`,
   getJob: (jid: number) => req<Job>(`/api/jobs/${jid}`),
   getJobLog: (jid: number, tail?: number) => {
     const qs = tail ? `?tail=${tail}` : ''
@@ -426,6 +442,49 @@ export const api = {
     req<{ job_id: number; canceled: boolean }>(`/api/jobs/${jid}/cancel`, {
       method: 'POST',
     }),
+
+  // Curation (PP3) -------------------------------------------------------
+  getCuration: (pid: number, vid: number) =>
+    req<CurationView>(`/api/projects/${pid}/versions/${vid}/curation`),
+  copyToTrain: (
+    pid: number,
+    vid: number,
+    body: { files: string[]; dest_folder: string }
+  ) =>
+    req<CopyResult>(`/api/projects/${pid}/versions/${vid}/curation/copy`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  removeFromTrain: (
+    pid: number,
+    vid: number,
+    body: { folder: string; files: string[] }
+  ) =>
+    req<{ removed: string[]; missing: string[] }>(
+      `/api/projects/${pid}/versions/${vid}/curation/remove`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+  folderOp: (
+    pid: number,
+    vid: number,
+    body: { op: 'create' | 'rename' | 'delete'; name: string; new_name?: string }
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${pid}/versions/${vid}/curation/folder`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+  versionThumbUrl: (
+    pid: number,
+    vid: number,
+    bucket: 'train' | 'reg' | 'samples',
+    name: string,
+    folder?: string,
+    size: number = 256
+  ) => {
+    const qs = new URLSearchParams({ bucket, name, size: String(size) })
+    if (folder) qs.set('folder', folder)
+    return `/api/projects/${pid}/versions/${vid}/thumb?${qs.toString()}`
+  },
 
   // Queue --------------------------------------------------------------
   listQueue: (status?: TaskStatus) => {

@@ -16,6 +16,7 @@ STUDIO_DB = STUDIO_DATA / "studio.db"
 USER_PRESETS_DIR = STUDIO_DATA / "presets"
 USER_CONFIGS_DIR = USER_PRESETS_DIR  # 兼容别名（PP0 后将随 configs_io 一起移除）
 LOGS_DIR = STUDIO_DATA / "logs"
+THUMB_CACHE_DIR = STUDIO_DATA / "thumb_cache"
 
 # React 前端
 WEB_DIR = REPO_ROOT / "studio" / "web"

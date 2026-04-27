@@ -12,6 +12,8 @@ const initialServerState = {
     convert_to_png: true,
     remove_alpha_channel: false,
   },
+  danbooru: { username: '', api_key: '' },
+  download: { exclude_tags: [] },
   huggingface: { token: '' },
   joycaption: {
     base_url: 'http://localhost:8000/v1',

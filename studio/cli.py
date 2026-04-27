@@ -20,6 +20,10 @@ import signal
 import subprocess
 import sys
 import threading
+import time
+import urllib.error
+import urllib.request
+import webbrowser
 from pathlib import Path
 from typing import Optional
 
@@ -153,13 +157,41 @@ def cmd_build(_args: argparse.Namespace) -> int:
     return npm_build(npm)
 
 
+def _spawn_browser_opener(url: str, *, delay: float = 1.0) -> None:
+    """后台等服务起来后用默认浏览器打开 url；失败静默。"""
+
+    def _wait_and_open() -> None:
+        deadline = time.monotonic() + 30.0
+        time.sleep(delay)
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen(url, timeout=1.5) as resp:
+                    if 200 <= resp.status < 500:
+                        break
+            except (urllib.error.URLError, ConnectionError, TimeoutError):
+                time.sleep(0.5)
+                continue
+            except Exception:
+                break
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_wait_and_open, name="studio-browser", daemon=True)
+    t.start()
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     if not WEB_DIST.exists() and not args.no_build:
         print("[studio] studio/web/dist 不存在，先构建前端...")
         rc = cmd_build(args)
         if rc != 0:
             return rc
-    print(f"[studio] 启动后端 → http://{args.host}:{args.port}/studio/")
+    url = f"http://{args.host}:{args.port}/studio/"
+    print(f"[studio] 启动后端 → {url}")
+    if not args.no_browser:
+        _spawn_browser_opener(url)
     return subprocess.call(
         [find_python(), "-m", "studio.server", "--host", args.host, "--port", str(args.port)]
     )
@@ -188,10 +220,14 @@ def cmd_dev(args: argparse.Namespace) -> int:
                 "--reload",
             ],
         )
+        frontend_url = "http://127.0.0.1:5173/studio/"
         print(
-            f"[studio] frontend → http://127.0.0.1:5173/studio/  "
-            f"backend → http://{args.host}:{args.port}"
+            f"[studio] frontend → {frontend_url}  "
+            f"backend → http://{args.host}:{args.port}/studio/"
         )
+        if not args.no_browser:
+            # dev 模式打开 Vite 端口（HMR 能用），不开 backend 端口
+            _spawn_browser_opener(frontend_url, delay=2.0)
         rc = pg.wait_any()
     finally:
         pg.stop_all()
@@ -229,11 +265,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--port", type=int, default=8765)
     p_run.add_argument("--no-build", action="store_true",
                        help="即使 dist 不存在也不自动 build")
+    p_run.add_argument("--no-browser", action="store_true",
+                       help="启动后不自动打开浏览器")
     p_run.set_defaults(func=cmd_run)
 
     p_dev = sub.add_parser("dev", help="前后端开发模式")
     p_dev.add_argument("--host", default="127.0.0.1")
     p_dev.add_argument("--port", type=int, default=8765)
+    p_dev.add_argument("--no-browser", action="store_true",
+                       help="启动后不自动打开浏览器")
     p_dev.set_defaults(func=cmd_dev)
 
     p_build = sub.add_parser("build", help="仅构建前端")
