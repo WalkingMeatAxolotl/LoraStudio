@@ -3,6 +3,41 @@ import { Link } from 'react-router-dom'
 import { api, type ConfigSummary, type Task, type TaskStatus } from '../api/client'
 import { useEventStream } from '../lib/useEventStream'
 
+async function downloadJson(filename: string, data: unknown) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: 'application/json',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+async function pickJsonFile(): Promise<unknown | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json,application/json'
+    input.onchange = async () => {
+      const f = input.files?.[0]
+      if (!f) {
+        resolve(null)
+        return
+      }
+      try {
+        const text = await f.text()
+        resolve(JSON.parse(text))
+      } catch {
+        alert('JSON 解析失败')
+        resolve(null)
+      }
+    }
+    input.click()
+  })
+}
+
 const STATUS_STYLE: Record<TaskStatus, string> = {
   pending: 'bg-slate-700 text-slate-300',
   running: 'bg-cyan-600/30 text-cyan-300 animate-pulse',
@@ -173,12 +208,59 @@ export default function QueuePage() {
           <h2 className="text-sm font-semibold text-slate-200">
             队列 <span className="text-slate-500 ml-1">({tasks.length})</span>
           </h2>
-          <button
-            onClick={() => void reload()}
-            className="text-xs text-slate-400 hover:text-slate-200"
-          >
-            刷新
-          </button>
+          <div className="flex gap-2 text-xs">
+            <button
+              disabled={busy || tasks.length === 0}
+              onClick={async () => {
+                try {
+                  const data = await api.exportQueue()
+                  await downloadJson(
+                    `queue_${new Date()
+                      .toISOString()
+                      .slice(0, 19)
+                      .replace(/[:T]/g, '-')}.json`,
+                    data
+                  )
+                } catch (e) {
+                  setError(String(e))
+                }
+              }}
+              className="text-slate-400 hover:text-slate-200 disabled:opacity-40"
+            >
+              导出
+            </button>
+            <button
+              disabled={busy}
+              onClick={async () => {
+                const payload = await pickJsonFile()
+                if (!payload) return
+                setBusy(true)
+                try {
+                  const r = await api.importQueue(payload)
+                  alert(
+                    `已导入 ${r.imported_count} 个任务` +
+                      (Object.keys(r.renamed).length
+                        ? `\n重命名: ${JSON.stringify(r.renamed)}`
+                        : '')
+                  )
+                  await reload()
+                } catch (e) {
+                  setError(String(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}
+              className="text-slate-400 hover:text-slate-200 disabled:opacity-40"
+            >
+              导入
+            </button>
+            <button
+              onClick={() => void reload()}
+              className="text-slate-400 hover:text-slate-200"
+            >
+              刷新
+            </button>
+          </div>
         </header>
 
         {tasks.length === 0 ? (

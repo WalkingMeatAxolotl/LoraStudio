@@ -1,9 +1,9 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import ConfigsPage from './pages/Configs'
+import DatasetsPage from './pages/Datasets'
 import LogPage from './pages/Log'
 import MonitorPage from './pages/Monitor'
-import Placeholder from './pages/Placeholder'
 import QueuePage from './pages/Queue'
 
 export default function App() {
@@ -17,16 +17,7 @@ export default function App() {
             <Route path="/configs" element={<ConfigsPage />} />
             <Route path="/queue" element={<QueuePage />} />
             <Route path="/queue/:id/log" element={<LogPage />} />
-            <Route
-              path="/datasets"
-              element={
-                <Placeholder
-                  title="数据集"
-                  phase="P4"
-                  description="P4 阶段会扫描 dataset/ 目录，按 Kohya 风格 N_xxx 子目录显示样本数、caption 类型分布、缩略图。"
-                />
-              }
-            />
+            <Route path="/datasets" element={<DatasetsPage />} />
           </Routes>
         </main>
       </div>

@@ -64,6 +64,41 @@ export interface LogResponse {
   size: number
 }
 
+export interface DatasetFolder {
+  name: string
+  label: string
+  repeat: number
+  image_count: number
+  caption_types: { json: number; txt: number; none: number }
+  samples: string[]
+  path: string
+}
+
+export interface DatasetScan {
+  root: string
+  exists: boolean
+  folders: DatasetFolder[]
+  total_images?: number
+  weighted_steps_per_epoch?: number
+}
+
+export interface QueueExport {
+  version: number
+  exported_at: number
+  tasks: Array<{
+    name: string
+    config_name: string
+    priority: number
+    config: Record<string, unknown> | null
+  }>
+}
+
+export interface ImportResult {
+  imported_count: number
+  task_ids: number[]
+  renamed: Record<string, string>
+}
+
 async function req<T>(
   path: string,
   init?: RequestInit
@@ -136,4 +171,23 @@ export const api = {
       body: JSON.stringify({ ordered_ids: orderedIds }),
     }),
   getLog: (id: number) => req<LogResponse>(`/api/logs/${id}`),
+
+  // Queue import / export ---------------------------------------------
+  exportQueue: (ids?: number[]) => {
+    const qs = ids && ids.length ? `?ids=${ids.join(',')}` : ''
+    return req<QueueExport>(`/api/queue/export${qs}`)
+  },
+  importQueue: (payload: unknown) =>
+    req<ImportResult>('/api/queue/import', {
+      method: 'POST',
+      body: JSON.stringify({ payload }),
+    }),
+
+  // Datasets -----------------------------------------------------------
+  listDatasets: (path?: string) => {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : ''
+    return req<DatasetScan>(`/api/datasets${qs}`)
+  },
+  thumbnailUrl: (folder: string, name: string) =>
+    `/api/datasets/thumbnail?folder=${encodeURIComponent(folder)}&name=${encodeURIComponent(name)}`,
 }

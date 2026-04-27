@@ -60,7 +60,7 @@ npm run build          # 输出到 studio/web/dist/
 - [x] **P2-B** `studio.argparse_bridge` schema → argparse 反向生成
 - [x] **P2-C** `anima_train.py` 迁移到 schema；React Configs 页（schema-driven 表单 + 列表 CRUD）
 - [x] **P3** 任务队列 + supervisor + SSE（`Queue.tsx` 列表 + 操作，`Log.tsx` 实时日志）
-- [ ] **P4** 数据集浏览 + JSON 导入导出
+- [x] **P4** 数据集浏览 (`Datasets.tsx`) + 队列 JSON 导入导出
 - [ ] **P5** 一键启动脚本、字段说明 tooltip、错误提示、Vitest 前端测试
 
 详见仓库根的 plan。
@@ -71,9 +71,9 @@ npm run build          # 输出到 studio/web/dist/
 - `/studio/` React 应用入口
   - `监控` 守护进程状态 + 跳转旧监控
   - `配置` schema-driven 表单 + 列表（新建 / 保存 / 复制 / 删除）
-  - `队列` 入队 / 取消 / 重试 / 删除 / 查日志；SSE 实时刷新
+  - `队列` 入队 / 取消 / 重试 / 删除 / 查日志 / JSON 导入导出；SSE 实时刷新
   - `/queue/{id}/log` 全屏日志查看（自动滚动 + 运行中每 2 秒拉一次）
-  - `数据集` 占位
+  - `数据集` 扫描子目录、解析 Kohya 前缀、统计 caption 类型、缩略图预览
 
 需要本地起前端开发服务器：
 

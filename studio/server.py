@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -27,13 +28,14 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import configs_io, db
+from . import configs_io, datasets, db, queue_io
 from .event_bus import bus
 from .paths import (
     LEGACY_MONITOR_HTML,
     LOGS_DIR,
     MONITOR_STATE_FILE,
     OUTPUT_DIR,
+    REPO_ROOT,
     STUDIO_DB,
     USER_CONFIGS_DIR,
     WEB_DIST,
@@ -187,6 +189,34 @@ def _supervisor() -> Supervisor:
     return sup
 
 
+# 导入 / 导出必须放在 /api/queue/{task_id} 之前，否则 "export" / "import" 会
+# 被当成 task_id 走整数解析。
+class ImportRequest(BaseModel):
+    payload: dict[str, Any]
+
+
+@app.get("/api/queue/export")
+def export_queue(ids: str = "") -> dict[str, Any]:
+    """`?ids=1,2,3` 指定导出的任务，缺省导出全部。"""
+    if ids.strip():
+        try:
+            id_list = [int(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(400, "ids must be comma-separated integers")
+    else:
+        with db.connection_for() as conn:
+            id_list = [t["id"] for t in db.list_tasks(conn)]
+    return queue_io.export_tasks(id_list)
+
+
+@app.post("/api/queue/import")
+def import_queue(body: ImportRequest) -> dict[str, Any]:
+    try:
+        return queue_io.import_tasks(body.payload)
+    except (ValueError, configs_io.ConfigError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.get("/api/queue")
 def list_queue(status: Optional[str] = None) -> dict[str, Any]:
     if status and status not in db.VALID_STATUSES:
@@ -275,6 +305,39 @@ def reorder_queue(body: ReorderRequest) -> dict[str, Any]:
     with db.connection_for() as conn:
         db.reorder(conn, body.ordered_ids)
     return {"reordered": len(body.ordered_ids)}
+
+
+# ---------------------------------------------------------------------------
+# /api/datasets  (P4)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/datasets")
+def get_datasets(path: str = "") -> dict[str, Any]:
+    """扫描数据集目录。`?path=` 指定根目录；缺省 = repo_root/dataset。"""
+    root = Path(path) if path else REPO_ROOT / "dataset"
+    if not root.is_absolute():
+        root = (REPO_ROOT / root).resolve()
+    return datasets.scan_dataset_root(root)
+
+
+@app.get("/api/datasets/thumbnail")
+def get_dataset_thumbnail(folder: str, name: str) -> FileResponse:
+    """返回 dataset 缩略图（实际是原图，前端用 CSS 缩放）。"""
+    if ".." in folder or ".." in name or "\\" in name or "/" in name:
+        raise HTTPException(400, "invalid path component")
+    p = (Path(folder) / name).resolve()
+    # 保证落在 repo 内（防止任意磁盘读取）
+    try:
+        p.relative_to(REPO_ROOT.resolve())
+    except ValueError:
+        raise HTTPException(403, "thumbnail path outside repo")
+    if not p.exists() or p.suffix.lower() not in datasets.IMAGE_EXTS:
+        raise HTTPException(404)
+    return FileResponse(p)
+
+
+# ---------------------------------------------------------------------------
 
 
 @app.get("/api/logs/{task_id}")

@@ -4,7 +4,7 @@ const links: Array<{ to: string; label: string; phase?: string }> = [
   { to: '/', label: '监控' },
   { to: '/configs', label: '配置' },
   { to: '/queue', label: '队列' },
-  { to: '/datasets', label: '数据集', phase: 'P4' },
+  { to: '/datasets', label: '数据集' },
 ]
 
 export default function Sidebar() {
