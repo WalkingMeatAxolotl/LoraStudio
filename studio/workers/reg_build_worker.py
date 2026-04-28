@@ -1,4 +1,4 @@
-"""正则集构建 worker（PP5）。
+"""正则集构建 worker（PP5 + PP5.1 + PP5.5）。
 
 `python -m studio.workers.reg_build_worker --job-id N`。读 `project_jobs.params`：
     {
@@ -13,11 +13,13 @@
 凭据从 `secrets.gelbooru` / `secrets.danbooru` 拉。
 
 工作流：
-1. reg_builder.build(opts) 落图 + 写 meta.json（auto_tagged=False）
-2. 若 auto_tag，内联调 WD14 给 reg/1_general/ 全图打标
-3. 失败 catch → meta.auto_tagged 仍 false；reg 集本体保留
+1. reg_builder.build(opts) 落图 + 写 meta.json（auto_tagged=False，postprocessed_at=None）
+2. PP5.5 — reg_postprocess.postprocess(reg_dir) 分辨率聚类 + smart resize 到统一分辨率
+   - 失败 / 找不到满足 max_crop 的 K → catch，meta.postprocessed_at 仍 None；reg 集保留
+3. 若 auto_tag，内联调 WD14 给 reg/ 全图打标
+4. 失败 catch → meta.auto_tagged 仍 false；reg 集本体保留
 
-不开子进程：把 WD14 直接 import 进来，progress 走同一 log_path。
+不开子进程：把 WD14 / postprocess 直接 import 进来，progress 走同一 log_path。
 """
 from __future__ import annotations
 
@@ -36,7 +38,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 from studio import db, project_jobs, projects, secrets, versions
 from studio.datasets import IMAGE_EXTS
-from studio.services import reg_builder, tagedit
+from studio.services import reg_builder, reg_postprocess, tagedit
 
 
 def _open_log(log_path: str):
@@ -53,6 +55,45 @@ def _collect_reg_images(reg_dir: Path) -> list[Path]:
         if f.is_file() and f.suffix.lower() in IMAGE_EXTS:
             out.append(f)
     return sorted(out)
+
+
+def _run_postprocess(
+    reg_dir: Path, progress, cancel_event,
+    *, method: str = "smart", max_crop_ratio: float = 0.1,
+) -> None:
+    """PP5.5 — 分辨率聚类后处理。失败不算 fatal；meta 字段反映结果。"""
+    import time as _time
+    try:
+        result = reg_postprocess.postprocess(
+            reg_dir,
+            method=method,
+            max_crop_ratio=max_crop_ratio,
+            on_progress=progress,
+            cancel_event=cancel_event,
+        )
+    except Exception as exc:
+        progress(f"[postprocess] 失败: {exc}")
+        import traceback
+        progress(traceback.format_exc())
+        reg_builder.update_meta_postprocess(
+            reg_dir, when=None, clusters=None, method=None, max_crop_ratio=None
+        )
+        return
+    if result.get("clusters") is None:
+        # 找不到满足 max_crop 的 K → 不动文件
+        reg_builder.update_meta_postprocess(
+            reg_dir, when=None, clusters=None,
+            method=result.get("method"),
+            max_crop_ratio=result.get("max_crop_ratio"),
+        )
+        return
+    reg_builder.update_meta_postprocess(
+        reg_dir,
+        when=_time.time(),
+        clusters=int(result["clusters"]),
+        method=str(result.get("method") or method),
+        max_crop_ratio=float(result.get("max_crop_ratio") or max_crop_ratio),
+    )
 
 
 def _run_auto_tag(reg_dir: Path, progress) -> bool:
@@ -120,7 +161,7 @@ def run(job_id: int) -> int:
 
             vdir = versions.version_dir(p["id"], p["slug"], v["label"])
             train_dir = vdir / "train"
-            output_dir = vdir / "reg" / "1_general"
+            output_dir = vdir / "reg"  # 与源脚本一致：直接镜像 train 子文件夹
 
             sec = secrets.load()
             api_source = str(params.get("api_source", "gelbooru"))
@@ -128,10 +169,16 @@ def run(job_id: int) -> int:
                 user_id = ""
                 username = sec.danbooru.username
                 api_key = sec.danbooru.api_key
+                # account_type 影响 max_search_tags 上限
+                account_type = (sec.danbooru.account_type or "free").lower()
+                max_search_tags = {
+                    "free": 2, "gold": 6, "platinum": 12,
+                }.get(account_type, 2)
             else:
                 user_id = sec.gelbooru.user_id
                 username = ""
                 api_key = sec.gelbooru.api_key
+                max_search_tags = 20  # gelbooru 默认 20
 
             opts = reg_builder.RegBuildOptions(
                 train_dir=train_dir,
@@ -140,7 +187,16 @@ def run(job_id: int) -> int:
                 user_id=user_id,
                 api_key=api_key,
                 username=username,
-                target_count=params.get("target_count") or None,
+                target_count=None,  # 永远镜像 train 总数（与源脚本一致）
+                max_search_tags=max_search_tags,
+                # batch_size = 搜索循环内部「每批下多少张后重算缺失 tag」，
+                # 与 train 子文件夹镜像无关；走源脚本默认 5，UI 不暴露
+                skip_similar=bool(params.get("skip_similar", True)),
+                aspect_ratio_filter_enabled=bool(
+                    params.get("aspect_ratio_filter_enabled", False)
+                ),
+                min_aspect_ratio=float(params.get("min_aspect_ratio", 0.5)),
+                max_aspect_ratio=float(params.get("max_aspect_ratio", 2.0)),
                 excluded_tags=list(params.get("excluded_tags") or []),
                 blacklist_tags=list(sec.download.exclude_tags or []),
                 auto_tag=bool(params.get("auto_tag", True)),
@@ -150,10 +206,12 @@ def run(job_id: int) -> int:
                 remove_alpha_channel=sec.gelbooru.remove_alpha_channel,
             )
             incremental = bool(params.get("incremental", False))
+            pp_method = str(params.get("postprocess_method", "smart"))
+            pp_max_crop = float(params.get("postprocess_max_crop_ratio", 0.1))
             progress(
                 f"[start] version={v['label']} api={api_source} "
-                f"target={opts.target_count or '<train-total>'} "
-                f"auto_tag={opts.auto_tag} incremental={incremental}"
+                f"max_tags={max_search_tags} auto_tag={opts.auto_tag} "
+                f"incremental={incremental} pp={pp_method}/{pp_max_crop}"
             )
 
             meta = reg_builder.build(
@@ -163,6 +221,13 @@ def run(job_id: int) -> int:
                 incremental=incremental,
             )
             progress(f"[reg-done] actual={meta.actual_count}/{meta.target_count}")
+
+            # PP5.5 — 分辨率聚类后处理（auto_tag 之前，因为打标基于最终图）
+            if meta.actual_count > 0:
+                _run_postprocess(
+                    output_dir, progress, cancel_event,
+                    method=pp_method, max_crop_ratio=pp_max_crop,
+                )
 
             # auto_tag：拉完后内联跑 WD14
             auto_ok = False

@@ -68,6 +68,7 @@ class RegBuildOptions:
     # 上限
     target_count: Optional[int] = None
     max_search_tags: int = 20  # gelbooru 默认 20，danbooru 免费 2 / gold 6 / platinum 12
+    # batch_size = 搜索循环内部「每下 N 张重算 missing_weight」的步进；与 train 子文件夹镜像无关
     batch_size: int = 5
 
     # 标签
@@ -104,6 +105,11 @@ class RegMeta:
     train_tag_distribution: dict[str, int]  # train tag 频率（top 50）
     auto_tagged: bool
     incremental_runs: int = 0         # 补足跑了多少次（PP5.1）
+    # PP5.5 — 后处理摘要（postprocessed_at=None 表示没跑或失败）
+    postprocessed_at: Optional[float] = None
+    postprocess_clusters: Optional[int] = None
+    postprocess_method: Optional[str] = None
+    postprocess_max_crop_ratio: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -913,7 +919,7 @@ def build(
 
     # 写 meta
     top_dist = dict(structure["global_tag_freq"].most_common(50))
-    # incremental 时，failed_tags / source_tags / runs 都基于旧 meta 合并
+    # incremental 时，failed_tags / source_tags / auto_tagged / runs 都基于旧 meta 合并
     if incremental and prior_meta is not None:
         merged_failed = sorted(set(failed_tags) | set(prior_meta.failed_tags))
         merged_source = sorted(set(source_tags_used) | set(prior_meta.source_tags))
@@ -989,6 +995,25 @@ def update_meta_auto_tagged(reg_dir: Path, auto_tagged: bool) -> None:
     if m is None:
         return
     m.auto_tagged = auto_tagged
+    write_meta(reg_dir, m)
+
+
+def update_meta_postprocess(
+    reg_dir: Path,
+    *,
+    when: Optional[float],
+    clusters: Optional[int],
+    method: Optional[str],
+    max_crop_ratio: Optional[float],
+) -> None:
+    """PP5.5 — 后处理完成后改写 meta 的后处理字段。"""
+    m = read_meta(reg_dir)
+    if m is None:
+        return
+    m.postprocessed_at = when
+    m.postprocess_clusters = clusters
+    m.postprocess_method = method
+    m.postprocess_max_crop_ratio = max_crop_ratio
     write_meta(reg_dir, m)
 
 

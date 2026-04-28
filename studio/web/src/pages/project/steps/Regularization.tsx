@@ -10,6 +10,7 @@ import {
   type Version,
 } from '../../../api/client'
 import ImageGrid from '../../../components/ImageGrid'
+import ImagePreviewModal from '../../../components/ImagePreviewModal'
 import JobProgress from '../../../components/JobProgress'
 import { useToast } from '../../../components/Toast'
 import { useEventStream } from '../../../lib/useEventStream'
@@ -20,6 +21,26 @@ interface Ctx {
   reload: () => Promise<void>
 }
 
+interface AdvancedParams {
+  skip_similar: boolean
+  aspect_ratio_filter_enabled: boolean
+  min_aspect_ratio: number
+  max_aspect_ratio: number
+  postprocess_method: 'smart' | 'stretch' | 'crop'
+  postprocess_max_crop_ratio: number
+}
+
+// batch_size 不暴露 — 多 train 子文件夹（5_concept / 1_general 等）共用同一 batch
+// 概念在 UI 上意义不大，保持源脚本默认 5。
+const ADVANCED_DEFAULTS: AdvancedParams = {
+  skip_similar: true,
+  aspect_ratio_filter_enabled: false,
+  min_aspect_ratio: 0.5,
+  max_aspect_ratio: 2.0,
+  postprocess_method: 'smart',
+  postprocess_max_crop_ratio: 0.1,
+}
+
 export default function RegularizationPage() {
   const { project, activeVersion, reload } = useOutletContext<Ctx>()
   const { toast } = useToast()
@@ -27,14 +48,19 @@ export default function RegularizationPage() {
   const [reg, setReg] = useState<RegStatus | null>(null)
   const [trainTags, setTrainTags] = useState<RegTagCount[]>([])
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
-  const [targetCount, setTargetCount] = useState<number | ''>('')
   const [autoTag, setAutoTag] = useState(true)
   const [apiSource, setApiSource] = useState<'gelbooru' | 'danbooru'>('gelbooru')
+  const [advanced, setAdvanced] = useState<AdvancedParams>(ADVANCED_DEFAULTS)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const [job, setJob] = useState<Job | null>(null)
   const [logs, setLogs] = useState<string[]>([])
   const jobIdRef = useRef<number | null>(null)
   jobIdRef.current = job?.id ?? null
+
+  // 预览 modal
+  const [previewIdx, setPreviewIdx] = useState<number | null>(null)
+  const [previewCaption, setPreviewCaption] = useState<string>('')
 
   const vid = activeVersion?.id ?? null
 
@@ -53,8 +79,7 @@ export default function RegularizationPage() {
     try {
       const items = await api.previewRegTags(project.id, vid, 30)
       setTrainTags(items)
-    } catch (e) {
-      // train 没图也会返回空，不报错
+    } catch {
       setTrainTags([])
     }
   }, [project.id, vid])
@@ -96,11 +121,11 @@ export default function RegularizationPage() {
       return
     }
     const body: RegBuildRequest = {
-      target_count: targetCount === '' ? null : Number(targetCount),
       excluded_tags: Array.from(excluded),
       auto_tag: autoTag,
       api_source: apiSource,
       incremental,
+      ...advanced,
     }
     try {
       const j = await api.startRegBuild(project.id, vid, body)
@@ -126,6 +151,23 @@ export default function RegularizationPage() {
     }
   }
 
+  // 预览：点击缩略图 → 加载该图 caption → 打开 modal
+  const openPreview = useCallback(
+    async (idx: number) => {
+      if (!reg || !vid) return
+      const path = reg.files[idx]
+      setPreviewIdx(idx)
+      setPreviewCaption('加载中...')
+      try {
+        const r = await api.getRegCaption(project.id, vid, path)
+        setPreviewCaption(r.tags.length ? r.tags.join(', ') : '(无 caption)')
+      } catch (e) {
+        setPreviewCaption(`加载失败: ${e}`)
+      }
+    },
+    [reg, vid, project.id]
+  )
+
   if (!activeVersion || !vid) {
     return <p className="text-slate-500">请先选择 / 创建一个版本</p>
   }
@@ -135,7 +177,7 @@ export default function RegularizationPage() {
       <header className="flex items-baseline gap-2 flex-wrap shrink-0">
         <h2 className="text-base font-semibold">⑤ 正则集</h2>
         <span className="text-xs text-slate-500">
-          基于 train tag 分布拉「相似但不同」的正则图 · 落到 reg/1_general/
+          基于 train tag 分布拉「相似但不同」的正则图 · 镜像 train 子文件夹到 reg/
         </span>
       </header>
 
@@ -158,17 +200,11 @@ export default function RegularizationPage() {
             <option value="danbooru">Danbooru</option>
           </select>
           <span className="text-slate-700">|</span>
-          <span className="text-slate-400">目标数量</span>
-          <input
-            type="number"
-            min={1}
-            value={targetCount}
-            onChange={(e) =>
-              setTargetCount(e.target.value === '' ? '' : Number(e.target.value))
-            }
-            placeholder={`(默认 train 总数 = ${trainImageCount})`}
-            className="px-2 py-1 rounded bg-slate-950 border border-slate-700 w-44 text-xs"
-          />
+          <span className="text-slate-400">
+            目标数量{' '}
+            <span className="font-mono text-slate-300">{trainImageCount}</span>
+            <span className="text-slate-600">（镜像 train）</span>
+          </span>
           <span className="text-slate-700">|</span>
           <label className="flex items-center gap-1 cursor-pointer">
             <input
@@ -178,6 +214,12 @@ export default function RegularizationPage() {
             />
             <span className="text-slate-300">拉完后自动 WD14 打标</span>
           </label>
+          <button
+            onClick={() => setAdvancedOpen((v) => !v)}
+            className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline"
+          >
+            {advancedOpen ? '⌃ 进阶' : '⌄ 进阶'}
+          </button>
           <span className="flex-1" />
           <button
             onClick={() => void startBuild(false)}
@@ -187,6 +229,10 @@ export default function RegularizationPage() {
             {isLive ? '生成中...' : '开始生成'}
           </button>
         </div>
+
+        {advancedOpen && (
+          <AdvancedPanel value={advanced} onChange={setAdvanced} />
+        )}
 
         <ExcludeTagsPicker
           trainTags={trainTags}
@@ -211,7 +257,30 @@ export default function RegularizationPage() {
       )}
 
       {reg && reg.image_count > 0 && (
-        <RegPreview pid={project.id} vid={vid} reg={reg} />
+        <RegPreview
+          pid={project.id}
+          vid={vid}
+          reg={reg}
+          onPick={(idx) => void openPreview(idx)}
+        />
+      )}
+
+      {previewIdx !== null && reg && reg.files[previewIdx] && (
+        <ImagePreviewModal
+          src={regOrigUrl(project.id, vid, reg.files[previewIdx])}
+          caption={previewCaption}
+          hasPrev={previewIdx > 0}
+          hasNext={previewIdx < reg.files.length - 1}
+          onClose={() => setPreviewIdx(null)}
+          onPrev={() =>
+            previewIdx > 0 ? void openPreview(previewIdx - 1) : undefined
+          }
+          onNext={() =>
+            previewIdx < reg.files.length - 1
+              ? void openPreview(previewIdx + 1)
+              : undefined
+          }
+        />
       )}
     </div>
   )
@@ -251,62 +320,225 @@ function RegStatusBar({
   const shortfall = m ? m.target_count - m.actual_count : 0
   const canTopUp = m !== null && shortfall > 0
   return (
-    <section className="rounded border border-slate-700 bg-slate-800/30 px-3 py-2 flex flex-wrap items-center gap-2 text-xs shrink-0">
-      <span className="text-slate-300">
-        reg 集存在：
-        <span className="font-mono text-emerald-300">{reg.image_count} 张</span>
-      </span>
-      {m && (
-        <>
-          <span className="text-slate-700">·</span>
-          <span className="text-slate-400">
-            target {m.actual_count}/{m.target_count}
-          </span>
-          <span className="text-slate-700">·</span>
-          <span className="text-slate-400">{m.api_source}</span>
-          <span className="text-slate-700">·</span>
-          <span className="text-slate-400">
-            auto-tag:{' '}
-            <span className={m.auto_tagged ? 'text-emerald-300' : 'text-slate-500'}>
-              {m.auto_tagged ? '✓' : '×'}
+    <section className="rounded border border-slate-700 bg-slate-800/30 px-3 py-2 flex flex-col gap-1 shrink-0">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-slate-300">
+          reg 集存在：
+          <span className="font-mono text-emerald-300">{reg.image_count} 张</span>
+        </span>
+        {m && (
+          <>
+            <span className="text-slate-700">·</span>
+            <span className="text-slate-400">
+              target {m.actual_count}/{m.target_count}
             </span>
-          </span>
-          <span className="text-slate-700">·</span>
-          <span className="text-slate-500">{ago}</span>
-          {m.failed_tags.length > 0 && (
-            <span
-              className="text-amber-300"
-              title={`搜索失败的 tag: ${m.failed_tags.join(', ')}`}
-            >
-              · {m.failed_tags.length} 失败 tag
+            <span className="text-slate-700">·</span>
+            <span className="text-slate-400">{m.api_source}</span>
+            <span className="text-slate-700">·</span>
+            <span className="text-slate-400">
+              auto-tag:{' '}
+              <span className={m.auto_tagged ? 'text-emerald-300' : 'text-slate-500'}>
+                {m.auto_tagged ? '✓' : '×'}
+              </span>
             </span>
-          )}
-          {m.incremental_runs > 0 && (
-            <span className="text-slate-500" title="补足跑过的次数">
-              · 补足 ×{m.incremental_runs}
-            </span>
-          )}
-        </>
-      )}
-      <span className="flex-1" />
-      {canTopUp && (
+            <span className="text-slate-700">·</span>
+            <span className="text-slate-500">{ago}</span>
+            {m.failed_tags.length > 0 && (
+              <span
+                className="text-amber-300"
+                title={`搜索失败的 tag: ${m.failed_tags.join(', ')}`}
+              >
+                · {m.failed_tags.length} 失败 tag
+              </span>
+            )}
+            {m.incremental_runs > 0 && (
+              <span className="text-slate-500" title="补足跑过的次数">
+                · 补足 ×{m.incremental_runs}
+              </span>
+            )}
+          </>
+        )}
+        <span className="flex-1" />
+        {canTopUp && (
+          <button
+            onClick={onTopUp}
+            disabled={disabled}
+            className="px-2 py-0.5 rounded text-xs bg-cyan-700/50 hover:bg-cyan-600/60 text-cyan-100 disabled:opacity-40"
+            title={`保留已下 ${m!.actual_count} 张，补足 ${shortfall} 张`}
+          >
+            补足 +{shortfall}
+          </button>
+        )}
         <button
-          onClick={onTopUp}
+          onClick={onDelete}
           disabled={disabled}
-          className="px-2 py-0.5 rounded text-xs bg-cyan-700/50 hover:bg-cyan-600/60 text-cyan-100 disabled:opacity-40"
-          title={`保留已下 ${m!.actual_count} 张，补足 ${shortfall} 张`}
+          className="px-2 py-0.5 rounded text-xs bg-red-800/40 hover:bg-red-800/60 text-red-200 disabled:opacity-40"
         >
-          补足 +{shortfall}
+          清空
         </button>
+      </div>
+
+      {m && (
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+          <span>分辨率聚类：</span>
+          {m.postprocess_clusters !== null ? (
+            <span
+              className="text-slate-300"
+              title={`方法 ${m.postprocess_method}，max_crop ${m.postprocess_max_crop_ratio}`}
+            >
+              {m.postprocess_clusters} 类（{m.postprocess_method},{' '}
+              max_crop {m.postprocess_max_crop_ratio}）
+            </span>
+          ) : (
+            <span
+              className="text-slate-600"
+              title="分辨率差异过大或未启用 — 训练靠 bucketing 处理"
+            >
+              未聚类
+            </span>
+          )}
+        </div>
       )}
-      <button
-        onClick={onDelete}
-        disabled={disabled}
-        className="px-2 py-0.5 rounded text-xs bg-red-800/40 hover:bg-red-800/60 text-red-200 disabled:opacity-40"
-      >
-        清空
-      </button>
     </section>
+  )
+}
+
+function AdvancedPanel({
+  value,
+  onChange,
+}: {
+  value: AdvancedParams
+  onChange: (v: AdvancedParams) => void
+}) {
+  const set = <K extends keyof AdvancedParams>(k: K, v: AdvancedParams[K]) =>
+    onChange({ ...value, [k]: v })
+  return (
+    <div className="rounded border border-slate-700 bg-slate-900/50 p-3 flex flex-col gap-3 text-xs">
+      <p className="text-[10px] text-slate-500">
+        默认值与原脚本一致；不熟悉就保持默认
+      </p>
+
+      {/* 选图 */}
+      <Group label="选图">
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={value.skip_similar}
+            onChange={(e) => set('skip_similar', e.target.checked)}
+          />
+          <span
+            className="text-slate-300"
+            title="候选只取偶数索引，避免相邻相似图（默认 ✓）"
+          >
+            skip_similar
+          </span>
+        </label>
+      </Group>
+
+      {/* 长宽比过滤 */}
+      <Group label="长宽比过滤">
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={value.aspect_ratio_filter_enabled}
+            onChange={(e) => set('aspect_ratio_filter_enabled', e.target.checked)}
+          />
+          <span className="text-slate-300">启用</span>
+        </label>
+        {value.aspect_ratio_filter_enabled && (
+          <>
+            <label className="flex items-center gap-1">
+              <span className="text-slate-500">min</span>
+              <input
+                type="number"
+                min={0.1}
+                max={1}
+                step={0.05}
+                value={value.min_aspect_ratio}
+                onChange={(e) =>
+                  set(
+                    'min_aspect_ratio',
+                    Math.max(0.1, Math.min(1, Number(e.target.value) || 0.5))
+                  )
+                }
+                className="w-16 px-1 py-0.5 rounded bg-slate-950 border border-slate-700"
+              />
+            </label>
+            <label className="flex items-center gap-1">
+              <span className="text-slate-500">max</span>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                step={0.1}
+                value={value.max_aspect_ratio}
+                onChange={(e) =>
+                  set(
+                    'max_aspect_ratio',
+                    Math.max(1, Math.min(10, Number(e.target.value) || 2))
+                  )
+                }
+                className="w-16 px-1 py-0.5 rounded bg-slate-950 border border-slate-700"
+              />
+            </label>
+            <span className="text-[10px] text-slate-500">
+              过滤极端长宽比图（例：0.5–2.0 = 1:2 到 2:1）
+            </span>
+          </>
+        )}
+      </Group>
+
+      {/* 后处理 */}
+      <Group label="后处理">
+        <span className="text-slate-500">方法</span>
+        <select
+          value={value.postprocess_method}
+          onChange={(e) =>
+            set('postprocess_method', e.target.value as 'smart' | 'stretch' | 'crop')
+          }
+          className="px-1 py-0.5 rounded bg-slate-950 border border-slate-700"
+        >
+          <option value="smart">smart（缩放+居中裁，推荐）</option>
+          <option value="stretch">stretch（拉伸，可能变形）</option>
+          <option value="crop">crop（先裁后缩）</option>
+        </select>
+        <label className="flex items-center gap-1">
+          <span className="text-slate-500">max_crop</span>
+          <input
+            type="number"
+            min={0.05}
+            max={0.5}
+            step={0.05}
+            value={value.postprocess_max_crop_ratio}
+            onChange={(e) =>
+              set(
+                'postprocess_max_crop_ratio',
+                Math.max(0.05, Math.min(0.5, Number(e.target.value) || 0.1))
+              )
+            }
+            className="w-16 px-1 py-0.5 rounded bg-slate-950 border border-slate-700"
+            title="单聚类内最大允许裁剪比例（默认 0.1 = 10%）"
+          />
+        </label>
+      </Group>
+    </div>
+  )
+}
+
+function Group({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex items-baseline gap-3">
+      <span className="text-[10px] text-slate-500 w-20 shrink-0 uppercase tracking-wide">
+        {label}
+      </span>
+      <div className="flex flex-wrap items-center gap-3 flex-1">{children}</div>
+    </div>
   )
 }
 
@@ -359,40 +591,56 @@ function RegPreview({
   pid,
   vid,
   reg,
+  onPick,
 }: {
   pid: number
   vid: number
   reg: RegStatus
+  onPick: (idx: number) => void
 }) {
-  // reg.files 是相对 reg/1_general/ 的路径，可能含子文件夹（镜像 train）
+  // reg.files 是相对 reg/ 的路径（含子文件夹镜像 train，例如 "5_concept/2001.png"）
   const items = useMemo(
     () =>
       reg.files.map((rel) => {
-        // rel 形如 "1_data/2001.png" 或 "2001.png"
         const idx = rel.lastIndexOf('/')
         const folder = idx >= 0 ? rel.slice(0, idx) : ''
         const name = idx >= 0 ? rel.slice(idx + 1) : rel
-        const folderForUrl = folder ? `1_general/${folder}` : '1_general'
         return {
           name: rel,
-          thumbUrl: api.versionThumbUrl(pid, vid, 'reg', name, folderForUrl),
+          thumbUrl: api.versionThumbUrl(pid, vid, 'reg', name, folder),
         }
       }),
     [reg.files, pid, vid]
   )
+  const indexByName = useMemo(() => {
+    const m = new Map<string, number>()
+    items.forEach((it, i) => m.set(it.name, i))
+    return m
+  }, [items])
   return (
     <section className="rounded-lg border border-slate-700 bg-slate-800/20 p-2 flex-1 min-h-0 overflow-y-auto">
       <p className="text-[11px] text-slate-500 px-1 pb-1">
-        reg/1_general/（共 {reg.image_count} 张）
+        reg/（共 {reg.image_count} 张）— 点击查看大图 + caption
       </p>
       <ImageGrid
         items={items}
         selected={new Set()}
-        onSelect={() => {}}
+        onSelect={(name) => {
+          const i = indexByName.get(name)
+          if (i !== undefined) onPick(i)
+        }}
         ariaLabel="reg-preview"
       />
     </section>
   )
+}
+
+function regOrigUrl(pid: number, vid: number, rel: string): string {
+  const idx = rel.lastIndexOf('/')
+  const folder = idx >= 0 ? rel.slice(0, idx) : ''
+  const name = idx >= 0 ? rel.slice(idx + 1) : rel
+  // 768px 预览（与 PP3 alt-hover 同尺寸）
+  return api.versionThumbUrl(pid, vid, 'reg', name, folder, 768)
 }
 
 function formatAgo(unix: number): string {

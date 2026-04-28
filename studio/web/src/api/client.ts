@@ -57,6 +57,7 @@ export interface GelbooruConfig {
 export interface DanbooruConfig {
   username: string
   api_key: string
+  account_type: 'free' | 'gold' | 'platinum'
 }
 
 export interface DownloadGlobalConfig {
@@ -281,6 +282,11 @@ export interface RegMeta {
   train_tag_distribution: Record<string, number>
   auto_tagged: boolean
   incremental_runs: number
+  // PP5.5 — 后处理摘要（postprocessed_at 为 null 表示未跑或 K 找不到）
+  postprocessed_at: number | null
+  postprocess_clusters: number | null
+  postprocess_method: string | null
+  postprocess_max_crop_ratio: number | null
 }
 
 export interface RegStatus {
@@ -296,11 +302,17 @@ export interface RegTagCount {
 }
 
 export interface RegBuildRequest {
-  target_count?: number | null
   excluded_tags?: string[]
   auto_tag?: boolean
   api_source?: 'gelbooru' | 'danbooru'
   incremental?: boolean
+  // PP5.5 进阶
+  skip_similar?: boolean
+  aspect_ratio_filter_enabled?: boolean
+  min_aspect_ratio?: number
+  max_aspect_ratio?: number
+  postprocess_method?: 'smart' | 'stretch' | 'crop'
+  postprocess_max_crop_ratio?: number
 }
 
 export type TaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'canceled'
@@ -639,6 +651,10 @@ export const api = {
     req<{ deleted: boolean; reason?: string }>(
       `/api/projects/${pid}/versions/${vid}/reg`,
       { method: 'DELETE' }
+    ),
+  getRegCaption: (pid: number, vid: number, path: string) =>
+    req<{ path: string; tags: string[] }>(
+      `/api/projects/${pid}/versions/${vid}/reg/caption?path=${encodeURIComponent(path)}`
     ),
 
   // Curation (PP3) -------------------------------------------------------

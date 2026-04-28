@@ -164,8 +164,8 @@ def test_stats_for_version_counts_train_and_reg(isolated) -> None:
     (vdir / "train" / "5_concept").mkdir(parents=True)
     (vdir / "train" / "5_concept" / "a.png").write_bytes(b"x")
     (vdir / "train" / "5_concept" / "b.png").write_bytes(b"x")
-    (vdir / "reg" / "1_general").mkdir(parents=True)
-    (vdir / "reg" / "1_general" / "r.png").write_bytes(b"x")
+    (vdir / "reg" / "1_data").mkdir(parents=True)
+    (vdir / "reg" / "1_data" / "r.png").write_bytes(b"x")
     stats = versions.stats_for_version(p, v)
     assert stats["train_image_count"] == 2
     assert stats["reg_image_count"] == 1

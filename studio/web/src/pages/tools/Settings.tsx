@@ -20,7 +20,7 @@ const EMPTY: Secrets = {
     convert_to_png: true,
     remove_alpha_channel: false,
   },
-  danbooru: { username: '', api_key: '' },
+  danbooru: { username: '', api_key: '', account_type: 'free' },
   download: { exclude_tags: [] },
   huggingface: { token: '' },
   joycaption: {
@@ -169,6 +169,23 @@ export default function SettingsPage() {
             serverValue={server?.danbooru.api_key ?? ''}
             onChange={(v) => update('danbooru', 'api_key', v)}
           />
+        </Field>
+        <Field label="account_type">
+          <select
+            value={draft.danbooru.account_type}
+            onChange={(e) =>
+              update(
+                'danbooru',
+                'account_type',
+                e.target.value as 'free' | 'gold' | 'platinum'
+              )
+            }
+            className={textInput}
+          >
+            <option value="free">free（max 2 tag）</option>
+            <option value="gold">gold（max 6 tag）</option>
+            <option value="platinum">platinum（max 12 tag）</option>
+          </select>
         </Field>
       </Section>
 

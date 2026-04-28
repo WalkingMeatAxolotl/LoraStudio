@@ -1014,19 +1014,24 @@ def batch_caption_endpoint(
 # ---------------------------------------------------------------------------
 
 
-REG_DEFAULT_FOLDER = "1_general"
-
-
 class RegBuildRequest(BaseModel):
-    target_count: Optional[int] = None
+    # 目标数量永远 = train 总数（与源脚本一致），UI 不暴露
     excluded_tags: list[str] = []
     auto_tag: bool = True
     api_source: str = "gelbooru"
     incremental: bool = False  # PP5.1：补足 — 不清空已有图，只补缺口
+    # PP5.5 进阶配置（默认值与源脚本一致）
+    skip_similar: bool = True
+    aspect_ratio_filter_enabled: bool = False
+    min_aspect_ratio: float = 0.5
+    max_aspect_ratio: float = 2.0
+    postprocess_method: str = "smart"  # smart | stretch | crop
+    postprocess_max_crop_ratio: float = 0.1
 
 
 def _reg_dir(vdir: Path) -> Path:
-    return vdir / "reg" / REG_DEFAULT_FOLDER
+    """reg 根目录 — 子目录直接镜像 train 子文件夹（与源脚本一致，无 1_general 中间层）。"""
+    return vdir / "reg"
 
 
 @app.get("/api/projects/{pid}/versions/{vid}/reg/preview-tags")
@@ -1070,8 +1075,14 @@ def get_reg_status(pid: int, vid: int) -> dict[str, Any]:
 def start_reg_build(pid: int, vid: int, body: RegBuildRequest) -> dict[str, Any]:
     if body.api_source not in {"gelbooru", "danbooru"}:
         raise HTTPException(400, "api_source must be gelbooru|danbooru")
-    if body.target_count is not None and body.target_count <= 0:
-        raise HTTPException(400, "target_count must be > 0 or null")
+    if body.postprocess_method not in {"smart", "stretch", "crop"}:
+        raise HTTPException(400, "postprocess_method must be smart|stretch|crop")
+    if not (0.05 <= body.postprocess_max_crop_ratio <= 0.5):
+        raise HTTPException(400, "postprocess_max_crop_ratio must be 0.05–0.5")
+    if body.aspect_ratio_filter_enabled and not (
+        0.0 < body.min_aspect_ratio < body.max_aspect_ratio
+    ):
+        raise HTTPException(400, "min_aspect_ratio must be < max_aspect_ratio (both > 0)")
     _, v, vdir = _version_dir_or_404(pid, vid)
     train = vdir / "train"
     has_image = train.exists() and any(
@@ -1089,11 +1100,16 @@ def start_reg_build(pid: int, vid: int, body: RegBuildRequest) -> dict[str, Any]
             kind="reg_build",
             params={
                 "version_id": vid,
-                "target_count": body.target_count,
                 "excluded_tags": list(body.excluded_tags),
                 "auto_tag": bool(body.auto_tag),
                 "api_source": body.api_source,
                 "incremental": bool(body.incremental),
+                "skip_similar": bool(body.skip_similar),
+                "aspect_ratio_filter_enabled": bool(body.aspect_ratio_filter_enabled),
+                "min_aspect_ratio": float(body.min_aspect_ratio),
+                "max_aspect_ratio": float(body.max_aspect_ratio),
+                "postprocess_method": body.postprocess_method,
+                "postprocess_max_crop_ratio": float(body.postprocess_max_crop_ratio),
             },
         )
         if v["stage"] in ("curating", "tagging"):
@@ -1103,16 +1119,47 @@ def start_reg_build(pid: int, vid: int, body: RegBuildRequest) -> dict[str, Any]
     return job
 
 
+@app.get("/api/projects/{pid}/versions/{vid}/reg/caption")
+def get_reg_caption(pid: int, vid: int, path: str) -> dict[str, Any]:
+    """读 reg 集中单张图的 caption。`path` 是相对 reg/ 的路径（含子文件夹）。"""
+    if not path or ".." in path or path.startswith("/") or path.startswith("\\"):
+        raise HTTPException(400, "invalid path")
+    _, _, vdir = _version_dir_or_404(pid, vid)
+    rdir = _reg_dir(vdir)
+    img = (rdir / path).resolve()
+    try:
+        img.relative_to(rdir.resolve())
+    except ValueError:
+        raise HTTPException(400, "path outside reg dir")
+    if not img.exists() or img.suffix.lower() not in datasets.IMAGE_EXTS:
+        raise HTTPException(404, "image not found")
+    return {"path": path, "tags": tagedit.read_tags(img)}
+
+
 @app.delete("/api/projects/{pid}/versions/{vid}/reg")
 def delete_reg(pid: int, vid: int) -> dict[str, Any]:
-    """清空 reg/1_general/（含 meta.json 和所有图片）。"""
+    """清空 reg/ 内容（含 meta.json + 所有子文件夹），保留空目录本身。
+
+    `versions.create_version` 总会建空 reg/；判定「存在」= 有 meta 或图片。
+    """
     import shutil as _shutil
     _, _, vdir = _version_dir_or_404(pid, vid)
     rdir = _reg_dir(vdir)
-    if not rdir.exists():
-        return {"deleted": False, "reason": "reg dir not exist"}
+    has_content = rdir.exists() and (
+        (rdir / "meta.json").exists()
+        or any(
+            f.is_file() and f.suffix.lower() in datasets.IMAGE_EXTS
+            for f in rdir.rglob("*")
+        )
+    )
+    if not has_content:
+        return {"deleted": False, "reason": "reg empty"}
     try:
-        _shutil.rmtree(rdir)
+        for child in rdir.iterdir():
+            if child.is_dir():
+                _shutil.rmtree(child)
+            else:
+                child.unlink()
     except OSError as exc:
         raise HTTPException(500, f"删除失败: {exc}") from exc
     return {"deleted": True}

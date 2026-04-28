@@ -8,12 +8,11 @@
 
 - 把 `regex_dataset_builder.py` **完整库化**为 `studio/services/reg_builder.py`，逻辑一字不改
 - 基于 train 的 tag 分布，从 booru 拉一组「相似但不同」的图作正则集
-- 落到 `versions/{label}/reg/1_general/{train-子文件夹镜像}/`，附 `meta.json`
+- 落到 `versions/{label}/reg/{train-子文件夹镜像}/`，meta.json 在 reg/ 根目录（与源脚本一致，不加 1_general 中间层）
 - 前端 ⑤ 正则集页：参数 + 进度 + meta + 结果预览
 - auto_tag 拉完后内联跑 WD14 给 reg 集打标（默认勾选）
 
 **不在 PP5 范围**：
-- ❌ 分辨率 K-means 聚类后处理（按裁剪比例统一分辨率）→ 移到 **PP5.5**
 - ❌ Danbooru Gold/Platinum 账户类型 UI 暴露（脚本逻辑保留，secrets 已支持）
 
 **PP5.1 — 补足（incremental）**：✅ 已完成
@@ -22,6 +21,41 @@
 - `RegMeta.incremental_runs` 记录补足次数（每次 +1）
 - 端点 `RegBuildRequest.incremental: bool`；前端状态条 `actual_count < target_count` 时多一个「补足 +N」按钮（cyan）
 - 已有图 ≥ target → 不调 booru，直接 no-op 写 meta
+
+**PP5.5 — 分辨率聚类后处理 + 进阶配置 + 路径修正**：✅ 已完成
+
+库化：
+- `studio/services/reg_postprocess.py` — 源脚本的 K-means + cluster merge + smart resize 全套
+- 嵌进 `reg_build_worker`，build 之后、auto_tag 之前自动跑
+
+关键约定：
+- inplace=True 永远（不备份，PP5.5 决议）
+- 找不到满足 max_crop 的 K → 保持原样不动文件，meta.postprocess_clusters=null
+- 失败（PIL / sklearn 异常）catch，不影响 auto_tag
+- 与源脚本日志对齐：每个 cluster 输出目标分辨率 / 平均分辨率 / 长宽比范围 / 最大裁剪比例 / 分辨率范围
+
+`RegMeta` 加：`postprocessed_at` / `postprocess_clusters` / `postprocess_method` / `postprocess_max_crop_ratio`
+
+**路径修正（与源脚本对齐）**：
+- 删除 `1_general/` 中间层；reg 子文件夹直接镜像 train（`reg/{train-子文件夹名}/{post_id}.png`）
+- meta.json 在 reg/ 根目录
+- DELETE 端点改为「清空内容保留空目录」，因 `versions.create_version` 已自动建空 reg/
+
+**进阶配置（UI 暴露）**：
+- 折叠的「⌄ 进阶」面板包含：
+  - `batch_size`（默认 5）
+  - `skip_similar`（默认 ✓）
+  - `aspect_ratio_filter_enabled` + `min_aspect_ratio` / `max_aspect_ratio`（默认 0.5/2.0）
+  - `postprocess_method`（smart/stretch/crop，默认 smart）
+  - `postprocess_max_crop_ratio`（0.05–0.5，默认 0.1）
+- 端点 `RegBuildRequest` 同步加 7 个字段，验证 method 枚举 + max_crop 范围 + min<max
+- worker 拉到 params 后写进 `RegBuildOptions` + 传给 `_run_postprocess`
+
+**Settings 加 `secrets.danbooru.account_type`**（free/gold/platinum）→ 决定 max_search_tags 上限（free=2 / gold=6 / platinum=12；gelbooru 永远 20）
+
+**预览 modal**：缩略图点击 → `ImagePreviewModal` 全屏图 + caption（拉自 `GET /reg/caption?path=...`），← → 切换上下张
+
+依赖：`scikit-learn>=1.3.0`（已加 requirements.txt）
 
 ## 关键约定
 
@@ -41,8 +75,8 @@
 - **80% 达成率算成功**（与源脚本一致）
 - 自动黑名单：把 `based_on_version`（version label）加入临时 blacklist，防同人画师互撞
 - 跨版本去重：`collect_source_image_ids` 把 train 文件 stem 作为 ID 集合，下载时 skip
-- 默认 reg 写到 `1_general/`（repeat=1 与 train 的 5_concept 形成对比）
-- 子文件夹镜像 train：train/`5_concept` → reg/1_general/`5_concept`
+- reg 子文件夹镜像 train：train/`5_concept` → reg/`5_concept`（repeat 跟 train 一致；trainer 支持 repeat>1）
+- **目标数量永远 = train 总图数**（与源脚本 `total_target_count = structure["total_images"]` 一致；UI 不暴露字段）
 
 ## 后端
 
@@ -133,7 +167,8 @@ class RegBuildRequest(BaseModel):
 
 @app.post("/api/projects/{pid}/versions/{vid}/reg/build")    # 启 job，推 stage=regularizing
 @app.get("/api/projects/{pid}/versions/{vid}/reg")           # meta + image_count + files
-@app.delete("/api/projects/{pid}/versions/{vid}/reg")        # rmtree(reg/1_general)
+@app.delete("/api/projects/{pid}/versions/{vid}/reg")        # 清空 reg/ 内容（保留空目录）
+@app.get("/api/projects/{pid}/versions/{vid}/reg/caption?path=...")  # 读单图 caption（预览 modal 用）
 @app.get("/api/projects/{pid}/versions/{vid}/reg/preview-tags?top=N")  # 仅扫 train，不真生成
 ```
 
@@ -141,7 +176,7 @@ class RegBuildRequest(BaseModel):
 
 `stats_for_version` 返回值新增：
 - `reg_image_count: int`（递归扫 reg/）
-- `reg_meta_exists: bool`（reg/1_general/meta.json 存在性）
+- `reg_meta_exists: bool`（reg/meta.json 存在性）
 
 Stepper ⑤ 派生：`reg_meta_exists && reg_image_count > 0` → done。
 
@@ -164,7 +199,7 @@ Stepper ⑤ 派生：`reg_meta_exists && reg_image_count > 0` → done。
 ├──────────────────────────────────────────────────────┤
 │ ─ JobProgress ─（live SSE 日志 + 取消按钮）         │
 ├──────────────────────────────────────────────────────┤
-│ ─ 结果预览 ─（reg/1_general/ 缩略图，复用 ImageGrid）│
+│ ─ 结果预览 ─（reg/ 缩略图复用 ImageGrid，点击 → 全屏 modal + caption）│
 └──────────────────────────────────────────────────────┘
 ```
 

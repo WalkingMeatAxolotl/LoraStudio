@@ -268,7 +268,7 @@ def test_build_writes_meta_and_images(tmp_path: Path, fake_booru) -> None:
             ("101", ["1girl", "blue_hair"]),
         ],
     })
-    out = tmp_path / "reg" / "1_general"
+    out = tmp_path / "reg"
 
     # search 返回 2 张候选（id 不在 train 里）
     fake_booru._search_results = [[_post(2001, "1girl solo blue_hair"), _post(2002, "1girl long_hair")]]
@@ -285,6 +285,140 @@ def test_build_writes_meta_and_images(tmp_path: Path, fake_booru) -> None:
     assert any(p.suffix == ".png" for p in out.rglob("*.png") if p.parent == out / "5_concept")
 
 
+def test_build_mirrors_train_subfolder_repeat_prefix(
+    tmp_path: Path, fake_booru
+) -> None:
+    """train 有 2_concept / 4_general → reg 镜像出同名同 repeat 子文件夹。"""
+    train = _make_train(tmp_path / "train", {
+        "2_concept": [
+            ("100", ["1girl", "solo"]),
+            ("101", ["1girl"]),
+        ],
+        "4_general": [
+            ("200", ["outdoor"]),
+        ],
+    })
+    out = tmp_path / "reg"
+
+    fake_booru._search_results = [
+        # 第一批：2_concept 的搜索
+        [_post(9001, "1girl solo"), _post(9002, "1girl long_hair")],
+        # 第二批：4_general 的搜索
+        [_post(9101, "outdoor sky")],
+    ] * 5
+    opts = _opts(train, out)
+    reg_builder.build(opts, on_progress=lambda _: None)
+
+    # 验证 repeat 前缀完全保留
+    assert (out / "2_concept").is_dir()
+    assert (out / "4_general").is_dir()
+    # 不存在「1_general」之类自创的目录
+    assert not (out / "1_general").exists()
+
+
+def test_build_skips_source_ids(tmp_path: Path, fake_booru) -> None:
+    """train 里有 id=2001 → reg 不应再下 2001。"""
+    train = _make_train(tmp_path / "train", {
+        "5_concept": [
+            ("2001", ["1girl"]),  # source 已有
+        ],
+    })
+    out = tmp_path / "reg"
+
+    fake_booru._search_results = [
+        [_post(2001, "1girl"), _post(3001, "1girl")],  # 2001 在 source 里，应跳
+    ]
+    opts = _opts(train, out, target_count=1, batch_size=1)
+    reg_builder.build(opts, on_progress=lambda _: None)
+    files = list((out / "5_concept").glob("*.png"))
+    names = {p.stem for p in files}
+    assert "2001" not in names
+    assert "3001" in names
+
+
+def test_build_failed_tags_accumulate(tmp_path: Path, fake_booru) -> None:
+    """单 tag 搜索失败 → 加入 failed_tags，meta 中体现。"""
+    train = _make_train(tmp_path / "train", {
+        "5_concept": [
+            ("1", ["unique_tag"]),
+        ],
+    })
+    out = tmp_path / "reg"
+
+    # 任何搜索都返回空 → 触发 failed_tags 累积 → 5 次连续失败退出
+    fake_booru._search_results = [[]] * 50
+    opts = _opts(train, out, target_count=1, batch_size=1, max_search_tags=1)
+    meta = reg_builder.build(opts, on_progress=lambda _: None)
+    assert meta.actual_count == 0
+    assert "unique_tag" in meta.failed_tags
+
+
+def test_build_respects_blacklist(tmp_path: Path, fake_booru) -> None:
+    train = _make_train(tmp_path / "train", {
+        "5_concept": [
+            ("1", ["1girl", "censored"]),
+        ],
+    })
+    out = tmp_path / "reg"
+
+    # 只有一个候选；它带黑名单 tag → 应被本地过滤掉
+    fake_booru._search_results = [[_post(5001, "1girl censored")]]
+    opts = _opts(
+        train, out, target_count=1, batch_size=1,
+        blacklist_tags=["censored"],
+    )
+    reg_builder.build(opts, on_progress=lambda _: None)
+    files = list((out / "5_concept").glob("*.png"))
+    assert files == []
+
+
+def test_build_auto_blacklists_version_name(tmp_path: Path, fake_booru) -> None:
+    train = _make_train(tmp_path / "train", {
+        "5_concept": [
+            ("1", ["1girl"]),
+        ],
+    })
+    out = tmp_path / "reg"
+
+    fake_booru._search_results = [[_post(5001, "1girl baseline_artist")]]
+    opts = _opts(
+        train, out, target_count=1, batch_size=1,
+        based_on_version="baseline_artist",
+    )
+    reg_builder.build(opts, on_progress=lambda _: None)
+    # 版本名（lower）应进 blacklist，候选被过滤
+    files = list((out / "5_concept").glob("*.png"))
+    assert files == []
+
+
+def test_build_cancel_event_exits_promptly(tmp_path: Path, fake_booru) -> None:
+    train = _make_train(tmp_path / "train", {
+        "5_concept": [
+            (str(i), ["1girl"]) for i in range(5)
+        ],
+    })
+    out = tmp_path / "reg"
+    fake_booru._search_results = [[_post(9000 + i, "1girl") for i in range(20)]] * 50
+
+    cancel = threading.Event()
+    cancel.set()  # 立刻取消
+    opts = _opts(train, out, target_count=5, batch_size=1)
+    meta = reg_builder.build(opts, on_progress=lambda _: None, cancel_event=cancel)
+    assert meta.actual_count == 0
+
+
+def test_preview_train_tag_distribution_returns_top_n(tmp_path: Path) -> None:
+    train = _make_train(tmp_path / "train", {
+        "5_concept": [
+            ("1", ["a", "b", "c"]),
+            ("2", ["a", "b"]),
+            ("3", ["a"]),
+        ],
+    })
+    top = reg_builder.preview_train_tag_distribution(train, top=2)
+    assert top == [("a", 3), ("b", 2)]
+
+
 def test_collect_existing_reg_per_subfolder(tmp_path: Path) -> None:
     out = tmp_path / "reg"
     (out / "5_concept").mkdir(parents=True)
@@ -295,6 +429,7 @@ def test_collect_existing_reg_per_subfolder(tmp_path: Path) -> None:
     pre = reg_builder.collect_existing_reg_per_subfolder(out)
     assert pre["5_concept"]["count"] == 2
     assert pre["5_concept"]["ids"] == {"100", "200"}
+    # 100 有 caption；200 没有 → tags 列表第一项 ['a','b']，第二项 []
     tag_lists = pre["5_concept"]["tags"]
     assert sorted(tag_lists, key=len, reverse=True)[0] == ["a", "b"]
     assert pre[""]["count"] == 1
@@ -309,7 +444,7 @@ def test_build_incremental_keeps_existing(tmp_path: Path, fake_booru) -> None:
             ("101", ["1girl"]),
         ],
     })
-    out = tmp_path / "reg" / "1_general"
+    out = tmp_path / "reg"
     # 预先放一张已有 reg 图（id=8000）
     (out / "5_concept").mkdir(parents=True)
     Image.new("RGB", (16, 16)).save(out / "5_concept" / "8000.png", "PNG")
@@ -342,119 +477,17 @@ def test_build_incremental_no_op_when_target_already_met(
     train = _make_train(tmp_path / "train", {
         "5_concept": [("1", ["x"])],
     })
-    out = tmp_path / "reg" / "1_general"
+    out = tmp_path / "reg"
     (out / "5_concept").mkdir(parents=True)
     Image.new("RGB", (16, 16)).save(out / "5_concept" / "5000.png", "PNG")
     (out / "5_concept" / "5000.txt").write_text("x", encoding="utf-8")
 
-    fake_booru._search_results = []
+    fake_booru._search_results = []  # 无候选；如果走到 booru 会失败
     opts = _opts(train, out, target_count=1, batch_size=1)
     meta = reg_builder.build(opts, on_progress=lambda _: None, incremental=True)
     assert meta.actual_count == 1
+    # 没新增图
     assert {p.name for p in (out / "5_concept").glob("*.png")} == {"5000.png"}
-
-
-def test_build_skips_source_ids(tmp_path: Path, fake_booru) -> None:
-    """train 里有 id=2001 → reg 不应再下 2001。"""
-    train = _make_train(tmp_path / "train", {
-        "5_concept": [
-            ("2001", ["1girl"]),  # source 已有
-        ],
-    })
-    out = tmp_path / "reg" / "1_general"
-
-    fake_booru._search_results = [
-        [_post(2001, "1girl"), _post(3001, "1girl")],  # 2001 在 source 里，应跳
-    ]
-    opts = _opts(train, out, target_count=1, batch_size=1)
-    reg_builder.build(opts, on_progress=lambda _: None)
-    files = list((out / "5_concept").glob("*.png"))
-    names = {p.stem for p in files}
-    assert "2001" not in names
-    assert "3001" in names
-
-
-def test_build_failed_tags_accumulate(tmp_path: Path, fake_booru) -> None:
-    """单 tag 搜索失败 → 加入 failed_tags，meta 中体现。"""
-    train = _make_train(tmp_path / "train", {
-        "5_concept": [
-            ("1", ["unique_tag"]),
-        ],
-    })
-    out = tmp_path / "reg" / "1_general"
-
-    # 任何搜索都返回空 → 触发 failed_tags 累积 → 5 次连续失败退出
-    fake_booru._search_results = [[]] * 50
-    opts = _opts(train, out, target_count=1, batch_size=1, max_search_tags=1)
-    meta = reg_builder.build(opts, on_progress=lambda _: None)
-    assert meta.actual_count == 0
-    assert "unique_tag" in meta.failed_tags
-
-
-def test_build_respects_blacklist(tmp_path: Path, fake_booru) -> None:
-    train = _make_train(tmp_path / "train", {
-        "5_concept": [
-            ("1", ["1girl", "censored"]),
-        ],
-    })
-    out = tmp_path / "reg" / "1_general"
-
-    # 只有一个候选；它带黑名单 tag → 应被本地过滤掉
-    fake_booru._search_results = [[_post(5001, "1girl censored")]]
-    opts = _opts(
-        train, out, target_count=1, batch_size=1,
-        blacklist_tags=["censored"],
-    )
-    reg_builder.build(opts, on_progress=lambda _: None)
-    files = list((out / "5_concept").glob("*.png"))
-    assert files == []
-
-
-def test_build_auto_blacklists_version_name(tmp_path: Path, fake_booru) -> None:
-    train = _make_train(tmp_path / "train", {
-        "5_concept": [
-            ("1", ["1girl"]),
-        ],
-    })
-    out = tmp_path / "reg" / "1_general"
-
-    fake_booru._search_results = [[_post(5001, "1girl baseline_artist")]]
-    opts = _opts(
-        train, out, target_count=1, batch_size=1,
-        based_on_version="baseline_artist",
-    )
-    reg_builder.build(opts, on_progress=lambda _: None)
-    # 版本名（lower）应进 blacklist，候选被过滤
-    files = list((out / "5_concept").glob("*.png"))
-    assert files == []
-
-
-def test_build_cancel_event_exits_promptly(tmp_path: Path, fake_booru) -> None:
-    train = _make_train(tmp_path / "train", {
-        "5_concept": [
-            (str(i), ["1girl"]) for i in range(5)
-        ],
-    })
-    out = tmp_path / "reg" / "1_general"
-    fake_booru._search_results = [[_post(9000 + i, "1girl") for i in range(20)]] * 50
-
-    cancel = threading.Event()
-    cancel.set()  # 立刻取消
-    opts = _opts(train, out, target_count=5, batch_size=1)
-    meta = reg_builder.build(opts, on_progress=lambda _: None, cancel_event=cancel)
-    assert meta.actual_count == 0
-
-
-def test_preview_train_tag_distribution_returns_top_n(tmp_path: Path) -> None:
-    train = _make_train(tmp_path / "train", {
-        "5_concept": [
-            ("1", ["a", "b", "c"]),
-            ("2", ["a", "b"]),
-            ("3", ["a"]),
-        ],
-    })
-    top = reg_builder.preview_train_tag_distribution(train, top=2)
-    assert top == [("a", 3), ("b", 2)]
 
 
 def test_meta_roundtrip(tmp_path: Path) -> None:

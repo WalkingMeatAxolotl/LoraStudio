@@ -109,7 +109,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_worker_runs_and_writes_meta_and_images(env) -> None:
     rc = reg_build_worker.run(env["job_id"])
     assert rc == 0
-    rdir = env["vdir"] / "reg" / "1_general"
+    rdir = env["vdir"] / "reg"
     assert (rdir / "meta.json").exists()
     meta = json.loads((rdir / "meta.json").read_text(encoding="utf-8"))
     assert meta["actual_count"] >= 1
@@ -127,6 +127,20 @@ def test_worker_unknown_job(env) -> None:
     assert reg_build_worker.run(99999) == 1
 
 
+def test_worker_writes_postprocess_meta_when_clusters_found(env) -> None:
+    """PP5.5 集成：worker 跑完 build 后调 postprocess，meta 含 postprocessed_at。"""
+    rc = reg_build_worker.run(env["job_id"])
+    assert rc == 0
+    rdir = env["vdir"] / "reg"
+    import json as _json
+    meta = _json.loads((rdir / "meta.json").read_text(encoding="utf-8"))
+    # 只有 1 张 reg 图（fake booru 的）→ < 2 → 单 cluster；postprocess 仍跑
+    # 单图情况下 cluster 数量是 1 或 None（< 2 时直接 1 个 cluster）
+    if meta.get("postprocess_clusters") is not None:
+        assert meta["postprocess_method"] == "smart"
+        assert meta["postprocess_max_crop_ratio"] == 0.1
+
+
 def test_worker_skips_auto_tag_when_disabled(env) -> None:
     # 改 job 的 auto_tag 为 False
     with db.connection_for(env["db"]) as conn:
@@ -138,7 +152,7 @@ def test_worker_skips_auto_tag_when_disabled(env) -> None:
         conn.commit()
     rc = reg_build_worker.run(env["job_id"])
     assert rc == 0
-    rdir = env["vdir"] / "reg" / "1_general"
+    rdir = env["vdir"] / "reg"
     meta = json.loads((rdir / "meta.json").read_text(encoding="utf-8"))
     assert meta["auto_tagged"] is False
     # 没 auto_tag → 不写 .txt

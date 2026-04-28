@@ -104,8 +104,8 @@ def test_get_reg_when_exists_returns_meta_and_files(
     with db.connection_for() as conn:
         proj = projects.get_project(conn, pid)
         v = versions.get_version(conn, vid)
-    rdir = versions.version_dir(proj["id"], proj["slug"], v["label"]) / "reg" / "1_general"
-    rdir.mkdir(parents=True)
+    rdir = versions.version_dir(proj["id"], proj["slug"], v["label"]) / "reg"
+    rdir.mkdir(parents=True, exist_ok=True)
     img = Image.new("RGB", (16, 16), (0, 0, 255))
     img.save(rdir / "100.png", "PNG")
     img.save(rdir / "200.png", "PNG")
@@ -147,19 +147,68 @@ def test_start_reg_build_creates_job(client: TestClient) -> None:
     })
     r = client.post(
         f"/api/projects/{pid}/versions/{vid}/reg/build",
-        json={"target_count": 10, "excluded_tags": ["character_x"], "auto_tag": False},
+        json={"excluded_tags": ["character_x"], "auto_tag": False},
     )
     assert r.status_code == 200, r.text
     job = r.json()
     assert job["kind"] == "reg_build"
     assert job["status"] == "pending"
     p_dict = json.loads(job["params"])
-    assert p_dict["target_count"] == 10
+    # 目标数量永远镜像 train 总数 — params 不再有 target_count
+    assert "target_count" not in p_dict
     assert p_dict["excluded_tags"] == ["character_x"]
     assert p_dict["auto_tag"] is False
+    # 默认进阶参数也透传
+    assert p_dict["skip_similar"] is True
+    assert p_dict["postprocess_method"] == "smart"
     # version stage 推到 regularizing
     v = client.get(f"/api/projects/{pid}/versions/{vid}").json()
     assert v["stage"] == "regularizing"
+
+
+def test_start_reg_build_passes_through_advanced_params(client: TestClient) -> None:
+    pid, vid = _make(client)
+    _seed_train(client, pid, vid, "5_concept", {"1.png": ["x"]})
+    r = client.post(
+        f"/api/projects/{pid}/versions/{vid}/reg/build",
+        json={
+            "auto_tag": False,
+            "skip_similar": False,
+            "aspect_ratio_filter_enabled": True,
+            "min_aspect_ratio": 0.6,
+            "max_aspect_ratio": 1.8,
+            "postprocess_method": "stretch",
+            "postprocess_max_crop_ratio": 0.2,
+        },
+    )
+    assert r.status_code == 200
+    p_dict = json.loads(r.json()["params"])
+    assert "batch_size" not in p_dict  # batch_size 不再暴露 / 不再写入 params
+    assert p_dict["skip_similar"] is False
+    assert p_dict["aspect_ratio_filter_enabled"] is True
+    assert p_dict["min_aspect_ratio"] == 0.6
+    assert p_dict["postprocess_method"] == "stretch"
+    assert p_dict["postprocess_max_crop_ratio"] == 0.2
+
+
+def test_start_reg_build_rejects_bad_postprocess_method(client: TestClient) -> None:
+    pid, vid = _make(client)
+    _seed_train(client, pid, vid, "5_concept", {"1.png": ["x"]})
+    r = client.post(
+        f"/api/projects/{pid}/versions/{vid}/reg/build",
+        json={"postprocess_method": "weird", "auto_tag": False},
+    )
+    assert r.status_code == 400
+
+
+def test_start_reg_build_rejects_bad_max_crop(client: TestClient) -> None:
+    pid, vid = _make(client)
+    _seed_train(client, pid, vid, "5_concept", {"1.png": ["x"]})
+    r = client.post(
+        f"/api/projects/{pid}/versions/{vid}/reg/build",
+        json={"postprocess_max_crop_ratio": 0.9, "auto_tag": False},
+    )
+    assert r.status_code == 400
 
 
 def test_start_reg_build_rejects_bad_api_source(client: TestClient) -> None:
@@ -184,39 +233,68 @@ def test_start_reg_build_passes_through_incremental(client: TestClient) -> None:
     assert p_dict["incremental"] is True
 
 
-def test_start_reg_build_rejects_negative_target(client: TestClient) -> None:
-    pid, vid = _make(client)
-    _seed_train(client, pid, vid, "5_concept", {"1.png": ["x"]})
-    r = client.post(
-        f"/api/projects/{pid}/versions/{vid}/reg/build",
-        json={"target_count": -5},
-    )
-    assert r.status_code == 400
-
-
 # ---------------------------------------------------------------------------
 # DELETE /reg
 # ---------------------------------------------------------------------------
 
 
-def test_delete_reg_removes_dir(client: TestClient) -> None:
+def test_delete_reg_removes_content(client: TestClient) -> None:
     pid, vid = _make(client)
     with db.connection_for() as conn:
         proj = projects.get_project(conn, pid)
         v = versions.get_version(conn, vid)
-    rdir = versions.version_dir(proj["id"], proj["slug"], v["label"]) / "reg" / "1_general"
-    rdir.mkdir(parents=True)
+    rdir = versions.version_dir(proj["id"], proj["slug"], v["label"]) / "reg"
+    rdir.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (8, 8)).save(rdir / "1.png", "PNG")
-    assert rdir.exists()
 
     r = client.delete(f"/api/projects/{pid}/versions/{vid}/reg")
     assert r.status_code == 200
     assert r.json()["deleted"] is True
-    assert not rdir.exists()
+    # 空目录保留
+    assert rdir.exists()
+    assert not (rdir / "1.png").exists()
 
 
-def test_delete_reg_when_not_exists(client: TestClient) -> None:
+def test_delete_reg_when_empty(client: TestClient) -> None:
+    """version_dir 已自动建空 reg/，无内容 → deleted=False。"""
     pid, vid = _make(client)
     r = client.delete(f"/api/projects/{pid}/versions/{vid}/reg")
     assert r.status_code == 200
     assert r.json()["deleted"] is False
+
+
+# ---------------------------------------------------------------------------
+# GET /reg/caption
+# ---------------------------------------------------------------------------
+
+
+def test_get_reg_caption_returns_tags(client: TestClient) -> None:
+    pid, vid = _make(client)
+    with db.connection_for() as conn:
+        proj = projects.get_project(conn, pid)
+        v = versions.get_version(conn, vid)
+    rdir = versions.version_dir(proj["id"], proj["slug"], v["label"]) / "reg" / "5_concept"
+    rdir.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (8, 8)).save(rdir / "100.png", "PNG")
+    (rdir / "100.txt").write_text("a, b, c", encoding="utf-8")
+    r = client.get(
+        f"/api/projects/{pid}/versions/{vid}/reg/caption?path=5_concept/100.png"
+    )
+    assert r.status_code == 200
+    assert r.json()["tags"] == ["a", "b", "c"]
+
+
+def test_get_reg_caption_rejects_path_traversal(client: TestClient) -> None:
+    pid, vid = _make(client)
+    r = client.get(
+        f"/api/projects/{pid}/versions/{vid}/reg/caption?path=../train/x.png"
+    )
+    assert r.status_code == 400
+
+
+def test_get_reg_caption_404_for_missing(client: TestClient) -> None:
+    pid, vid = _make(client)
+    r = client.get(
+        f"/api/projects/{pid}/versions/{vid}/reg/caption?path=ghost.png"
+    )
+    assert r.status_code == 404

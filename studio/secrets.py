@@ -34,6 +34,8 @@ class DanbooruConfig(BaseModel):
     """Danbooru 用 HTTP Basic auth：username + api_key（可匿名跑，但有速率限制）。"""
     username: str = ""
     api_key: str = ""
+    # 账户类型决定多 tag 搜索上限（free=2 / gold=6 / platinum=12）
+    account_type: str = "free"
 
 
 class HuggingFaceConfig(BaseModel):

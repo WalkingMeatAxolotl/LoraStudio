@@ -279,11 +279,11 @@ def stats_for_version(p: dict[str, Any], v: dict[str, Any]) -> dict[str, Any]:
     reg_total = 0
     reg_meta_exists = False
     if reg_dir.exists():
-        # reg/1_general/{train-subfolder}/{post_id}.png — 递归扫
+        # reg/{train-subfolder-mirror}/{post_id}.png — 递归扫（与源脚本一致）
         for f in reg_dir.rglob("*"):
             if f.is_file() and f.suffix.lower() in IMAGE_EXTS:
                 reg_total += 1
-        reg_meta_exists = (reg_dir / "1_general" / "meta.json").exists()
+        reg_meta_exists = (reg_dir / "meta.json").exists()
     output_dir = vdir / "output"
     has_output = output_dir.exists() and any(output_dir.iterdir())
     return {

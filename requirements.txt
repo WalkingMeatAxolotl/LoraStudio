@@ -41,6 +41,9 @@ requests>=2.31.0
 onnxruntime>=1.16.0
 huggingface_hub>=0.20.0
 
+# PP5.5 — 正则集分辨率聚类后处理（K-means + silhouette）
+scikit-learn>=1.3.0
+
 # Dev / tests (optional)
 # pytest>=8.0
 # httpx>=0.27   # required by FastAPI's TestClient
