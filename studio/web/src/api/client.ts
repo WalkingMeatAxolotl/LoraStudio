@@ -301,6 +301,14 @@ export interface RegTagCount {
   count: number
 }
 
+// PP6.2 — Train config (version 私有，独立于全局 preset 池)
+export interface VersionConfigResponse {
+  has_config: boolean
+  config: ConfigData | null
+  /** 服务端强制覆盖的项目特定字段（前端表单应 disabled 这些） */
+  project_specific_fields: string[]
+}
+
 export interface RegBuildRequest {
   excluded_tags?: string[]
   auto_tag?: boolean
@@ -655,6 +663,30 @@ export const api = {
   getRegCaption: (pid: number, vid: number, path: string) =>
     req<{ path: string; tags: string[] }>(
       `/api/projects/${pid}/versions/${vid}/reg/caption?path=${encodeURIComponent(path)}`
+    ),
+
+  // Train config (PP6.2) -------------------------------------------------
+  getVersionConfig: (pid: number, vid: number) =>
+    req<VersionConfigResponse>(`/api/projects/${pid}/versions/${vid}/config`),
+  putVersionConfig: (pid: number, vid: number, data: ConfigData) =>
+    req<{ has_config: true; config: ConfigData }>(
+      `/api/projects/${pid}/versions/${vid}/config`,
+      { method: 'PUT', body: JSON.stringify(data) }
+    ),
+  forkPresetForVersion: (pid: number, vid: number, name: string) =>
+    req<{ has_config: true; config: ConfigData; from_preset: string }>(
+      `/api/projects/${pid}/versions/${vid}/config/from_preset`,
+      { method: 'POST', body: JSON.stringify({ name }) }
+    ),
+  saveVersionConfigAsPreset: (
+    pid: number,
+    vid: number,
+    name: string,
+    overwrite = false
+  ) =>
+    req<{ saved_preset: string; config: ConfigData }>(
+      `/api/projects/${pid}/versions/${vid}/config/save_as_preset`,
+      { method: 'POST', body: JSON.stringify({ name, overwrite }) }
     ),
 
   // Curation (PP3) -------------------------------------------------------

@@ -42,7 +42,14 @@ from . import (
     versions,
 )
 from .event_bus import bus
-from .services import caption_snapshot, downloader, reg_builder, tagedit
+from .services import (
+    caption_snapshot,
+    downloader,
+    presets as preset_flow,
+    reg_builder,
+    tagedit,
+    version_config,
+)
 from .services.tagger import VALID_TAGGER_NAMES, get_tagger
 from .paths import (
     LEGACY_MONITOR_HTML,
@@ -1188,6 +1195,106 @@ def delete_reg(pid: int, vid: int) -> dict[str, Any]:
     except OSError as exc:
         raise HTTPException(500, f"删除失败: {exc}") from exc
     return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# /api/projects/{pid}/versions/{vid}/config  (PP6.2 训练配置 — version 私有)
+# ---------------------------------------------------------------------------
+
+
+class FromPresetRequest(BaseModel):
+    name: str  # 全局 preset 名
+
+
+class SaveAsPresetRequest(BaseModel):
+    name: str
+    overwrite: bool = False
+
+
+def _project_and_version_or_404(
+    pid: int, vid: int
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    with db.connection_for() as conn:
+        try:
+            return version_config.get_project_and_version(conn, pid, vid)
+        except version_config.VersionConfigError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/projects/{pid}/versions/{vid}/config")
+def get_version_config_endpoint(pid: int, vid: int) -> dict[str, Any]:
+    """读 version 私有 config；不存在返回 has_config=false / config=null。"""
+    project, ver = _project_and_version_or_404(pid, vid)
+    if not version_config.has_version_config(project, ver):
+        return {
+            "has_config": False,
+            "config": None,
+            "project_specific_fields": sorted(version_config.PROJECT_SPECIFIC_FIELDS),
+        }
+    try:
+        cfg = version_config.read_version_config(project, ver)
+    except version_config.VersionConfigError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {
+        "has_config": True,
+        "config": cfg,
+        "project_specific_fields": sorted(version_config.PROJECT_SPECIFIC_FIELDS),
+    }
+
+
+@app.put("/api/projects/{pid}/versions/{vid}/config")
+def put_version_config_endpoint(
+    pid: int, vid: int, body: dict[str, Any]
+) -> dict[str, Any]:
+    """直接写 version 私有 config（全量替换）。
+
+    项目特定字段（data_dir / output_dir / output_name 等）由服务端强制覆盖，
+    防止用户绕过前端 disabled 改路径。
+    """
+    project, ver = _project_and_version_or_404(pid, vid)
+    try:
+        version_config.write_version_config(
+            project, ver, body, force_project_overrides=True
+        )
+        cfg = version_config.read_version_config(project, ver)
+    except version_config.VersionConfigError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"has_config": True, "config": cfg}
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/config/from_preset")
+def fork_preset_for_version_endpoint(
+    pid: int, vid: int, body: FromPresetRequest
+) -> dict[str, Any]:
+    """从全局 preset 复制一份进 version 私有 config（应用项目特定字段）。"""
+    project, ver = _project_and_version_or_404(pid, vid)
+    try:
+        cfg = preset_flow.fork_preset_for_version(body.name, project, ver)
+    except presets_io.PresetError as exc:
+        raise HTTPException(_err_code(exc), str(exc)) from exc
+    except version_config.VersionConfigError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    # 同步 versions.config_name = 来源 preset 名（informational only）
+    with db.connection_for() as conn:
+        versions.update_version(conn, vid, config_name=body.name)
+    return {"has_config": True, "config": cfg, "from_preset": body.name}
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/config/save_as_preset")
+def save_version_config_as_preset_endpoint(
+    pid: int, vid: int, body: SaveAsPresetRequest
+) -> dict[str, Any]:
+    """version 私有 config → 全局 preset（清掉项目特定字段）。"""
+    project, ver = _project_and_version_or_404(pid, vid)
+    try:
+        cfg = preset_flow.save_version_config_as_preset(
+            project, ver, body.name, overwrite=body.overwrite
+        )
+    except presets_io.PresetError as exc:
+        raise HTTPException(_err_code(exc), str(exc)) from exc
+    except version_config.VersionConfigError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"saved_preset": body.name, "config": cfg}
 
 
 # version 级缩略图：bucket = train | reg | samples（PP3 加 train，reg/samples 留作 PP4-5）
