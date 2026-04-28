@@ -280,6 +280,7 @@ export interface RegMeta {
   failed_tags: string[]
   train_tag_distribution: Record<string, number>
   auto_tagged: boolean
+  incremental_runs: number
 }
 
 export interface RegStatus {
@@ -299,6 +300,7 @@ export interface RegBuildRequest {
   excluded_tags?: string[]
   auto_tag?: boolean
   api_source?: 'gelbooru' | 'danbooru'
+  incremental?: boolean
 }
 
 export type TaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'canceled'

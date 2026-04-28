@@ -103,6 +103,7 @@ class RegMeta:
     failed_tags: list[str]            # 搜索失败的 tag
     train_tag_distribution: dict[str, int]  # train tag 频率（top 50）
     auto_tagged: bool
+    incremental_runs: int = 0         # 补足跑了多少次（PP5.1）
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +255,38 @@ def collect_source_image_ids(source_path: Path) -> set[str]:
             continue
         ids.add(img.stem)
     return ids
+
+
+def collect_existing_reg_per_subfolder(
+    output_dir: Path,
+) -> dict[str, dict[str, Any]]:
+    """PP5.1 — 扫已存在 reg 图，按子文件夹聚合 (ids, tags, count)。
+
+    返回 {subfolder_name: {"ids": set[str], "tags": list[list[str]], "count": int}}
+    subfolder_name == "" 表示 output_dir 根。
+    """
+    out: dict[str, dict[str, Any]] = {}
+    if not output_dir.exists():
+        return out
+
+    def _ensure(key: str) -> dict[str, Any]:
+        if key not in out:
+            out[key] = {"ids": set(), "tags": [], "count": 0}
+        return out[key]
+
+    for img in output_dir.rglob("*"):
+        if not img.is_file():
+            continue
+        if img.suffix.lower() not in IMAGE_EXTS:
+            continue
+        rel = img.relative_to(output_dir)
+        # 子文件夹 = 路径第一段（如果存在）
+        sub_key = rel.parts[0] if len(rel.parts) > 1 else ""
+        bucket = _ensure(sub_key)
+        bucket["ids"].add(img.stem)
+        bucket["tags"].append(analyze_tags_in_file(img))
+        bucket["count"] += 1
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +495,7 @@ def _build_for_subfolder(
     total_downloaded_so_far: int,
     on_progress: ProgressFn,
     cancel_event: Optional[threading.Event],
+    pre_existing: Optional[dict[str, Any]] = None,  # PP5.1
 ) -> tuple[bool, int]:
     """单子文件夹批量循环。返回 (success_80%达成, 实际下载数)。"""
     label = subfolder_name or "<root>"
@@ -486,6 +520,22 @@ def _build_for_subfolder(
     downloaded_ids: set[str] = set()
     skipped = 0
     failed = 0
+
+    # PP5.1 — incremental：把已有图作为「已下载」计入起点 + 累加 current_weights
+    if pre_existing and pre_existing.get("count"):
+        existing_count = int(pre_existing["count"])
+        downloaded_count = min(existing_count, target_count)
+        for pid in pre_existing.get("ids") or set():
+            downloaded_ids.add(str(pid))
+        for tags in pre_existing.get("tags") or []:
+            for t in tags:
+                current_weights[t] += 1 / target_count
+        on_progress(
+            f"  [incremental] 沿用已有 {existing_count} 张（计入起点 {downloaded_count}/{target_count}）"
+        )
+        if downloaded_count >= target_count:
+            on_progress("  [incremental] 已有图已达目标，无需补足")
+            return True, downloaded_count
 
     batch_round = 0
     max_rounds = 50
@@ -754,6 +804,7 @@ def build(
     *,
     on_progress: ProgressFn = print,
     cancel_event: Optional[threading.Event] = None,
+    incremental: bool = False,
 ) -> RegMeta:
     """构建正则集主流程。返回 RegMeta（即使中途取消也尽量返回部分元数据）。
 
@@ -763,6 +814,10 @@ def build(
     3. 自动黑名单：把 based_on_version 标签化加入临时 blacklist（防同人画师）
     4. 各子文件夹按比例分配目标数量，循环 _build_for_subfolder
     5. 写 meta.json
+
+    PP5.1：`incremental=True` 时保留 output_dir 已有图作为「已下载」起点，
+    `current_weights` 从已有 caption 累加，仅补足缺口；旧 meta 的
+    `incremental_runs + 1` 写回。
     """
     on_progress(f"[reg] api={opts.api_source} train={opts.train_dir}")
 
@@ -806,6 +861,18 @@ def build(
     # 输出目录
     opts.output_dir.mkdir(parents=True, exist_ok=True)
 
+    # PP5.1 — incremental 时扫已有图
+    pre_existing_per_sub: dict[str, dict[str, Any]] = {}
+    prior_meta: Optional[RegMeta] = None
+    if incremental:
+        pre_existing_per_sub = collect_existing_reg_per_subfolder(opts.output_dir)
+        prior_meta = read_meta(opts.output_dir)
+        existing_total = sum(b["count"] for b in pre_existing_per_sub.values())
+        on_progress(
+            f"[reg] incremental 模式：已有 {existing_total} 张图、"
+            f"{len(pre_existing_per_sub)} 个子文件夹"
+        )
+
     target_resolution = structure.get("median_resolution")
     target_aspect_ratio = structure.get("median_aspect_ratio")
     resolution_std = structure.get("resolution_std")
@@ -831,6 +898,7 @@ def build(
                 total_downloaded_so_far=total_downloaded,
                 on_progress=on_progress,
                 cancel_event=cancel_event,
+                pre_existing=pre_existing_per_sub.get(sub_name),
             )
             if ok:
                 success_subfolder_count += 1
@@ -845,18 +913,30 @@ def build(
 
     # 写 meta
     top_dist = dict(structure["global_tag_freq"].most_common(50))
+    # incremental 时，failed_tags / source_tags / runs 都基于旧 meta 合并
+    if incremental and prior_meta is not None:
+        merged_failed = sorted(set(failed_tags) | set(prior_meta.failed_tags))
+        merged_source = sorted(set(source_tags_used) | set(prior_meta.source_tags))
+        merged_excluded = sorted(set(excluded) | set(prior_meta.excluded_tags))
+        runs = prior_meta.incremental_runs + 1
+    else:
+        merged_failed = sorted(failed_tags)
+        merged_source = sorted(source_tags_used)
+        merged_excluded = sorted(excluded)
+        runs = 0
     meta = RegMeta(
         generated_at=time.time(),
         based_on_version=opts.based_on_version,
         api_source=opts.api_source,
         target_count=total_target,
         actual_count=total_downloaded,
-        source_tags=sorted(source_tags_used),
-        excluded_tags=list(excluded),
+        source_tags=merged_source,
+        excluded_tags=list(merged_excluded),
         blacklist_tags=sorted(blacklist_tags),
-        failed_tags=sorted(failed_tags),
+        failed_tags=merged_failed,
         train_tag_distribution=top_dist,
         auto_tagged=False,  # worker 在 auto_tag 完成后改写
+        incremental_runs=runs,
     )
     write_meta(opts.output_dir, meta)
 

@@ -1022,6 +1022,7 @@ class RegBuildRequest(BaseModel):
     excluded_tags: list[str] = []
     auto_tag: bool = True
     api_source: str = "gelbooru"
+    incremental: bool = False  # PP5.1：补足 — 不清空已有图，只补缺口
 
 
 def _reg_dir(vdir: Path) -> Path:
@@ -1092,6 +1093,7 @@ def start_reg_build(pid: int, vid: int, body: RegBuildRequest) -> dict[str, Any]
                 "excluded_tags": list(body.excluded_tags),
                 "auto_tag": bool(body.auto_tag),
                 "api_source": body.api_source,
+                "incremental": bool(body.incremental),
             },
         )
         if v["stage"] in ("curating", "tagging"):

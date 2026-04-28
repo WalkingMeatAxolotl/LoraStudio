@@ -7,6 +7,7 @@
       "excluded_tags": [str, ...],
       "auto_tag": bool,
       "api_source": "gelbooru" | "danbooru",  # 可选，默认 gelbooru
+      "incremental": bool,                    # PP5.1，可选，默认 False
     }
 
 凭据从 `secrets.gelbooru` / `secrets.danbooru` 拉。
@@ -148,14 +149,18 @@ def run(job_id: int) -> int:
                 convert_to_png=sec.gelbooru.convert_to_png,
                 remove_alpha_channel=sec.gelbooru.remove_alpha_channel,
             )
+            incremental = bool(params.get("incremental", False))
             progress(
                 f"[start] version={v['label']} api={api_source} "
                 f"target={opts.target_count or '<train-total>'} "
-                f"auto_tag={opts.auto_tag}"
+                f"auto_tag={opts.auto_tag} incremental={incremental}"
             )
 
             meta = reg_builder.build(
-                opts, on_progress=progress, cancel_event=cancel_event
+                opts,
+                on_progress=progress,
+                cancel_event=cancel_event,
+                incremental=incremental,
             )
             progress(f"[reg-done] actual={meta.actual_count}/{meta.target_count}")
 

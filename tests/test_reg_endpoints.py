@@ -172,6 +172,18 @@ def test_start_reg_build_rejects_bad_api_source(client: TestClient) -> None:
     assert r.status_code == 400
 
 
+def test_start_reg_build_passes_through_incremental(client: TestClient) -> None:
+    pid, vid = _make(client)
+    _seed_train(client, pid, vid, "5_concept", {"1.png": ["x"]})
+    r = client.post(
+        f"/api/projects/{pid}/versions/{vid}/reg/build",
+        json={"incremental": True, "auto_tag": False},
+    )
+    assert r.status_code == 200
+    p_dict = json.loads(r.json()["params"])
+    assert p_dict["incremental"] is True
+
+
 def test_start_reg_build_rejects_negative_target(client: TestClient) -> None:
     pid, vid = _make(client)
     _seed_train(client, pid, vid, "5_concept", {"1.png": ["x"]})

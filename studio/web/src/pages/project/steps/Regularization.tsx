@@ -89,7 +89,7 @@ export default function RegularizationPage() {
     })
   }
 
-  const startBuild = async () => {
+  const startBuild = async (incremental = false) => {
     if (!vid) return
     if (trainImageCount <= 0) {
       toast('train 还没有图片，先去 ① 整理 / ② 下载', 'error')
@@ -100,12 +100,13 @@ export default function RegularizationPage() {
       excluded_tags: Array.from(excluded),
       auto_tag: autoTag,
       api_source: apiSource,
+      incremental,
     }
     try {
       const j = await api.startRegBuild(project.id, vid, body)
       setJob(j)
       setLogs([])
-      toast(`已入队 #${j.id}`, 'success')
+      toast(incremental ? `已入队补足 #${j.id}` : `已入队 #${j.id}`, 'success')
     } catch (e) {
       toast(String(e), 'error')
     }
@@ -138,7 +139,12 @@ export default function RegularizationPage() {
         </span>
       </header>
 
-      <RegStatusBar reg={reg} onDelete={onDelete} disabled={isLive} />
+      <RegStatusBar
+        reg={reg}
+        onDelete={onDelete}
+        onTopUp={() => void startBuild(true)}
+        disabled={isLive}
+      />
 
       <section className="rounded-lg border border-slate-700 bg-slate-800/40 p-3 flex flex-col gap-3 shrink-0">
         <div className="flex flex-wrap items-center gap-3 text-xs">
@@ -174,7 +180,7 @@ export default function RegularizationPage() {
           </label>
           <span className="flex-1" />
           <button
-            onClick={startBuild}
+            onClick={() => void startBuild(false)}
             disabled={isLive || trainImageCount <= 0}
             className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white disabled:bg-slate-700 disabled:text-slate-500"
           >
@@ -218,10 +224,12 @@ export default function RegularizationPage() {
 function RegStatusBar({
   reg,
   onDelete,
+  onTopUp,
   disabled,
 }: {
   reg: RegStatus | null
   onDelete: () => void
+  onTopUp: () => void
   disabled: boolean
 }) {
   if (!reg) {
@@ -240,6 +248,8 @@ function RegStatusBar({
   }
   const m = reg.meta
   const ago = m ? formatAgo(m.generated_at) : '?'
+  const shortfall = m ? m.target_count - m.actual_count : 0
+  const canTopUp = m !== null && shortfall > 0
   return (
     <section className="rounded border border-slate-700 bg-slate-800/30 px-3 py-2 flex flex-wrap items-center gap-2 text-xs shrink-0">
       <span className="text-slate-300">
@@ -271,9 +281,24 @@ function RegStatusBar({
               · {m.failed_tags.length} 失败 tag
             </span>
           )}
+          {m.incremental_runs > 0 && (
+            <span className="text-slate-500" title="补足跑过的次数">
+              · 补足 ×{m.incremental_runs}
+            </span>
+          )}
         </>
       )}
       <span className="flex-1" />
+      {canTopUp && (
+        <button
+          onClick={onTopUp}
+          disabled={disabled}
+          className="px-2 py-0.5 rounded text-xs bg-cyan-700/50 hover:bg-cyan-600/60 text-cyan-100 disabled:opacity-40"
+          title={`保留已下 ${m!.actual_count} 张，补足 ${shortfall} 张`}
+        >
+          补足 +{shortfall}
+        </button>
+      )}
       <button
         onClick={onDelete}
         disabled={disabled}

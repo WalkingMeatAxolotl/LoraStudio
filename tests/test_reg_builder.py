@@ -285,6 +285,75 @@ def test_build_writes_meta_and_images(tmp_path: Path, fake_booru) -> None:
     assert any(p.suffix == ".png" for p in out.rglob("*.png") if p.parent == out / "5_concept")
 
 
+def test_collect_existing_reg_per_subfolder(tmp_path: Path) -> None:
+    out = tmp_path / "reg"
+    (out / "5_concept").mkdir(parents=True)
+    Image.new("RGB", (16, 16)).save(out / "5_concept" / "100.png", "PNG")
+    (out / "5_concept" / "100.txt").write_text("a, b", encoding="utf-8")
+    Image.new("RGB", (16, 16)).save(out / "5_concept" / "200.png", "PNG")
+    Image.new("RGB", (16, 16)).save(out / "300.png", "PNG")  # 根目录
+    pre = reg_builder.collect_existing_reg_per_subfolder(out)
+    assert pre["5_concept"]["count"] == 2
+    assert pre["5_concept"]["ids"] == {"100", "200"}
+    tag_lists = pre["5_concept"]["tags"]
+    assert sorted(tag_lists, key=len, reverse=True)[0] == ["a", "b"]
+    assert pre[""]["count"] == 1
+    assert pre[""]["ids"] == {"300"}
+
+
+def test_build_incremental_keeps_existing(tmp_path: Path, fake_booru) -> None:
+    """PP5.1：已有 reg 图被计入起点，仅补差额。"""
+    train = _make_train(tmp_path / "train", {
+        "5_concept": [
+            ("100", ["1girl", "solo"]),
+            ("101", ["1girl"]),
+        ],
+    })
+    out = tmp_path / "reg" / "1_general"
+    # 预先放一张已有 reg 图（id=8000）
+    (out / "5_concept").mkdir(parents=True)
+    Image.new("RGB", (16, 16)).save(out / "5_concept" / "8000.png", "PNG")
+    (out / "5_concept" / "8000.txt").write_text("1girl, solo", encoding="utf-8")
+    # 写一份旧 meta 用来累积 incremental_runs
+    reg_builder.write_meta(out, reg_builder.RegMeta(
+        generated_at=1.0, based_on_version="x", api_source="gelbooru",
+        target_count=2, actual_count=1, source_tags=["solo"],
+        excluded_tags=[], blacklist_tags=[], failed_tags=["unique"],
+        train_tag_distribution={}, auto_tagged=False, incremental_runs=0,
+    ))
+
+    fake_booru._search_results = [[_post(9001, "1girl long_hair")]]
+    opts = _opts(train, out, target_count=2, batch_size=1)
+    meta = reg_builder.build(opts, on_progress=lambda _: None, incremental=True)
+
+    # 8000 仍在 + 9001 新下 = 2
+    assert (out / "5_concept" / "8000.png").exists()
+    assert (out / "5_concept" / "9001.png").exists()
+    # incremental_runs 累加
+    assert meta.incremental_runs == 1
+    # failed_tags 与旧 meta 合并
+    assert "unique" in meta.failed_tags
+
+
+def test_build_incremental_no_op_when_target_already_met(
+    tmp_path: Path, fake_booru
+) -> None:
+    """已有图 >= target → 直接返回，不调 booru。"""
+    train = _make_train(tmp_path / "train", {
+        "5_concept": [("1", ["x"])],
+    })
+    out = tmp_path / "reg" / "1_general"
+    (out / "5_concept").mkdir(parents=True)
+    Image.new("RGB", (16, 16)).save(out / "5_concept" / "5000.png", "PNG")
+    (out / "5_concept" / "5000.txt").write_text("x", encoding="utf-8")
+
+    fake_booru._search_results = []
+    opts = _opts(train, out, target_count=1, batch_size=1)
+    meta = reg_builder.build(opts, on_progress=lambda _: None, incremental=True)
+    assert meta.actual_count == 1
+    assert {p.name for p in (out / "5_concept").glob("*.png")} == {"5000.png"}
+
+
 def test_build_skips_source_ids(tmp_path: Path, fake_booru) -> None:
     """train 里有 id=2001 → reg 不应再下 2001。"""
     train = _make_train(tmp_path / "train", {

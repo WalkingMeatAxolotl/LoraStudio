@@ -14,8 +14,14 @@
 
 **不在 PP5 范围**：
 - ❌ 分辨率 K-means 聚类后处理（按裁剪比例统一分辨率）→ 移到 **PP5.5**
-- ❌ 「补足」增量再跑 → 移到 **PP5.1**
 - ❌ Danbooru Gold/Platinum 账户类型 UI 暴露（脚本逻辑保留，secrets 已支持）
+
+**PP5.1 — 补足（incremental）**：✅ 已完成
+- `reg_builder.build(opts, *, incremental=True)`：扫 `output_dir` 已有图作为「已下载」起点 → 仅补缺口
+- `current_weights` 累加已有图的 caption；`failed_tags` / `source_tags` / `excluded_tags` 与旧 meta 合并
+- `RegMeta.incremental_runs` 记录补足次数（每次 +1）
+- 端点 `RegBuildRequest.incremental: bool`；前端状态条 `actual_count < target_count` 时多一个「补足 +N」按钮（cyan）
+- 已有图 ≥ target → 不调 booru，直接 no-op 写 meta
 
 ## 关键约定
 
