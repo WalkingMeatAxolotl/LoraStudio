@@ -1,6 +1,6 @@
 # PP6 — 训练配置 + 入队
 
-**状态**：进行中（PP6.1 / PP6.2 已合，PP6.3 计划中）
+**状态**：✅ 已完成（PP6.1 / PP6.2 / PP6.3 全部合）
 **前置依赖**：PP5
 **收尾环节**：流水线最后一步，把 version 的所有产物绑成一个训练任务
 
@@ -9,8 +9,8 @@
 | 子片 | 状态 | 范围 |
 |---|---|---|
 | PP6.1 | ✅ 8578fa4 | per-task monitor — 删 HTTP server，state 文件路径 per-version；Queue 行 +「📊 监控」按钮；`/api/state?task_id=` |
-| PP6.2 | ✅（commit 待打）| Preset 双向流 — `services/version_config.py` 私有 config + `services/presets.py` fork/save_as + 4 个端点；项目特定字段服务端强制覆盖 |
-| PP6.3 | 计划中 | Train 页 UI + 入队端点 + Stepper ⑥ 派生 done + output_lora_path 回填 |
+| PP6.2 | ✅ ac4ac6a | Preset 双向流 — `services/version_config.py` 私有 config + `services/presets.py` fork/save_as + 4 个端点；项目特定字段服务端强制覆盖 |
+| PP6.3 | ✅（commit 待打）| Train 页 UI + 入队端点 (`POST /versions/{vid}/queue`) + db v4 (`tasks.config_path`) + supervisor 优先用 config_path + Stepper ⑥ 派生 done + 完成回填 `version.output_lora_path` + Queue 行「来源」列 |
 
 ## 目标
 

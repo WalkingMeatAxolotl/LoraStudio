@@ -71,6 +71,11 @@ function statusFor(
       return 'done'
     }
   }
+  // train 派生：output_lora_path 存在 → done；version.stage=training → active
+  if (step.key === 'train' && version) {
+    if (version.output_lora_path) return 'done'
+    if (version.stage === 'training') return 'active'
+  }
   return status
 }
 

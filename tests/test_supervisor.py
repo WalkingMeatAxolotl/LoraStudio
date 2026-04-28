@@ -242,6 +242,81 @@ def test_default_cmd_builder_includes_monitor_flag() -> None:
     assert cmd[i + 1] == "/tmp/x/state.json"
 
 
+def test_config_path_takes_priority(env, tmp_path) -> None:
+    """PP6.3：task.config_path 设了就用它，不再读 _configs_dir。"""
+    captured: dict[str, Any] = {}
+
+    explicit_cfg = tmp_path / "private" / "config.yaml"
+    explicit_cfg.parent.mkdir(parents=True)
+    explicit_cfg.write_text("epochs: 1\n", encoding="utf-8")
+
+    def capturing_cmd(task, cfg):
+        captured["cfg"] = str(cfg)
+        return [sys.executable, "-c", "import sys; sys.exit(0)"]
+
+    sup = Supervisor(
+        cmd_builder=capturing_cmd,
+        db_path=env["db"], logs_dir=env["logs"], configs_dir=env["configs"],
+        poll_interval=0.05,
+    )
+    with db.connection_for(env["db"]) as conn:
+        tid = db.create_task(conn, name="t", config_name="ignored")
+        db.update_task(conn, tid, config_path=str(explicit_cfg))
+
+    sup.start()
+    try:
+        assert _wait_for(
+            lambda: _task_status(env["db"], tid) == "done", timeout=10
+        )
+    finally:
+        sup.stop()
+
+    assert captured["cfg"] == str(explicit_cfg)
+
+
+def test_finalize_version_writes_output_lora_path(env, tmp_path, monkeypatch) -> None:
+    """PP6.3：训练 task 完成 → 推 version.output_lora_path + stage=done。"""
+    from studio import projects, versions
+
+    monkeypatch.setattr(projects, "PROJECTS_DIR", tmp_path / "projects")
+    monkeypatch.setattr(projects, "TRASH_DIR", tmp_path / "_trash")
+
+    # 建 project + version + 假 lora_final.safetensors
+    with db.connection_for(env["db"]) as conn:
+        p = projects.create_project(conn, title="P")
+        v = versions.create_version(conn, project_id=p["id"], label="baseline")
+    vdir = versions.version_dir(p["id"], p["slug"], "baseline")
+    out_lora = vdir / "output" / f"{p['slug']}_baseline_final.safetensors"
+    out_lora.parent.mkdir(parents=True, exist_ok=True)
+    out_lora.write_bytes(b"fake-safetensors")
+
+    # 用一个秒退 0 的假 cmd
+    sup = Supervisor(
+        cmd_builder=lambda *_: [sys.executable, "-c", "import sys; sys.exit(0)"],
+        db_path=env["db"], logs_dir=env["logs"], configs_dir=env["configs"],
+        poll_interval=0.05,
+    )
+    with db.connection_for(env["db"]) as conn:
+        tid = db.create_task(conn, name="t", config_name="fake")
+        db.update_task(
+            conn, tid, project_id=p["id"], version_id=v["id"]
+        )
+
+    sup.start()
+    try:
+        assert _wait_for(
+            lambda: _task_status(env["db"], tid) == "done", timeout=10
+        )
+    finally:
+        sup.stop()
+
+    # version 已推到 done + output_lora_path 回填
+    with db.connection_for(env["db"]) as conn:
+        v_after = versions.get_version(conn, v["id"])
+    assert v_after["stage"] == "done"
+    assert v_after["output_lora_path"] == str(out_lora)
+
+
 def _task_status(dbfile: Path, tid: int) -> str:
     with db.connection_for(dbfile) as conn:
         task = db.get_task(conn, tid)

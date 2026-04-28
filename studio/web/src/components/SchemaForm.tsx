@@ -7,13 +7,18 @@ interface Props {
   schema: SchemaResponse
   values: ConfigData
   onChange: (values: ConfigData) => void
+  /** 这些字段名将以 readonly / disabled 渲染（PP6.3：项目特定字段）。 */
+  disabledFields?: string[]
 }
 
 /**
  * 按 schema.groups 分区渲染表单；分组可折叠。
  * show_when 用 evalShowWhen 做条件显示，依赖当前 values。
  */
-export default function SchemaForm({ schema, values, onChange }: Props) {
+export default function SchemaForm({
+  schema, values, onChange, disabledFields,
+}: Props) {
+  const disabledSet = new Set(disabledFields ?? [])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const setField = (name: string, v: unknown) =>
     onChange({ ...values, [name]: v })
@@ -65,6 +70,7 @@ export default function SchemaForm({ schema, values, onChange }: Props) {
                       prop={prop}
                       value={values[name]}
                       onChange={(v) => setField(name, v)}
+                      disabled={disabledSet.has(name)}
                     />
                   )
                 })}

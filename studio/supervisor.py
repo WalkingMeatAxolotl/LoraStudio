@@ -50,6 +50,38 @@ def _default_cmd_builder(task: dict[str, Any], config_path: Path) -> list[str]:
     return cmd
 
 
+def _maybe_finalize_version(conn: Any, task_id: int) -> None:
+    """PP6.3：task 成功完成 → 找 version → 回填 output_lora_path + stage=done。
+
+    output_lora_path 推断：`versions/{label}/output/{output_name}_final.safetensors`
+    （anima_train 标准命名）。文件不存在不报错 — 有可能用户用别的命名规则。
+    project.stage 也推到 'done' 让 Stepper 反映。
+    """
+    from . import projects as _projects, versions as _versions
+    task_row = db.get_task(conn, task_id)
+    if not task_row:
+        return
+    vid = task_row.get("version_id")
+    pid = task_row.get("project_id")
+    if not (vid and pid):
+        return
+    v = _versions.get_version(conn, int(vid))
+    p = _projects.get_project(conn, int(pid))
+    if not v or not p:
+        return
+    # 推断 output_lora_path（与 anima_train 默认 `{output_name}_final.safetensors` 一致）
+    output_name = f"{p['slug']}_{v['label']}"
+    vdir = _versions.version_dir(int(pid), p["slug"], v["label"])
+    candidate = vdir / "output" / f"{output_name}_final.safetensors"
+    fields: dict[str, Any] = {"stage": "done"}
+    if candidate.exists():
+        fields["output_lora_path"] = str(candidate)
+    _versions.update_version(conn, int(vid), **fields)
+    # 项目也推到 done（用户视角整条链跑完了）
+    if p.get("stage") in ("training", "configured"):
+        _projects.advance_stage(conn, int(pid), "done")
+
+
 def _resolve_monitor_state_path(task: dict[str, Any]) -> Path:
     """PP6.1 — 决定 task 的 monitor_state.json 落盘路径。
 
@@ -261,7 +293,13 @@ class Supervisor:
 
     # -------------------------------------------------------------- 子进程
     def _spawn_task(self, task: dict[str, Any]) -> None:
-        cfg_path = self._configs_dir / f"{task['config_name']}.yaml"
+        # PP6.3：优先用 task.config_path（version 私有 config 绝对路径）；
+        # 没有时降级到老路径 _configs_dir / {config_name}.yaml。
+        explicit_cfg = task.get("config_path")
+        if explicit_cfg:
+            cfg_path = Path(explicit_cfg)
+        else:
+            cfg_path = self._configs_dir / f"{task['config_name']}.yaml"
         if not cfg_path.exists():
             with db.connection_for(self._db_path) as conn:
                 now = time.time()
@@ -271,7 +309,11 @@ class Supervisor:
                     status="failed",
                     started_at=now,
                     finished_at=now,
-                    error_msg=f"preset not found: {task['config_name']}",
+                    error_msg=(
+                        f"config not found: {cfg_path}"
+                        if explicit_cfg
+                        else f"preset not found: {task['config_name']}"
+                    ),
                 )
             self._on_event(
                 {
@@ -414,6 +456,9 @@ class Supervisor:
                 if status == "failed":
                     fields["error_msg"] = f"exit code {rc}"
                 db.update_task(conn, cid, **fields)
+                # PP6.3：训练成功时回填 version.output_lora_path + 推 stage=done
+                if status == "done":
+                    _maybe_finalize_version(conn, cid)
             self._on_event(
                 {"type": "task_state_changed", "task_id": cid, "status": status}
             )

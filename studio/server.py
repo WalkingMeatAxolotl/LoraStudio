@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
@@ -1295,6 +1296,67 @@ def save_version_config_as_preset_endpoint(
     except version_config.VersionConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"saved_preset": body.name, "config": cfg}
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/queue")
+def enqueue_version_training(pid: int, vid: int) -> dict[str, Any]:
+    """PP6.3 — 把 version 入队训练。
+
+    校验：
+    - version 已配置训练参数（version_config 存在）
+    - 该 version 没有 active task（pending / running）
+    """
+    project, ver = _project_and_version_or_404(pid, vid)
+    if not version_config.has_version_config(project, ver):
+        raise HTTPException(
+            400, "请先在 ⑥ 训练页选预设并保存配置后再入队"
+        )
+    cfg_path = version_config.version_config_path(project, ver)
+
+    with db.connection_for() as conn:
+        # 该 version 当前是否已有 active task
+        active = conn.execute(
+            "SELECT id, status FROM tasks "
+            "WHERE version_id = ? AND status IN ('pending', 'running') "
+            "LIMIT 1",
+            (vid,),
+        ).fetchone()
+        if active:
+            raise HTTPException(
+                409,
+                f"该版本已有 active task #{active['id']}（{active['status']}），"
+                "请等其完成或取消",
+            )
+
+        # 创建 task
+        slug = project["slug"]
+        label = ver["label"]
+        task_name = f"{slug}_{label}"
+        config_name = ver["config_name"] or f"proj_{pid}_{label}"  # informational
+        cur = conn.execute(
+            "INSERT INTO tasks(name, config_name, status, priority, created_at, "
+            "project_id, version_id, config_path) "
+            "VALUES (?, ?, 'pending', 0, ?, ?, ?, ?)",
+            (task_name, config_name, time.time(), pid, vid, str(cfg_path)),
+        )
+        tid = int(cur.lastrowid)
+        conn.commit()
+
+        # 推 stage：configured → training（task 启动后由 supervisor 推 done）
+        if ver["stage"] in ("ready", "configured", "regularizing", "tagging", "curating"):
+            updated = versions.advance_stage(conn, vid, "training")
+            _publish_version_state(updated)
+        if project["stage"] in ("created", "downloading", "curating", "tagging", "regularizing"):
+            up = projects.advance_stage(conn, pid, "training")
+            _publish_project_state(up)
+
+        task = db.get_task(conn, tid)
+    bus.publish({
+        "type": "task_state_changed",
+        "task_id": tid,
+        "status": "pending",
+    })
+    return task or {}
 
 
 # version 级缩略图：bucket = train | reg | samples（PP3 加 train，reg/samples 留作 PP4-5）

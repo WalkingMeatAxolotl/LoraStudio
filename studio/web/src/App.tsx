@@ -8,10 +8,10 @@ import ProjectLayout from './pages/project/Layout'
 import ProjectOverview from './pages/project/Overview'
 import CurationPage from './pages/project/steps/Curation'
 import DownloadPage from './pages/project/steps/Download'
-import StepPlaceholder from './pages/project/steps/Placeholder'
 import RegularizationPage from './pages/project/steps/Regularization'
 import TagEditPage from './pages/project/steps/TagEdit'
 import TaggingPage from './pages/project/steps/Tagging'
+import TrainPage from './pages/project/steps/Train'
 import MonitorPage from './pages/tools/Monitor'
 import PresetsPage from './pages/tools/Presets'
 import SettingsPage from './pages/tools/Settings'
@@ -37,10 +37,7 @@ export default function App() {
                 <Route path="tag" element={<TaggingPage />} />
                 <Route path="edit" element={<TagEditPage />} />
                 <Route path="reg" element={<RegularizationPage />} />
-                <Route
-                  path="train"
-                  element={<StepPlaceholder step="⑥ 训练" doc="PP6" />}
-                />
+                <Route path="train" element={<TrainPage />} />
               </Route>
             </Route>
 

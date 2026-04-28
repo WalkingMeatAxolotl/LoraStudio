@@ -275,6 +275,7 @@ export default function QueuePage() {
               <tr>
                 <th className="px-3 py-2 text-left font-normal">#</th>
                 <th className="px-3 py-2 text-left font-normal">名称 / 配置</th>
+                <th className="px-3 py-2 text-left font-normal">来源</th>
                 <th className="px-3 py-2 text-left font-normal">状态</th>
                 <th className="px-3 py-2 text-left font-normal">入队时间</th>
                 <th className="px-3 py-2 text-left font-normal">运行时长</th>
@@ -293,6 +294,19 @@ export default function QueuePage() {
                     <div className="text-xs text-slate-500 font-mono">
                       {t.config_name}.yaml
                     </div>
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {t.project_id && t.version_id ? (
+                      <Link
+                        to={`/projects/${t.project_id}/v/${t.version_id}/train`}
+                        className="text-cyan-400 hover:underline font-mono"
+                        title="跳到该 version 的 ⑥ 训练页"
+                      >
+                        项目 #{t.project_id} / v#{t.version_id}
+                      </Link>
+                    ) : (
+                      <span className="text-slate-600">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <span

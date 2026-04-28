@@ -13,7 +13,7 @@
 | [pp3-curation.md](pp3-curation.md) | ✅ 已完成 — download / train 双面板、缩略图、复制/移除、子文件夹管理 |
 | [pp4-tagging.md](pp4-tagging.md) | ✅ 已完成 — Tagger 协议、WD14 (本地+HF 自动下载)、JoyCaption (vLLM)；pipeline 拆成「③ 打标」「④ 标签编辑」两步 |
 | [pp5-regularization.md](pp5-regularization.md) | ✅ 已完成 — PP5（reg_build + auto_tag）+ PP5.1（补足）+ PP5.5（分辨率聚类后处理）|
-| [pp6-train.md](pp6-train.md) | Preset fork/save、Train 页、入队带 project_id+version_id、monitor 按 version 拆分 |
+| [pp6-train.md](pp6-train.md) | ✅ 已完成 — PP6.1（per-task monitor）+ PP6.2（preset 双向流）+ PP6.3（Train 页 + 入队 + Stepper ⑥）|
 
 ## 实施原则
 

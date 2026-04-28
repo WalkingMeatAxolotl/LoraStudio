@@ -193,3 +193,49 @@ def test_save_as_preset_without_config_400(client: TestClient) -> None:
         json={"name": "x"},
     )
     assert r.status_code == 400  # version 还没 fork 过任何 preset
+
+
+# ---------------------------------------------------------------------------
+# POST /queue (PP6.3 入队)
+# ---------------------------------------------------------------------------
+
+
+def test_enqueue_without_config_400(client: TestClient) -> None:
+    pid, vid = _make(client)
+    r = client.post(f"/api/projects/{pid}/versions/{vid}/queue")
+    assert r.status_code == 400
+
+
+def test_enqueue_creates_task_with_ids_and_config_path(
+    client: TestClient, env
+) -> None:
+    pid, vid = _make(client)
+    _seed_preset(env, "tpl", lora_rank=64)
+    client.post(
+        f"/api/projects/{pid}/versions/{vid}/config/from_preset",
+        json={"name": "tpl"},
+    )
+    r = client.post(f"/api/projects/{pid}/versions/{vid}/queue")
+    assert r.status_code == 200, r.text
+    task = r.json()
+    assert task["status"] == "pending"
+    assert task["project_id"] == pid
+    assert task["version_id"] == vid
+    assert task["config_path"] and task["config_path"].endswith("config.yaml")
+    # version stage 推到 training
+    v = client.get(f"/api/projects/{pid}/versions/{vid}").json()
+    assert v["stage"] == "training"
+
+
+def test_enqueue_rejects_active_task(client: TestClient, env) -> None:
+    """同 version 已有 pending/running task → 409。"""
+    pid, vid = _make(client)
+    _seed_preset(env, "tpl")
+    client.post(
+        f"/api/projects/{pid}/versions/{vid}/config/from_preset",
+        json={"name": "tpl"},
+    )
+    r1 = client.post(f"/api/projects/{pid}/versions/{vid}/queue")
+    assert r1.status_code == 200
+    r2 = client.post(f"/api/projects/{pid}/versions/{vid}/queue")
+    assert r2.status_code == 409

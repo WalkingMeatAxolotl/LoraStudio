@@ -338,6 +338,14 @@ export interface Task {
   exit_code: number | null
   output_dir: string | null
   error_msg: string | null
+  /** PP1 加；老任务为 null。 */
+  project_id?: number | null
+  /** PP1 加；老任务为 null。 */
+  version_id?: number | null
+  /** PP6.3 — version 私有 config 路径（旧任务 null，走 _configs_dir 兜底）。 */
+  config_path?: string | null
+  /** PP6.1 — per-task monitor state.json 路径。 */
+  monitor_state_path?: string | null
 }
 
 export interface LogResponse {
@@ -687,6 +695,11 @@ export const api = {
     req<{ saved_preset: string; config: ConfigData }>(
       `/api/projects/${pid}/versions/${vid}/config/save_as_preset`,
       { method: 'POST', body: JSON.stringify({ name, overwrite }) }
+    ),
+  enqueueVersionTraining: (pid: number, vid: number) =>
+    req<Task>(
+      `/api/projects/${pid}/versions/${vid}/queue`,
+      { method: 'POST' }
     ),
 
   // Curation (PP3) -------------------------------------------------------
