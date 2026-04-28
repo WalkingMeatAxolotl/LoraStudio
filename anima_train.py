@@ -1877,7 +1877,16 @@ def parse_args():
     p.add_argument("--auto-install", action="store_true", help="自动安装缺失依赖")
     p.add_argument("--interactive", action="store_true", help="交互模式，提示输入缺失参数")
     p.add_argument("--no-live-curve", action="store_true", help="禁用实时 Loss 曲线刷新")
-    # 已弃用，保留是为了不破坏旧脚本（每图重复改用文件夹名前缀，如 5_concept）
+    # PP6.1 — 监控状态文件路径；不传则默认写到 output_dir/monitor_state.json
+    # 注：--no-monitor / --monitor-host / --monitor-port / --no-browser 由 schema
+    # 自动从 TrainingConfig 字段生成（保留只为兼容旧 yaml，运行时忽略）。
+    p.add_argument(
+        "--monitor-state-file",
+        type=str,
+        default=None,
+        help="训练监控 state.json 输出路径（默认 output_dir/monitor_state.json）",
+    )
+    # 已弃用：每图重复改用文件夹名前缀（如 5_concept）
     p.add_argument("--repeats", type=int, default=1, help=argparse.SUPPRESS)
     p.add_argument("--reg-repeats", type=int, default=1, help=argparse.SUPPRESS)
     return p.parse_args()
@@ -2014,30 +2023,33 @@ def main():
     sample_dir = output_dir / "samples"
     sample_dir.mkdir(exist_ok=True)
 
-    # 启动训练监控面板
-    monitor_server = None
-    if not getattr(args, "no_monitor", False):
-        try:
-            from train_monitor import start_monitor_server, update_monitor
-            monitor_server = start_monitor_server(
-                host=getattr(args, "monitor_host", "127.0.0.1"),
-                port=int(getattr(args, "monitor_port", 8765) or 8765),
-                output_dir=output_dir,
-                open_browser=(not getattr(args, "no_browser", False)),
-            )
-            update_monitor(config={
-                "model": "Anima LoKr" if args.lora_type == "lokr" else "Anima LoRA",
-                "rank": args.lora_rank,
-                "alpha": args.lora_alpha,
-                "epochs": args.epochs,
-                "batch_size": args.batch_size,
-                "grad_accum": args.grad_accum,
-                "lr": args.learning_rate,
-                "resolution": args.resolution,
-                "data_dir": str(args.data_dir),
-            })
-        except Exception as e:
-            logger.warning(f"监控面板启动失败: {e}")
+    # 训练监控状态写入（PP6.1）：永远开启，文件路径优先来自 --monitor-state-file，
+    # 否则落到 output_dir/monitor_state.json。Studio 前端通过 /api/state?task_id=
+    # 读这个文件，不再启动训练侧 HTTP server（Studio 自己是 monitor）。
+    monitor_server = True  # 兼容下方分支判断；实际代表「写状态文件」
+    try:
+        from train_monitor import set_state_file, update_monitor
+        state_path = (
+            Path(args.monitor_state_file)
+            if getattr(args, "monitor_state_file", None)
+            else output_dir / "monitor_state.json"
+        )
+        set_state_file(state_path)
+        update_monitor(config={
+            "model": "Anima LoKr" if args.lora_type == "lokr" else "Anima LoRA",
+            "rank": args.lora_rank,
+            "alpha": args.lora_alpha,
+            "epochs": args.epochs,
+            "batch_size": args.batch_size,
+            "grad_accum": args.grad_accum,
+            "lr": args.learning_rate,
+            "resolution": args.resolution,
+            "data_dir": str(args.data_dir),
+        })
+        logger.info(f"📊 训练监控状态文件: {state_path}")
+    except Exception as e:
+        logger.warning(f"监控状态写入初始化失败: {e}")
+        monitor_server = None
 
     # 查找模型代码
     repo_root = find_diffusion_pipe_root()

@@ -195,6 +195,53 @@ def test_orphan_running_marked_failed_on_start(env) -> None:
     assert "supervisor restart" in (task["error_msg"] or "")
 
 
+def test_monitor_state_path_passed_to_cmd_and_db(env, monkeypatch) -> None:
+    """PP6.1：spawn task 时把 --monitor-state-file 传给 cmd_builder + 写 monitor_state_path 到 db。"""
+    captured: dict[str, Any] = {}
+
+    def capturing_cmd(task, cfg):
+        captured["cmd_msp"] = task.get("monitor_state_path")
+        return [sys.executable, "-c", "import sys; sys.exit(0)"]
+
+    sup = Supervisor(
+        cmd_builder=capturing_cmd,
+        db_path=env["db"], logs_dir=env["logs"], configs_dir=env["configs"],
+        poll_interval=0.05,
+    )
+    with db.connection_for(env["db"]) as conn:
+        tid = db.create_task(conn, name="t", config_name="fake")
+
+    sup.start()
+    try:
+        assert _wait_for(
+            lambda: _task_status(env["db"], tid) == "done", timeout=10
+        )
+    finally:
+        sup.stop()
+
+    # cmd_builder 收到的 task dict 含 monitor_state_path
+    assert captured.get("cmd_msp"), "cmd_builder 没拿到 monitor_state_path"
+    assert "task_" in captured["cmd_msp"]  # 兜底路径含 task_{id}
+
+    # db 也写入了
+    with db.connection_for(env["db"]) as conn:
+        row = db.get_task(conn, tid)
+    assert row["monitor_state_path"] == captured["cmd_msp"]
+
+
+def test_default_cmd_builder_includes_monitor_flag() -> None:
+    """没传 cmd_builder 时，默认行为是把 --monitor-state-file 拼进去。"""
+    from studio.supervisor import _default_cmd_builder
+    cmd = _default_cmd_builder(
+        {"id": 99, "config_name": "x",
+         "monitor_state_path": "/tmp/x/state.json"},
+        Path("/tmp/cfg.yaml"),
+    )
+    assert "--monitor-state-file" in cmd
+    i = cmd.index("--monitor-state-file")
+    assert cmd[i + 1] == "/tmp/x/state.json"
+
+
 def _task_status(dbfile: Path, tid: int) -> str:
     with db.connection_for(dbfile) as conn:
         task = db.get_task(conn, tid)

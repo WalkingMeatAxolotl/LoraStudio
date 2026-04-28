@@ -325,6 +325,13 @@ export default function QueuePage() {
                     >
                       日志
                     </Link>
+                    <Link
+                      to={`/queue/${t.id}/monitor`}
+                      className="text-xs text-slate-400 hover:text-cyan-400 ml-2"
+                      title="查看训练曲线 / 采样图"
+                    >
+                      📊 监控
+                    </Link>
                     {(t.status === 'pending' || t.status === 'running') && (
                       <button
                         disabled={busy}

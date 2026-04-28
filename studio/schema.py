@@ -342,24 +342,27 @@ class TrainingConfig(BaseModel):
         description="日志输出间隔（步）",
         json_schema_extra=_meta("monitor"),
     )
+    # PP6.1：以下字段保留是为了不破坏既有 yaml；HTTP monitor server 已退役，
+    # 这些值不再生效。Studio 前端通过 /api/state?task_id= 读 monitor_state.json，
+    # 路径由 --monitor-state-file（CLI-only）决定。
     no_monitor: bool = Field(
-        False,
-        description="禁用内置 Web 监控（Studio 模式应设 true）",
+        True,
+        description="(已废弃) 内置 Web monitor server 已删除；保留字段兼容旧 yaml",
         json_schema_extra=_meta("monitor"),
     )
     monitor_host: str = Field(
         "127.0.0.1",
-        description="监控绑定地址",
+        description="(已废弃) 旧 monitor server 绑定地址；当前忽略",
         json_schema_extra=_meta("monitor"),
     )
     monitor_port: int = Field(
         8765, ge=1, le=65535,
-        description="监控端口",
+        description="(已废弃) 旧 monitor server 端口；当前忽略",
         json_schema_extra=_meta("monitor"),
     )
     no_browser: bool = Field(
-        False,
-        description="不自动打开浏览器",
+        True,
+        description="(已废弃) 旧 monitor server 自动开浏览器；当前忽略",
         json_schema_extra=_meta("monitor"),
     )
 

@@ -15,12 +15,14 @@ import sqlite3
 from typing import Callable
 
 from ._v2_projects import migrate as _migrate_v2
+from ._v3_monitor_state import migrate as _migrate_v3
 
 Migration = Callable[[sqlite3.Connection], None]
 
 # 索引位置即版本号（1-based）。v1 = 基础 SCHEMA（不在此列表）。
 MIGRATIONS: list[Migration] = [
     _migrate_v2,  # v2: projects / versions / project_jobs + tasks 扩字段
+    _migrate_v3,  # v3: tasks.monitor_state_path（PP6.1 per-version monitor）
 ]
 
 

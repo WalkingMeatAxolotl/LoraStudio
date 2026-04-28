@@ -18,19 +18,23 @@ from studio import server
 @pytest.fixture
 def isolated_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     """把 server 模块里的路径全部指向 tmp_path 下的隔离目录。"""
-    monitor_data = tmp_path / "monitor_data"
+    from studio import db
     output = tmp_path / "output"
     samples_dir = output / "samples"
     legacy_html = tmp_path / "monitor_smooth.html"
     web_dist = tmp_path / "web_dist"  # 不创建即模拟未构建
     samples_dir.mkdir(parents=True)
 
-    monkeypatch.setattr(server, "MONITOR_STATE_FILE", monitor_data / "state.json")
+    dbfile = tmp_path / "studio.db"
+    db.init_db(dbfile)
+    monkeypatch.setattr(db, "STUDIO_DB", dbfile)
+    monkeypatch.setattr(server.db, "STUDIO_DB", dbfile)
     monkeypatch.setattr(server, "OUTPUT_DIR", output)
     monkeypatch.setattr(server, "LEGACY_MONITOR_HTML", legacy_html)
     monkeypatch.setattr(server, "WEB_DIST", web_dist)
     return {
-        "monitor_data": monitor_data,
+        "tmp": tmp_path,
+        "db": dbfile,
         "output": output,
         "samples_dir": samples_dir,
         "legacy_html": legacy_html,
@@ -60,8 +64,7 @@ def test_health_returns_ok(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 def test_state_missing_returns_empty(client: TestClient, isolated_paths: dict[str, Path]) -> None:
-    """state.json 不存在时不应报错，返回空状态。"""
-    assert not isolated_paths["monitor_data"].exists()  # sanity
+    """没有 task_id 也没有 running 任务时返回空状态。"""
     resp = client.get("/api/state")
     assert resp.status_code == 200
     body = resp.json()
@@ -72,7 +75,28 @@ def test_state_missing_returns_empty(client: TestClient, isolated_paths: dict[st
     assert body["start_time"] is None
 
 
-def test_state_returns_parsed_json(client: TestClient, isolated_paths: dict[str, Path]) -> None:
+def _make_task_with_state(
+    isolated_paths: dict[str, Path], payload: dict | str | None
+) -> int:
+    """建一个 task 并写 state 文件，返回 task_id。payload=None 表示不写文件。"""
+    from studio import db as _db
+    state_dir = isolated_paths["tmp"] / "states"
+    state_dir.mkdir(exist_ok=True)
+    state_file = state_dir / "state.json"
+    if payload is not None:
+        state_file.write_text(
+            json.dumps(payload) if isinstance(payload, dict) else payload,
+            encoding="utf-8",
+        )
+    with _db.connection_for(isolated_paths["db"]) as conn:
+        tid = _db.create_task(conn, name="t", config_name="x")
+        _db.update_task(conn, tid, monitor_state_path=str(state_file))
+    return tid
+
+
+def test_state_by_task_id_returns_parsed_json(
+    client: TestClient, isolated_paths: dict[str, Path]
+) -> None:
     payload = {
         "losses": [{"step": 1, "loss": 0.5, "time": 100.0}],
         "lr_history": [{"step": 1, "lr": 1e-4}],
@@ -84,22 +108,41 @@ def test_state_returns_parsed_json(client: TestClient, isolated_paths: dict[str,
         "start_time": 1700000000.0,
         "config": {"lora_rank": 32},
     }
-    isolated_paths["monitor_data"].mkdir(parents=True)
-    (isolated_paths["monitor_data"] / "state.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-    resp = client.get("/api/state")
+    tid = _make_task_with_state(isolated_paths, payload)
+    resp = client.get(f"/api/state?task_id={tid}")
     assert resp.status_code == 200
     assert resp.json() == payload
 
 
-def test_state_corrupt_returns_500(client: TestClient, isolated_paths: dict[str, Path]) -> None:
-    isolated_paths["monitor_data"].mkdir(parents=True)
-    (isolated_paths["monitor_data"] / "state.json").write_text(
-        "this is not json", encoding="utf-8"
-    )
-    resp = client.get("/api/state")
+def test_state_corrupt_returns_500(
+    client: TestClient, isolated_paths: dict[str, Path]
+) -> None:
+    tid = _make_task_with_state(isolated_paths, "this is not json")
+    resp = client.get(f"/api/state?task_id={tid}")
     assert resp.status_code == 500
+
+
+def test_state_unknown_task_returns_empty(
+    client: TestClient, isolated_paths: dict[str, Path]
+) -> None:
+    resp = client.get("/api/state?task_id=99999")
+    assert resp.status_code == 200
+    assert resp.json()["losses"] == []
+
+
+def test_state_running_task_used_when_no_task_id(
+    client: TestClient, isolated_paths: dict[str, Path]
+) -> None:
+    """没给 task_id → 默认拉当前 running 的 task。"""
+    payload = {"losses": [], "lr_history": [], "epoch": 0, "step": 7,
+               "total_steps": 0, "speed": 0.0, "samples": [],
+               "start_time": None, "config": {}}
+    from studio import db as _db
+    tid = _make_task_with_state(isolated_paths, payload)
+    with _db.connection_for(isolated_paths["db"]) as conn:
+        _db.update_task(conn, tid, status="running", started_at=1.0)
+    resp = client.get("/api/state")
+    assert resp.json()["step"] == 7
 
 
 # ---------------------------------------------------------------------------

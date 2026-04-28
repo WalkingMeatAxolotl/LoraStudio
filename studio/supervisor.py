@@ -27,7 +27,7 @@ from typing import Any, Callable, Optional
 
 from . import db, project_jobs
 from .log_tail import LogTailer
-from .paths import LOGS_DIR, REPO_ROOT, STUDIO_DB, USER_PRESETS_DIR
+from .paths import LOGS_DIR, REPO_ROOT, STUDIO_DATA, STUDIO_DB, USER_PRESETS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +37,44 @@ JobCmdBuilder = Callable[[dict[str, Any]], list[str]]
 
 
 def _default_cmd_builder(task: dict[str, Any], config_path: Path) -> list[str]:
-    """默认调用 anima_train.py --config <path> --no-monitor。"""
-    return [
+    """默认调用 anima_train.py --config <path> --monitor-state-file <state>。"""
+    cmd = [
         sys.executable,
         str(REPO_ROOT / "anima_train.py"),
         "--config",
         str(config_path),
-        "--no-monitor",
     ]
+    msp = task.get("monitor_state_path")
+    if msp:
+        cmd.extend(["--monitor-state-file", str(msp)])
+    return cmd
+
+
+def _resolve_monitor_state_path(task: dict[str, Any]) -> Path:
+    """PP6.1 — 决定 task 的 monitor_state.json 落盘路径。
+
+    有 version_id：`versions/{label}/monitor_state.json`，与 train/output/samples
+    放一起；用户切 version 监控自然独立。
+    没有 version_id（PP1 之前的旧任务）：兜底到
+    `studio_data/monitors/task_{id}/state.json`，避免老任务无处可写。
+    """
+    vid = task.get("version_id")
+    pid = task.get("project_id")
+    if vid and pid:
+        # 不在这里 import projects/versions（避免循环）；直接通过 db 查
+        with db.connection_for() as conn:
+            row = conn.execute(
+                "SELECT projects.slug AS slug, versions.label AS label "
+                "FROM versions JOIN projects ON versions.project_id = projects.id "
+                "WHERE versions.id = ?",
+                (vid,),
+            ).fetchone()
+        if row:
+            return (
+                STUDIO_DATA / "projects" / f"{pid}-{row['slug']}"
+                / "versions" / row["label"] / "monitor_state.json"
+            )
+    return STUDIO_DATA / "monitors" / f"task_{task['id']}" / "state.json"
 
 
 def _default_job_cmd_builder(job: dict[str, Any]) -> list[str]:
@@ -252,6 +282,14 @@ class Supervisor:
             )
             return
 
+        # PP6.1 — 计算 per-task monitor 状态文件路径
+        # 有 version_id：versions/{label}/monitor_state.json
+        # 没有：studio_data/monitors/task_{id}/state.json（兜底）
+        monitor_state_path = _resolve_monitor_state_path(task)
+        # 提前注入到 task dict 供 cmd_builder 用，以及落库
+        task = dict(task)
+        task["monitor_state_path"] = str(monitor_state_path)
+
         self._logs_dir.mkdir(parents=True, exist_ok=True)
         log_path = self._logs_dir / f"{task['id']}.log"
         log_fp = open(log_path, "wb")
@@ -272,6 +310,7 @@ class Supervisor:
                 status="running",
                 started_at=time.time(),
                 pid=proc.pid,
+                monitor_state_path=str(monitor_state_path),
             )
         self._on_event(
             {

@@ -727,6 +727,13 @@
             // 本地文件或默认
             return 'http://localhost:8765';
         })();
+        // PP6.1：?task_id=N 透传给 /api/state，让 monitor 锁定到指定任务
+        const TASK_ID = (() => {
+            const params = new URLSearchParams(window.location.search);
+            const v = params.get('task_id');
+            return v && /^\d+$/.test(v) ? v : null;
+        })();
+        const TASK_QS = TASK_ID ? `&task_id=${TASK_ID}` : '';
 
         // Chart config
         const chartDefaults = {
@@ -866,7 +873,7 @@
 
         async function updateData() {
             try {
-                const resp = await fetch(`${API_BASE}/api/state?max_points=${MAX_CHART_POINTS}&_=${Date.now()}`);
+                const resp = await fetch(`${API_BASE}/api/state?max_points=${MAX_CHART_POINTS}${TASK_QS}&_=${Date.now()}`);
                 const data = await resp.json();
                 lastData = data;
                 lastUpdate = Date.now();
@@ -950,7 +957,7 @@
             // 生成缩略图
             grid.innerHTML = list.map((s, i) => `
                 <div class="sample-thumb ${i === activeIndex ? 'active' : ''}" data-index="${i}" title="Step ${s.step}">
-                    <img src="${API_BASE}/samples/${s.path.split(/[\\\\/]/).pop()}" onerror="this.parentElement.style.display='none'">
+                    <img src="${API_BASE}/samples/${s.path.split(/[\\\\/]/).pop()}${TASK_ID ? '?task_id=' + TASK_ID : ''}" onerror="this.parentElement.style.display='none'">
                 </div>
             `).join('');
 
@@ -995,7 +1002,7 @@
             
             if (!sample) return;
             
-            const imgUrl = `${API_BASE}/samples/${sample.path.split(/[\\\\/]/).pop()}`;
+            const imgUrl = `${API_BASE}/samples/${sample.path.split(/[\\\\/]/).pop()}${TASK_ID ? '?task_id=' + TASK_ID : ''}`;
             
             preview.innerHTML = `
                 <img src="${imgUrl}" alt="Step ${sample.step}">

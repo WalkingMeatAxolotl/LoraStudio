@@ -101,13 +101,38 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/api/state")
-def get_state() -> JSONResponse:
-    """读取训练侧写出的 monitor_data/state.json。
-    训练未启动 / 文件缺失时返回空状态，不报错。"""
-    if not MONITOR_STATE_FILE.exists():
+def get_state(task_id: Optional[int] = None) -> JSONResponse:
+    """读取训练监控 state.json（PP6.1 改造 — per-task）。
+
+    `task_id` 给了 → 查 tasks.monitor_state_path 对应文件；没有 / 文件缺失 →
+    返回 EMPTY_STATE，不报错。
+    `task_id` 没给 → 返回当前 running task 的 state；没 running 也返回空。
+
+    旧的全局 `monitor_data/state.json` 路径已退役（PP6.1）。
+    """
+    target_path: Optional[Path] = None
+    if task_id is not None:
+        with db.connection_for() as conn:
+            row = conn.execute(
+                "SELECT monitor_state_path FROM tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+        if row and row["monitor_state_path"]:
+            target_path = Path(row["monitor_state_path"])
+    else:
+        # 没给 task_id：找当前 running 的 task
+        with db.connection_for() as conn:
+            row = conn.execute(
+                "SELECT monitor_state_path FROM tasks WHERE status = 'running' "
+                "ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
+        if row and row["monitor_state_path"]:
+            target_path = Path(row["monitor_state_path"])
+
+    if target_path is None or not target_path.exists():
         return JSONResponse(EMPTY_STATE)
     try:
-        data = json.loads(MONITOR_STATE_FILE.read_text(encoding="utf-8"))
+        data = json.loads(target_path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise HTTPException(500, f"failed to read state: {exc}")
     return JSONResponse(data)
@@ -1419,10 +1444,32 @@ async def events(request: Request) -> StreamingResponse:
 
 
 @app.get("/samples/{filename}")
-def get_sample(filename: str) -> FileResponse:
-    # 简单防越权
+def get_sample(
+    filename: str, task_id: Optional[int] = None
+) -> FileResponse:
+    """采样图代理。
+
+    PP6.1：`?task_id=N` 给了 → 从该任务的 monitor_state_path 同级 samples/
+    读取（即 `versions/{label}/samples/{filename}`）；没给 → 全局 OUTPUT_DIR
+    /samples/ 兜底（旧训练直接命令行的兼容）。
+    """
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(400, "invalid filename")
+
+    if task_id is not None:
+        with db.connection_for() as conn:
+            row = conn.execute(
+                "SELECT monitor_state_path FROM tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+        if row and row["monitor_state_path"]:
+            # samples 与 monitor_state.json 同级
+            samples_dir = Path(row["monitor_state_path"]).parent / "samples"
+            path = samples_dir / filename
+            if path.exists():
+                return FileResponse(path)
+        raise HTTPException(404)
+
     path = OUTPUT_DIR / "samples" / filename
     if not path.exists():
         raise HTTPException(404)
@@ -1478,6 +1525,14 @@ def root() -> FileResponse | JSONResponse:
             "(npm install && npm run build) to enable the new UI."
         }
     )
+
+
+@app.get("/monitor_smooth.html", response_model=None, include_in_schema=False)
+def monitor_smooth_html() -> FileResponse:
+    """直接路径访问 monitor_smooth.html（PP6.1：QueueMonitor iframe 走这里）。"""
+    if not LEGACY_MONITOR_HTML.exists():
+        raise HTTPException(404, "monitor_smooth.html not found")
+    return FileResponse(LEGACY_MONITOR_HTML)
 
 
 # ---------------------------------------------------------------------------

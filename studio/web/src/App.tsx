@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar'
 import LogPage from './pages/Log'
 import ProjectsPage from './pages/Projects'
 import QueuePage from './pages/Queue'
+import QueueMonitorPage from './pages/QueueMonitor'
 import ProjectLayout from './pages/project/Layout'
 import ProjectOverview from './pages/project/Overview'
 import CurationPage from './pages/project/steps/Curation'
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="/" element={<ProjectsPage />} />
             <Route path="/queue" element={<QueuePage />} />
             <Route path="/queue/:id/log" element={<LogPage />} />
+            <Route path="/queue/:id/monitor" element={<QueueMonitorPage />} />
 
             {/* PP1: project layout + stepper + version tabs */}
             <Route path="/projects/:pid" element={<ProjectLayout />}>

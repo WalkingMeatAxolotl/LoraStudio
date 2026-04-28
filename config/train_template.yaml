@@ -120,8 +120,5 @@ loss_curve_steps: 100                # 终端显示最近 N 步的 loss 曲线
 no_progress: false                   # 禁用进度条
 log_every: 10                        # 日志输出间隔（步）
 
-# Web 监控面板（默认 http://127.0.0.1:8765）
-# no_monitor: false                  # 禁用 Web 监控面板
-# monitor_host: "127.0.0.1"          # 监控绑定地址（局域网用 0.0.0.0）
-# monitor_port: 8765                 # 监控端口
-# no_browser: false                  # 不自动打开浏览器
+# 训练监控（PP6.1）：取消了内置 Web monitor server，Studio 前端有自己的监控页。
+# 训练写状态到 --monitor-state-file（默认 output_dir/monitor_state.json）。
