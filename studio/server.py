@@ -60,6 +60,7 @@ from .services import (
     model_downloader,
     reg_builder,
     tagedit,
+    train_io,
     uploads as uploads_svc,
     version_config,
 )
@@ -518,6 +519,87 @@ def activate_version_endpoint(pid: int, vid: int) -> dict[str, Any]:
     assert p is not None
     _publish_project_state(p)
     return _project_payload(p)
+
+
+# Train export / import (PP7) -----------------------------------------------
+
+
+@app.get("/api/projects/{pid}/versions/{vid}/train.zip")
+def export_version_train_zip(
+    pid: int, vid: int, background: BackgroundTasks
+) -> FileResponse:
+    """打包 version 的 train/ + manifest.json 为 zip 一次性下载。
+
+    实现：写到临时文件再 FileResponse；响应发完后 BackgroundTasks 清理。
+    与 outputs.zip 一致用 ZIP_STORED（PNG/jpg 已压缩，再压只是浪费 CPU）。
+    """
+    import tempfile
+
+    with db.connection_for() as conn:
+        v = versions.get_version(conn, vid)
+        if not v or v["project_id"] != pid:
+            raise HTTPException(404, f"版本不存在: id={vid}")
+        p = projects.get_project(conn, pid)
+        assert p is not None
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        tmp.close()
+        tmp_path = Path(tmp.name)
+        try:
+            train_io.export_train(conn, vid, tmp_path)
+        except train_io.TrainIOError as exc:
+            tmp_path.unlink(missing_ok=True)
+            raise HTTPException(400, str(exc)) from exc
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+    background.add_task(lambda: tmp_path.unlink(missing_ok=True))
+    archive_name = f"{p['slug']}-{v['label']}.train.zip"
+    return FileResponse(
+        tmp_path,
+        media_type="application/zip",
+        filename=archive_name,
+        background=background,
+    )
+
+
+@app.post("/api/projects/import-train")
+async def import_train_zip(file: UploadFile = File(...)) -> dict[str, Any]:
+    """上传训练集 zip → 新建 project + v1（stage=tagging），返回新项目。"""
+    import tempfile
+
+    if not file.filename:
+        raise HTTPException(400, "缺少上传文件")
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    try:
+        # UploadFile 内部本就是 SpooledTemporaryFile，大文件会落临时盘
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            tmp.write(chunk)
+        tmp.close()
+        tmp_path = Path(tmp.name)
+        with db.connection_for() as conn:
+            try:
+                result = train_io.import_train(conn, tmp_path)
+            except train_io.TrainIOError as exc:
+                raise HTTPException(400, str(exc)) from exc
+    finally:
+        try:
+            Path(tmp.name).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    p = result["project"]
+    _publish_project_state(p)
+    _publish_version_state(result["version"])
+    return {
+        "project": _project_payload(p),
+        "version": result["version"],
+        "stats": result["stats"],
+    }
 
 
 # ---------------------------------------------------------------------------

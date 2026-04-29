@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Outlet, useNavigate, useParams } from 'react-router-dom'
-import { api, type ProjectDetail } from '../../api/client'
+import { api, downloadBlob, type ProjectDetail } from '../../api/client'
 import ProjectStepper from '../../components/ProjectStepper'
 import { useToast } from '../../components/Toast'
 import VersionTabs from '../../components/VersionTabs'
@@ -16,6 +16,7 @@ export default function ProjectLayout() {
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === '1'
@@ -93,6 +94,19 @@ export default function ProjectLayout() {
     }
   }
 
+  const handleExportTrain = useCallback(async () => {
+    if (!project || !activeVersion || exporting) return
+    setExporting(true)
+    try {
+      const filename = `${project.slug}-${activeVersion.label}.train.zip`
+      await downloadBlob(api.versionTrainZipUrl(project.id, activeVersion.id), filename)
+    } catch (e) {
+      toast(`导出失败: ${e}`, 'error')
+    } finally {
+      setExporting(false)
+    }
+  }, [project, activeVersion, exporting, toast])
+
   const handleDeleteVersion = async (vid: number) => {
     if (!project) return
     const v = project.versions.find((x) => x.id === vid)
@@ -165,6 +179,17 @@ export default function ProjectLayout() {
             onCreate={() => setCreating(true)}
             onDelete={handleDeleteVersion}
           />
+          {activeVersion && (
+            <button
+              onClick={handleExportTrain}
+              disabled={exporting}
+              title={exporting ? '后端打包中...' : '把当前版本的 train/ 打包下载（含已打标的 caption）'}
+              className="text-[11px] px-2 py-1 rounded text-slate-300 hover:text-cyan-300 hover:bg-slate-800/60 disabled:opacity-50 text-left flex items-center gap-1.5"
+            >
+              <span>{exporting ? '⏳' : '⬇️'}</span>
+              <span className="truncate">{exporting ? '打包中...' : '导出训练集'}</span>
+            </button>
+          )}
           <ProjectStepper project={project} version={activeVersion} />
         </aside>
       )}

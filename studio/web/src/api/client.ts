@@ -522,6 +522,37 @@ async function req<T>(
   return (await resp.json()) as T
 }
 
+/**
+ * 下载二进制为浏览器附件。fetch + blob，让调用方能用 setLoading 包起来显示进度。
+ *
+ * 用 `<a href download>` 直链虽然简单但点击瞬间就让浏览器接管，前端无法
+ * 显示「打 zip 中...」之类的 loading 状态 —— 训练集 / output 几百 MB 时
+ * 后端打 zip 要几秒到几十秒，loading 反馈很有必要。
+ */
+export async function downloadBlob(url: string, filename: string): Promise<void> {
+  const resp = await fetch(url, { headers: { Accept: 'application/zip,application/octet-stream' } })
+  if (!resp.ok) {
+    let detail = `${resp.status} ${resp.statusText}`
+    try {
+      const body = await resp.json()
+      if (body?.detail) detail = body.detail
+    } catch {
+      // ignore
+    }
+    throw new Error(detail)
+  }
+  const blob = await resp.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = objectUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  // 让浏览器有机会发起下载后再 revoke
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+}
+
 export const api = {
   health: () => req<HealthResponse>('/api/health'),
   state: () => req<Record<string, unknown>>('/api/state'),
@@ -933,8 +964,35 @@ export const api = {
   /** 下载单个 output 文件的直链，不发请求。<a href={...} download> 即可。 */
   taskOutputDownloadUrl: (id: number, filename: string) =>
     `/api/queue/${id}/output/${encodeURIComponent(filename)}`,
-  /** 把 output 目录全部文件打包成 zip 下载的直链。 */
+  /** 把 output 目录全部文件打包成 zip 下载的直链。
+   * 推荐用 downloadBlob() 调它，能显示 loading（后端打 zip 要时间）。 */
   taskOutputsZipUrl: (id: number) => `/api/queue/${id}/outputs.zip`,
+
+  // PP7 — 训练集导出 / 导入 -----------------------------------------------
+  /** 当前 version 的 train/ 打包 zip 直链。用 downloadBlob() 调它显示 loading。 */
+  versionTrainZipUrl: (pid: number, vid: number) =>
+    `/api/projects/${pid}/versions/${vid}/train.zip`,
+  /** 上传训练集 zip → 新建 project + v1，返回新项目。 */
+  importTrainProject: async (file: File): Promise<{
+    project: ProjectDetail
+    version: Version
+    stats: { image_count: number; tagged_count: number; untagged_count: number; concepts: string[] }
+  }> => {
+    const fd = new FormData()
+    fd.append('file', file)
+    const resp = await fetch('/api/projects/import-train', { method: 'POST', body: fd })
+    if (!resp.ok) {
+      let detail = `${resp.status} ${resp.statusText}`
+      try {
+        const body = await resp.json()
+        if (body?.detail) detail = body.detail
+      } catch {
+        // ignore
+      }
+      throw new Error(detail)
+    }
+    return resp.json()
+  },
   /** 在 server 主机的 OS 文件管理器里打开 output 目录（仅 loopback 可用）。 */
   openTaskFolder: (id: number) =>
     req<{ opened: string }>(`/api/queue/${id}/open-folder`, {

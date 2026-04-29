@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, type ProjectStage, type ProjectSummary } from '../api/client'
 import { useToast } from '../components/Toast'
@@ -32,6 +32,8 @@ export default function ProjectsPage() {
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const navigate = useNavigate()
   const { toast } = useToast()
 
@@ -87,6 +89,25 @@ export default function ProjectsPage() {
     }
   }
 
+  const handleImportFile = async (file: File) => {
+    setImporting(true)
+    try {
+      const result = await api.importTrainProject(file)
+      const stats = result.stats
+      toast(
+        `已导入 ${result.project.title}（${stats.image_count} 张图，${stats.tagged_count} 已打标）`,
+        'success'
+      )
+      navigate(`/projects/${result.project.id}`)
+    } catch (e) {
+      toast(`导入失败: ${e}`, 'error')
+    } finally {
+      setImporting(false)
+      // 清空 file input 以便用户能重新选同一个文件
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   const handleEmptyTrash = async () => {
     if (!confirm('物理删除所有回收站项目？此操作不可恢复。')) return
     try {
@@ -106,6 +127,24 @@ export default function ProjectsPage() {
           className="text-xs text-slate-500 hover:text-slate-300"
         >
           清空回收站
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".zip,application/zip"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void handleImportFile(f)
+          }}
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={importing}
+          className="px-3 py-1.5 rounded text-sm bg-slate-700 hover:bg-slate-600 disabled:opacity-50"
+          title={importing ? '上传 + 解压中...' : '上传训练集 zip → 自动新建项目'}
+        >
+          {importing ? '⏳ 导入中...' : '⬆️ 导入训练集'}
         </button>
         <button
           onClick={() => setCreating(true)}

@@ -160,3 +160,97 @@ def test_alien_version_404(client: TestClient) -> None:
     assert (
         client.get(f"/api/projects/{b['id']}/versions/{av}").status_code == 404
     )
+
+
+# ---------------------------------------------------------------------------
+# PP7 — train.zip export / import
+# ---------------------------------------------------------------------------
+
+
+def test_train_zip_export_then_import(client: TestClient) -> None:
+    """端到端：创建项目 → 放打标后的 train/ → 导出 zip → 上传 → 新项目应有同样的 train/。"""
+    p = client.post("/api/projects", json={"title": "Round Trip"}).json()
+    pid = p["id"]
+    vid = p["versions"][0]["id"]
+    train = versions.version_dir(pid, p["slug"], "v1") / "train" / "1_data"
+    train.mkdir(parents=True, exist_ok=True)
+    (train / "a.png").write_bytes(b"png")
+    (train / "a.txt").write_text("tag1, tag2", encoding="utf-8")
+    (train / "b.png").write_bytes(b"png2")
+
+    # export
+    resp = client.get(f"/api/projects/{pid}/versions/{vid}/train.zip")
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"] == "application/zip"
+    assert "round-trip-v1.train.zip" in resp.headers.get("content-disposition", "")
+    zip_bytes = resp.content
+    assert len(zip_bytes) > 0
+
+    # import
+    resp = client.post(
+        "/api/projects/import-train",
+        files=[("file", ("round-trip-v1.train.zip", zip_bytes, "application/zip"))],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["project"]["id"] != pid
+    assert body["project"]["stage"] == "tagging"
+    assert body["stats"]["image_count"] == 2
+    assert body["stats"]["tagged_count"] == 1
+
+    new_train = versions.version_dir(
+        body["project"]["id"], body["project"]["slug"], "v1"
+    ) / "train" / "1_data"
+    assert (new_train / "a.png").exists()
+    assert (new_train / "a.txt").read_text(encoding="utf-8") == "tag1, tag2"
+    assert (new_train / "b.png").exists()
+
+
+def test_train_zip_export_empty_returns_400(client: TestClient) -> None:
+    p = client.post("/api/projects", json={"title": "Empty"}).json()
+    vid = p["versions"][0]["id"]
+    resp = client.get(f"/api/projects/{p['id']}/versions/{vid}/train.zip")
+    assert resp.status_code == 400
+
+
+def test_train_zip_export_alien_version_returns_404(client: TestClient) -> None:
+    a = client.post("/api/projects", json={"title": "A"}).json()
+    b = client.post("/api/projects", json={"title": "B"}).json()
+    av = a["versions"][0]["id"]
+    resp = client.get(f"/api/projects/{b['id']}/versions/{av}/train.zip")
+    assert resp.status_code == 404
+
+
+def test_import_train_rejects_zip_slip(client: TestClient) -> None:
+    import io
+    import json
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
+        zf.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "exported_at": 0,
+                    "source": {"title": "Evil", "version_label": "v1", "slug": "evil"},
+                    "stats": {},
+                }
+            ),
+        )
+        zf.writestr("train/../escape.png", b"x")
+
+    resp = client.post(
+        "/api/projects/import-train",
+        files=[("file", ("evil.zip", buf.getvalue(), "application/zip"))],
+    )
+    assert resp.status_code == 400
+
+
+def test_import_train_rejects_corrupt_zip(client: TestClient) -> None:
+    resp = client.post(
+        "/api/projects/import-train",
+        files=[("file", ("bad.zip", b"not a zip", "application/zip"))],
+    )
+    assert resp.status_code == 400

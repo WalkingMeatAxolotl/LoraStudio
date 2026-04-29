@@ -14,6 +14,7 @@
 | [pp4-tagging.md](pp4-tagging.md) | ✅ 已完成 — Tagger 协议、WD14 (本地+HF 自动下载)、JoyCaption (vLLM)；pipeline 拆成「③ 打标」「④ 标签编辑」两步 |
 | [pp5-regularization.md](pp5-regularization.md) | ✅ 已完成 — PP5（reg_build + auto_tag）+ PP5.1（补足）+ PP5.5（分辨率聚类后处理）|
 | [pp6-train.md](pp6-train.md) | ✅ 已完成 — PP6.1（per-task monitor）+ PP6.2（preset 双向流）+ PP6.3（Train 页 + 入队 + Stepper ⑥）|
+| [pp7-train-export-import.md](pp7-train-export-import.md) | ✅ 已完成 — 训练集（打标后的 train/）导出 zip + 上传新建项目；复用 outputs.zip 的打包/loading 模式 |
 
 ## 实施原则
 

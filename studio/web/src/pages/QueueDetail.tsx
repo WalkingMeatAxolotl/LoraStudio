@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   api,
+  downloadBlob,
   type Task,
   type TaskOutputs,
   type TaskStatus,
@@ -510,6 +511,7 @@ function OutputsTab({ taskId }: { taskId: number }) {
   const [data, setData] = useState<TaskOutputs | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [zipping, setZipping] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
@@ -540,6 +542,18 @@ function OutputsTab({ taskId }: { taskId: number }) {
       toast(String(e), 'error')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const handleDownloadZip = async () => {
+    if (zipping) return
+    setZipping(true)
+    try {
+      await downloadBlob(api.taskOutputsZipUrl(taskId), `task_${taskId}_outputs.zip`)
+    } catch (e) {
+      toast(`下载失败: ${e}`, 'error')
+    } finally {
+      setZipping(false)
     }
   }
 
@@ -592,14 +606,14 @@ function OutputsTab({ taskId }: { taskId: number }) {
             刷新
           </button>
           {data.exists && data.files.length > 0 && (
-            <a
-              href={api.taskOutputsZipUrl(taskId)}
-              download={`task_${taskId}_outputs.zip`}
-              className="px-2 py-0.5 rounded bg-cyan-700 hover:bg-cyan-600 text-white shrink-0"
-              title="打包 output 目录里全部文件为 zip 下载"
+            <button
+              onClick={handleDownloadZip}
+              disabled={zipping}
+              className="px-2 py-0.5 rounded bg-cyan-700 hover:bg-cyan-600 text-white shrink-0 disabled:opacity-50"
+              title={zipping ? '后端打包中...' : '打包 output 目录里全部文件为 zip 下载'}
             >
-              ⤓ 全量 zip
-            </a>
+              {zipping ? '⏳ 打包中...' : '⤓ 全量 zip'}
+            </button>
           )}
         </div>
       ) : (
