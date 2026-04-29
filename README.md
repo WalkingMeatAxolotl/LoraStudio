@@ -1,381 +1,205 @@
 # AnimaLoraToolkit
 
-一个功能完善的 **Anima** LoRA/LoKr 训练工具包，支持 YAML 配置、JSON 标签、实时监控，输出兼容 ComfyUI。
+Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaStudio)**。
 
-## 🔗 相关项目
+从「准备数据 → 打标 → 正则集 → 训练 → 监控 → 下载 LoRA」一条流水线，在浏览器里点完。也支持纯 CLI 跑训练。
 
-训练好的 LoRA 可以在 ComfyUI 中使用，推荐搭配：
+输出的 LoRA 权重直接 ComfyUI 可用（`lora_unet_*` 格式，无需任何转换）。
 
-- **[ComfyUI-AnimaTool](https://github.com/Moeblack/ComfyUI-AnimaTool)** - Anima 图像生成工具，支持 MCP Server、HTTP API、CLI，可直接加载本工具训练的 LoRA
+---
 
-### 示例作品
+## 上游与致谢
 
-使用本工具训练的 LoRA 示例：
+本仓库的核心训练脚本最初派生自 [**FHfanshu/Anima_Trainer**](https://github.com/FHfanshu/Anima_Trainer)；之后做了大量重构、改造与扩展，已经与上游完全分歧（独立仓库）。仍感谢原作者打的底子。
 
-- **[Cosmic Princess Kaguya | 超时空辉耀姬](https://civitai.com/models/2366705)** - 基于 Netflix 动画电影《超时空辉耀姬！》训练的画风+角色 LoKr
+- 主模型 / VAE：[circlestone-labs / Anima](https://huggingface.co/circlestone-labs/Anima)
+- ComfyUI 兼容格式：[comfyanonymous / ComfyUI](https://github.com/comfyanonymous/ComfyUI)
+- 训练监控前端 HTML：单文件 `monitor_smooth.html`
 
-## 📦 安装
+---
+
+## 主要特性
+
+**核心训练 (`anima_train.py`)**
+- LoRA + LyCORIS LoKr 双模式，输出原生 ComfyUI 格式
+- Flow Matching + ARB 分桶 + 梯度检查点
+- 断点续训（state.pt 含 optimizer / RNG / loss 历史）
+- 多优化器：AdamW / AdamW8bit / Prodigy
+- bf16 / fp16 训练
+- 训练时 sample 出图 + 实时 loss 曲线
+
+**AnimaStudio Web 工作台 (`studio/`)**
+- 项目 / 版本 数据模型，每次训练对应一个 `Project` + 一个 `Version`
+- ① 下载（Booru 抓取 + 本地 jpg/png/zip 上传）
+- ② 筛选（download / train 双面板，多选复制 / 移除）
+- ③ 打标（WD14 ONNX 本地 / JoyCaption vLLM 远程；多模型选）
+- ④ 标签编辑（缓存模式 + 还原点）
+- ⑤ 正则集（基于 train tag 分布贪心搜索 + AR 聚类）
+- ⑥ 训练（preset 双向流，version 私有 config + 全局 preset 池）
+- 队列 / 任务详情（日志 / 监控 / 输出下载 / 全量 zip）
+- 设置（凭据 / WD14 多模型 / 模型一键下载 / 路径自定义）
+
+---
+
+## 快速开始
+
+### 1. 安装
 
 ```bash
-git clone https://github.com/Moeblack/AnimaLoraToolkit.git
+git clone https://github.com/<your-name>/AnimaLoraToolkit.git
 cd AnimaLoraToolkit
 
-# 创建虚拟环境
-python -m venv .venv
-
+python -m venv venv
 # Windows
-.\.venv\Scripts\activate
+.\venv\Scripts\activate
+# Linux / macOS
+# source venv/bin/activate
 
-# 安装依赖
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
 ```
 
-> 说明：`requirements.txt` 默认**不强制安装** `xformers / flash-attn / bitsandbytes / wandb`（可选项，很多环境尤其 Windows 会安装失败）。
-> 需要时可按需 `pip install xformers`，并在配置里把 `xformers: true` 打开。
+需要 Node 18+（前端构建用）。
 
-## 🚀 快速开始
+### 2. 下载模型
 
-### 1. 准备模型文件
-
-```
-models/
-├── transformers/
-│   └── anima-preview.safetensors      # Anima 主模型
-├── vae/
-│   └── qwen_image_vae.safetensors     # VAE 解码器
-└── text_encoders/
-    ├── config.json                     # 已包含（小文件）
-    ├── tokenizer_config.json           # 已包含（小文件）
-    ├── merges.txt                      # 已包含（小文件）
-    ├── tokenizer.json                  # 需下载（小文件，可用 tools/download_tokenizers.py）
-    ├── vocab.json                      # 需下载（小文件，可用 tools/download_tokenizers.py）
-    ├── special_tokens_map.json         # 需下载（小文件，可用 tools/download_tokenizers.py）
-    └── model.safetensors               # 需下载（大文件：Qwen3-0.6B 权重）
-```
-
-**方式一：一键下载 tokenizer（推荐）**
+一条命令下完所有训练所需：
 
 ```bash
-python tools/download_tokenizers.py
+python tools/download_models.py
 ```
 
-> 使用 hf-mirror.com 镜像，国内可直接访问。如需自定义镜像，设置环境变量 `HF_ENDPOINT`。
+默认走 [hf-mirror.com](https://hf-mirror.com)（国内可直接下）。要用官方源加 `--no-mirror`。
 
-**方式二：手动下载**
+下载内容（默认落到 `./models/`）：
 
-| 文件 | 来源 | 放置位置 |
-|------|------|----------|
-| `anima-preview.safetensors` | [circlestone-labs/Anima](https://huggingface.co/circlestone-labs/Anima) | `models/transformers/` |
-| `qwen_image_vae.safetensors` | [circlestone-labs/Anima](https://huggingface.co/circlestone-labs/Anima) | `models/vae/` |
-| `model.safetensors` | [Qwen/Qwen3-0.6B-Base](https://huggingface.co/Qwen/Qwen3-0.6B-Base) | `models/text_encoders/` |
-| `tokenizer.json`, `vocab.json` | [Qwen/Qwen3-0.6B-Base](https://huggingface.co/Qwen/Qwen3-0.6B-Base) | `models/text_encoders/` |
-| `spiece.model` | [google/t5-v1_1-xxl](https://huggingface.co/google/t5-v1_1-xxl) | `models/t5_tokenizer/` |
+| 项 | 来源 | 路径 | 大小 |
+|---|---|---|---|
+| Anima 主模型（latest = preview3-base）| [circlestone-labs/Anima](https://huggingface.co/circlestone-labs/Anima) | `models/diffusion_models/` | ~4 GB |
+| Anima VAE | 同上 | `models/vae/` | ~250 MB |
+| Qwen3-0.6B-Base 文本编码器 | [Qwen/Qwen3-0.6B-Base](https://huggingface.co/Qwen/Qwen3-0.6B-Base) | `models/text_encoders/` | ~1.2 GB |
+| T5 tokenizer（仅 3 文件，不下权重）| [google/t5-v1_1-xxl](https://huggingface.co/google/t5-v1_1-xxl) | `models/t5_tokenizer/` | <1 MB |
 
-**镜像站下载**（国内推荐）:
-- HF-Mirror: `https://hf-mirror.com/<repo>/resolve/main/<filename>`
-- 示例: `https://hf-mirror.com/Qwen/Qwen3-0.6B-Base/resolve/main/model.safetensors`
+更多选项：`python tools/download_models.py --help`，包含：
+- `--variant {latest, preview3-base, preview2, preview}` 选 Anima 主模型版本
+- `--skip-{main,vae,qwen,t5}` 单独跳过某项
+- `--output PATH` 自定义目标根目录
 
-### 2. 准备数据集
+也可以**直接进 Studio 设置页里点按钮下载**（与 CLI 共享同一份代码，可选根目录、状态实时刷新）。
 
-支持两种标签格式：
-
-**TXT 格式（传统）**:
-```
-dataset/
-├── image001.jpg
-├── image001.txt    # Danbooru 风格标签
-└── ...
-```
-
-**JSON 格式（推荐）**:
-```
-dataset/
-├── image001.jpg
-├── image001.json   # 结构化标签
-└── ...
-```
-
-JSON 标签示例：
-```json
-{
-  "quality": "newest, safe",
-  "count": "1girl",
-  "character": "hatsune miku",
-  "series": "vocaloid",
-  "artist": "@wlop",
-  "appearance": ["long hair", "blue hair", "twintails", "blue eyes"],
-  "tags": ["singing", "microphone", "dynamic pose"],
-  "environment": ["concert stage", "spotlight", "crowd"],
-  "nl": "Miku performs energetically on stage."
-}
-```
-
-JSON 格式支持**分类 shuffle**（appearance/tags/environment 各自内部打乱，固定字段保持在前），详见 [docs/json-caption-format.md](docs/json-caption-format.md)
-
-### 3. 编辑配置文件
+### 3. 启动 Studio
 
 ```bash
-cp config/train_template.yaml config/my_training.yaml
-# 编辑 my_training.yaml
+python -m studio              # 构建前端（如缺）+ 起后端，自动开浏览器
 ```
 
-### 4. 开始训练
+或开发模式（前后端 watch）：
 
 ```bash
-python anima_train.py --config ./config/my_training.yaml
+python -m studio dev          # vite 5173 + uvicorn 8765 --reload
 ```
 
-命令行参数可覆盖配置文件：
+Windows 上也可以双击 `studio.bat`。
+
+打开 http://127.0.0.1:8765/studio/，跟着 Stepper 走：
+
+1. 项目页「+ 新建项目」
+2. **① 下载**：Booru 抓图（先在设置填 Gelbooru / Danbooru 凭据）或本地上传 zip
+3. **② 筛选**：双 grid，选要训的图复制到 train/
+4. **③ 打标**：选 WD14 模型 + 阈值，一键自动打标
+5. **④ 标签编辑**：批量加 / 删 / 替换；单图修；自动还原点
+6. **⑤ 正则集**：基于 tag 分布反向搜 booru，自动 WD14 打标 + 分辨率 AR 聚类
+7. **⑥ 训练**：选 preset 复制进 version 私有 config，改参数 → 入队
+8. 「队列」页查看任务，进**任务详情**看日志 / 监控 / 输出（含一键全量 zip 下载）
+
+### 4. 用 LoRA
+
+LoRA 权重直接 ComfyUI 可加载（**已经是 `lora_unet_*` 格式**），不需要任何转换。
+
+---
+
+## 高级：纯 CLI 训练
+
+不想用 Studio？
 
 ```bash
-python anima_train.py --config ./config/my_training.yaml --lr 5e-5 --epochs 20
+cp config/train_template.yaml config/my.yaml
+# 编辑 my.yaml，填好 transformer_path / vae_path / data_dir 等
+python anima_train.py --config config/my.yaml
 ```
 
-### 训练监控面板
+支持 `--no-monitor`（关训练侧 monitor）、`--monitor-state-file PATH`（指定 state.json 路径，Studio 用）等参数。CLI 完整参数表 `--help`。
 
-- **默认地址**：`http://127.0.0.1:8765/`
-- **关闭监控**：`--no-monitor`
-- **不自动打开浏览器**：`--no-browser`
-- **局域网/云端访问**：`--monitor-host 0.0.0.0`（并开放端口）
+断点续训 / 从已有 LoRA 继续训练 见 [docs/training-tips.md](docs/training-tips.md)。
 
-> 安全提醒：监控面板**没有鉴权**。不建议直接暴露到公网；云端建议用 SSH 端口转发访问。
+---
 
-## ⚙️ 配置说明
+## 项目结构
 
-### 基础配置
-
-```yaml
-# 模型路径
-transformer_path: "models/transformers/anima-preview.safetensors"
-vae_path: "models/vae/qwen_image_vae.safetensors"
-text_encoder_path: "models/text_encoders"
-t5_tokenizer_path: "models/t5_tokenizer"
-
-# 数据集
-data_dir: "./dataset"
-resolution: 1024
-repeats: 10              # 数据重复次数
-
-# 正则数据集（Kohya 风格，防过拟合）
-# reg_data_dir: "./reg"   # 通用图目录（1girl 等，不含角色）
-# reg_caption: "1girl, solo"  # 统一 caption（空则用各图自带）
-# 正则集同样支持文件夹名 repeat（如 5_concept）
-
-# Caption 处理
-shuffle_caption: true    # 打乱标签顺序
-keep_tokens: 0           # 保护前 N 个标签不打乱
-prefer_json: false       # 优先使用 JSON 标签文件
-flip_augment: false      # 水平翻转增强
-tag_dropout: 0.0         # 标签随机丢弃概率
-cache_latents: true      # 缓存 VAE latent
+```
+AnimaLoraToolkit/
+├── anima_train.py            # 核心训练脚本（CLI 入口）
+├── train_monitor.py          # 训练状态写入器（被 anima_train 调）
+├── monitor_smooth.html       # 监控 UI（HTML，Studio iframe 嵌入）
+├── studio/                   # AnimaStudio Web 工作台（FastAPI + React）
+│   ├── server.py             # 守护进程入口
+│   ├── services/             # 业务逻辑（uploads / 打标 / 正则集 / model_downloader 等）
+│   ├── workers/              # 后台任务子进程（download / tag / reg_build）
+│   └── web/                  # React + Vite 前端
+├── tools/                    # CLI 工具
+│   ├── download_models.py    # 一键下载所有模型
+│   └── ...
+├── config/                   # 训练 yaml 模板
+├── docs/                     # 详细文档
+├── utils/                    # 训练侧 utility（model loader / optimizer 等）
+└── models/                   # 模型文件（gitignored）
 ```
 
-### LoRA/LoKr 配置
+运行时数据：
+- `studio_data/` (SQLite + 用户 config + 任务日志，gitignored)
+- `models/` (HF 下载的模型，gitignored)
+- `output/` (训练 LoRA 输出，gitignored；按 version 也会落到 `studio_data/projects/.../versions/{label}/output/`)
 
-```yaml
-lora_type: "lokr"        # lora 或 lokr
-lora_rank: 32            # LoRA rank（建议 16-64）
-lora_alpha: 32           # 通常与 rank 相同
-lokr_factor: 8           # LoKr 专用参数
-```
+---
 
-**选择建议**:
-| 场景 | 类型 | Rank | 说明 |
-|------|------|------|------|
-| 单角色 LoRA | lora | 16-32 | 参数少，泛化好 |
-| 画风 LoRA | lora | 8-16 | 低 rank 防止过拟合 |
-| 多角色/复杂画风 | lokr | 32-64 | LyCORIS 更强表达力 |
+## 工具脚本
 
-### 训练参数
+| 脚本 | 用途 |
+|---|---|
+| `tools/download_models.py` | 一键下载所有训练所需的主模型 / VAE / Qwen3 / T5 tokenizer。多版本可选 |
+| `tools/validate_local_models.py` | 验证本地 Qwen / T5 是否可离线加载 |
+| `tools/check_weights.py` | （开发者）比对权重文件与代码 module 定义的 key 差异 |
 
-```yaml
-epochs: 50
-max_steps: 0             # 0 = 不限制
-batch_size: 1
-grad_accum: 4            # 有效 batch = batch_size × grad_accum
-learning_rate: 1e-4
-mixed_precision: "bf16"  # fp16, bf16, 或 no
-grad_checkpoint: true    # 梯度检查点（省显存）
-xformers: false          # Windows 5090 用 SDPA 更好
-num_workers: 0           # Windows 必须为 0
-```
+---
 
-### 保存与断点续训
+## 文档
 
-```yaml
-output_dir: "./output"
-output_name: "my_lora"
+- [docs/json-caption-format.md](docs/json-caption-format.md) — JSON 标签格式 + 分类 shuffle
+- [docs/tagging-guide.md](docs/tagging-guide.md) — Anima 标签格式与最佳实践
+- [docs/training-tips.md](docs/training-tips.md) — 训练参数 / 断点续训 / 常见问题
+- [docs/regularization-analysis.md](docs/regularization-analysis.md) — 正则集生成原理
+- [docs/trainer-optimization-analysis.md](docs/trainer-optimization-analysis.md) — 训练性能调优
+- [docs/studio-pipeline/](docs/studio-pipeline/) — Studio 七步改造的设计文档（开发者向）
+- [studio/README.md](studio/README.md) — Studio 内部架构
 
-# === 保存配置（重要！） ===
-save_every: 0              # 每 N epoch 保存 LoRA (0=禁用)
-save_every_steps: 500      # 每 N step 保存 LoRA (推荐)
-save_state_every: 1000     # 每 N step 保存完整训练状态（可断点续训）
+---
 
-# === 继续训练 ===
-resume_lora: ""            # 从已有 LoRA 继续训练
-resume_state: ""           # 从训练状态恢复（断点续训）
+## 硬件要求
 
-seed: 42
-```
+- **GPU**：24 GB+ 显存（RTX 3090 / 4090 / 5090；Apple Silicon 暂不支持）
+- **RAM**：32 GB+
+- **存储**：SSD 强烈推荐（latent cache + sample 输出 IO 频繁）
 
-**保存文件说明**：
-- `{name}_step{N}.safetensors` - LoRA 权重，可直接在 ComfyUI 使用
-- `training_state_step{N}.pt` - 完整训练状态（优化器、随机数、loss 历史）
+---
 
-### 采样配置
+## License
 
-```yaml
-sample_every: 5          # 每 N 个 epoch 采样
-sample_steps: 0          # 或每 N step 采样
-sample_infer_steps: 25
-sample_cfg_scale: 4.0
-sample_sampler_name: "er_sde"
-sample_scheduler: "simple"
+仓库整体以 **GPL-3.0** 发布（包含 / 派生自 ComfyUI 的 GPL-3.0 代码实现）。
 
-# 多提示词轮换
-sample_prompts:
-  - "newest, safe, 1girl, ..."
-  - "newest, safe, 1boy, ..."
-```
-
-## 🔄 继续训练与断点恢复
-
-### 从已有 LoRA 继续训练
-
-如果你有一个训练好的 LoRA，想在此基础上继续训练：
-
-```yaml
-# 在配置文件中指定
-resume_lora: "./output/my_lora_step1000.safetensors"
-```
-
-或命令行：
-
-```bash
-python anima_train.py --config config.yaml --resume-lora ./output/my_lora_step1000.safetensors
-```
-
-**注意**：这只加载 LoRA 权重，优化器状态会重置，学习率从头开始。
-
-### 从中断处完全恢复（断点续训）
-
-如果训练中断，想从**完全相同的状态**恢复（包括优化器、随机数、loss 历史）：
-
-```yaml
-# 在配置文件中指定
-resume_state: "./output/cosmic_kaguya/training_state_step1000.pt"
-```
-
-或命令行：
-
-```bash
-python anima_train.py --config config.yaml --resume-state ./output/training_state_step1000.pt
-```
-
-**恢复内容**：
-- ✅ LoRA 权重
-- ✅ 优化器状态（momentum、Adam state）
-- ✅ 随机数状态（torch、numpy、python random）
-- ✅ 当前 epoch 和 step
-- ✅ Loss 历史
-
-### Ctrl+C 安全中断
-
-训练时按 `Ctrl+C` 会**自动保存**：
-```
-检测到 Ctrl+C，正在保存训练状态...
-已保存！下次使用 --resume-state "xxx/training_state_step1234.pt" 继续训练
-```
-
-### 推荐配置
-
-```yaml
-# 长时间训练推荐配置
-save_every_steps: 500      # 每 500 step 保存 LoRA（方便选择最佳版本）
-save_state_every: 2000     # 每 2000 step 保存训练状态（断点恢复用）
-```
-
-## 📁 配置示例
-
-| 文件 | 场景 | 说明 |
-|------|------|------|
-| `config/train_template.yaml` | 通用模板 | 带详细注释，推荐作为起点 |
-| `config/train_local.yaml` | 本地离线训练 | 所有路径指向本地模型 |
-
-## 📖 文档
-
-- [打标指南](docs/tagging-guide.md) - Anima 标签格式和最佳实践
-- [JSON Caption 格式](docs/json-caption-format.md) - 结构化标签规范
-- [训练技巧](docs/training-tips.md) - 常见问题和优化建议
-
-## 🎛️ AnimaStudio（Web 面板，开发中）
-
-`studio/` 下是一个常驻的 Web 服务，用来替代手写 YAML、管理多个训练任务。当前 P1 阶段只提供训练监控守护化，后续会陆续上线配置编辑、数据集浏览、任务队列。详见 [`studio/README.md`](studio/README.md)。
-
-```bash
-# 后端
-python -m studio.server          # http://127.0.0.1:8765
-
-# 前端开发模式（需 Node 18+）
-cd studio/web && npm install && npm run dev
-```
-
-启用 Studio 模式跑训练时，加 `--no-monitor` 让训练侧不再自启监控（守护进程已经在跑）：
-
-```bash
-python anima_train.py --config config/foo.yaml --no-monitor
-```
-
-## 🔧 工具脚本
-
-| 脚本 | 功能 |
-|------|------|
-| `tools/download_tokenizers.py` | 下载 tokenizer 文件（支持镜像） |
-| `tools/validate_local_models.py` | 验证本地模型文件是否正确 |
-| `tools/check_weights.py` | 检查模型权重与代码定义的差异 |
-| `tools/convert_lokr_for_comfyui.py` | 转换其他工具导出的 LoKr 为 ComfyUI 格式 |
-| `train_monitor.py` | 训练监控 Web 界面（训练时自动启动；Studio 模式下由 `studio/server.py` 接管） |
-
-### convert_lokr_for_comfyui.py
-
-将 `lycoris_` 前缀的 LoKr 权重转换为 ComfyUI 兼容的 `lora_unet_` 前缀。
-
-> **注意**：本工具训练的 LoRA 已经是 ComfyUI 格式，**无需转换**。此脚本仅用于转换其他工具（如 kohya）导出的旧格式。
-
-```bash
-# 转换单个文件
-python tools/convert_lokr_for_comfyui.py ./my_lokr.safetensors
-
-# 指定输出路径
-python tools/convert_lokr_for_comfyui.py ./my_lokr.safetensors --output ./converted.safetensors
-```
-
-| 输入格式 | 输出格式 | 说明 |
-|----------|----------|------|
-| `lycoris_xxx.lokr_w1` | `lora_unet_xxx.lokr_w1` | 自动转换前缀 |
-| `lora_unet_xxx` | `lora_unet_xxx` | 已是正确格式，保持不变 |
-
-## 💻 硬件要求
-
-- **GPU**: 24GB+ 显存 (RTX 3090/4090/5090)
-- **RAM**: 32GB+
-- **存储**: SSD 推荐（latent 缓存）
-
-## 🙏 致谢
-
-- [FHfanshu/Anima_Trainer](https://github.com/FHfanshu/Anima_Trainer) - 原版训练脚本，本项目的基础
-- [CircleStone Labs](https://huggingface.co/circlestone-labs) - Anima 模型开发团队
-- [Comfy Org](https://github.com/comfyanonymous/ComfyUI) - ComfyUI 框架
-
-## 📄 License
-
-本项目整体以 **GPL-3.0** 发布（包含/派生自 ComfyUI 的 GPL-3.0 代码实现）。
-
-同时，本项目包含部分来自第三方的代码/实现片段（例如 NVIDIA Cosmos / Wan2.1 等），请保留其文件头声明，并参考：
+仓库内同时包含部分 Apache-2.0 第三方实现（NVIDIA Cosmos / Wan2.1 等），请保留原文件头声明。详见：
 
 - `LICENSE`（GPL-3.0）
 - `LICENSE-APACHE`（Apache-2.0 文本，用于仓库内 Apache-2.0 组件）
 - `THIRD_PARTY_NOTICES.md`
 
-**注意**：模型权重（例如 Anima / Qwen / VAE）通常有各自的条款（含 Non-Commercial 等限制），请以对应模型卡/仓库协议为准。
+**模型权重**（Anima / Qwen / VAE）有各自的条款（含 Non-Commercial 等限制），请以对应模型卡 / HF repo 协议为准。
