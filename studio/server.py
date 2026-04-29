@@ -1110,7 +1110,9 @@ def wd14_install(body: WD14InstallRequest) -> dict[str, Any]:
     """切换 onnxruntime 包：先 uninstall 两个互斥包，再装目标。
 
     同步 pip install，几分钟级；前端按钮要带 loading。
-    返回新的 runtime 状态（与 /api/wd14/runtime 同结构）+ pip stdout 末尾。
+    onnxruntime 是 C extension，装完后**必须重启 Studio** 才能切换 EP（pip 卸装
+    重装不能热替换已 import 的 .pyd/.so）。返回 `restart_required=True` 让前端
+    显式提示。
     """
     if body.target not in ("auto", "gpu", "cpu"):
         raise HTTPException(400, "target must be auto|gpu|cpu")
@@ -1118,11 +1120,13 @@ def wd14_install(body: WD14InstallRequest) -> dict[str, Any]:
         res = onnxruntime_setup.install_runtime(body.target)
     except RuntimeError as exc:
         raise HTTPException(500, str(exc)) from exc
-    # stdout 可能很长，截尾给前端做 toast / 折叠显示
     stdout = res.pop("stdout", "")
     tail = "\n".join(stdout.splitlines()[-30:])
+    # 同时返回当前进程视角（providers 仍是旧的，UI 用来对比）
+    rt = onnxruntime_setup.current_runtime()
     return {
         **res,
+        **rt,
         "cuda_detect": onnxruntime_setup.detect_cuda(),
         "stdout_tail": tail,
     }

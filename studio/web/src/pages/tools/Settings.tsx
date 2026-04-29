@@ -1061,7 +1061,12 @@ function WD14RuntimePanel() {
         : target === 'gpu'
         ? '将卸载现有 onnxruntime 并安装 onnxruntime-gpu'
         : '将卸载现有 onnxruntime-gpu 并安装 onnxruntime（CPU）'
-    if (!confirm(`${detail}。装包需要几分钟，期间不要关 Studio。继续？`)) return
+    if (
+      !confirm(
+        `${detail}。装包需要几分钟。\n\n⚠️ 注意：装完后必须**重启 Studio** 才能生效（onnxruntime 是 C 扩展，进程内不能热替换）。继续？`
+      )
+    )
+      return
     setBusy(target)
     try {
       const result = await api.installWD14Runtime(target)
@@ -1070,14 +1075,12 @@ function WD14RuntimePanel() {
         version: result.version,
         providers: result.providers,
         cuda_available: result.cuda_available,
+        restart_required: result.restart_required,
         cuda_detect: result.cuda_detect,
       })
-      toast(
-        `已切换为 ${result.installed}@${result.version ?? '?'} (${
-          result.cuda_available ? 'CUDA' : 'CPU'
-        })`,
-        'success'
-      )
+      const newPkg = result.installed_pkg ?? result.installed ?? '?'
+      const newVer = result.installed_version ?? result.version ?? '?'
+      toast(`已装 ${newPkg}==${newVer}，请重启 Studio 让 EP 生效`, 'success')
     } catch (e) {
       toast(`装包失败: ${e}`, 'error')
     } finally {
@@ -1102,6 +1105,7 @@ function WD14RuntimePanel() {
     ? `${cuda.gpu_name ?? '?'} (driver ${cuda.driver_version ?? '?'})`
     : '未检测到 NVIDIA GPU'
   const mismatched = cuda.available && !rt.cuda_available
+  const restartRequired = !!rt.restart_required
 
   return (
     <div className="rounded border border-slate-700 bg-slate-950/40 p-2 space-y-1.5 text-xs">
@@ -1124,7 +1128,13 @@ function WD14RuntimePanel() {
       </div>
       <div className="text-slate-500">EP: <code className="text-slate-300 font-mono">{epLabel}</code></div>
       <div className="text-slate-500">GPU 检测: <span className="text-slate-300">{cudaInfo}</span></div>
-      {mismatched && (
+      {restartRequired && (
+        <div className="rounded border border-red-700/60 bg-red-900/30 px-2 py-1.5 text-red-200 text-[11px] leading-relaxed">
+          🔁 已装新 onnxruntime 包，但当前进程仍在用旧的（C 扩展不能热替换）。
+          <strong className="text-red-100">请重启 Studio</strong> 让 EP 切换生效。
+        </div>
+      )}
+      {!restartRequired && mismatched && (
         <div className="text-amber-300 text-[11px] leading-relaxed">
           ⚠️ 检测到 NVIDIA GPU 但 onnxruntime 只有 CPU EP — WD14 会跑得很慢。点下方「重装为 GPU 版」修复。
         </div>

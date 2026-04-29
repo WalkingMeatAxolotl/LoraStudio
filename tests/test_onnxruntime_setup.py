@@ -105,13 +105,8 @@ def test_install_runtime_runs_uninstall_then_install(
 
     monkeypatch.setattr(ors, "_pip", fake_pip)
     monkeypatch.setattr(
-        ors, "current_runtime",
-        lambda: {
-            "installed": "onnxruntime-gpu",
-            "version": "1.20.0",
-            "providers": ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            "cuda_available": True,
-        },
+        ors, "_query_dist_info",
+        lambda: ("onnxruntime-gpu", "1.20.0"),
     )
     res = ors.install_runtime("gpu")
     assert len(calls) == 2
@@ -120,8 +115,10 @@ def test_install_runtime_runs_uninstall_then_install(
     assert "onnxruntime" in calls[0]
     assert calls[1][0] == "install"
     assert any("onnxruntime-gpu" in a for a in calls[1])
-    assert res["installed"] == "onnxruntime-gpu"
-    assert res["cuda_available"] is True
+    assert res["installed_pkg"] == "onnxruntime-gpu"
+    assert res["installed_version"] == "1.20.0"
+    # 装完必须返回 restart_required 提示前端
+    assert res["restart_required"] is True
 
 
 def test_install_runtime_install_failure_raises(
@@ -147,20 +144,27 @@ def test_bootstrap_installs_when_missing(monkeypatch: pytest.MonkeyPatch) -> Non
         ors, "detect_cuda",
         lambda: {"available": True, "driver_version": "551.86", "gpu_name": "RTX 5090"},
     )
-    monkeypatch.setattr(
-        ors, "current_runtime",
-        lambda: {"installed": None, "version": None, "providers": [], "cuda_available": False},
-    )
+    # current_runtime 第一次返回未安装；install 完后第二次返回新状态
+    rt_calls = iter([
+        {"installed": None, "version": None, "providers": [], "cuda_available": False, "restart_required": False},
+        {
+            "installed": "onnxruntime-gpu",
+            "version": "1.20.0",
+            "providers": ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            "cuda_available": True,
+            "restart_required": False,
+        },
+    ])
+    monkeypatch.setattr(ors, "current_runtime", lambda: next(rt_calls))
     captured: dict = {}
 
     def fake_install(target):
         captured["target"] = target
         return {
             "target": "onnxruntime-gpu>=1.20",
-            "installed": "onnxruntime-gpu",
-            "version": "1.20.0",
-            "providers": ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            "cuda_available": True,
+            "installed_pkg": "onnxruntime-gpu",
+            "installed_version": "1.20.0",
+            "restart_required": True,
             "stdout": "",
         }
 
@@ -221,6 +225,46 @@ def test_bootstrap_silent_when_already_correct(
     state = ors.bootstrap()
     assert install_called == []
     assert state["cuda_available"] is True
+
+
+def test_current_runtime_flags_restart_when_dist_version_mismatches_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pip 装了 onnxruntime-gpu==1.25.1，但已 import 的进程内还是旧 1.18.0 →
+    restart_required=True（C extension 不能热替换）。"""
+    monkeypatch.setattr(ors, "_query_dist_info", lambda: ("onnxruntime-gpu", "1.25.1"))
+    fake_ort = MagicMock()
+    fake_ort.get_available_providers.return_value = ["AzureExecutionProvider", "CPUExecutionProvider"]
+    fake_ort.__version__ = "1.18.0"
+    monkeypatch.setitem(__import__("sys").modules, "onnxruntime", fake_ort)
+    rt = ors.current_runtime()
+    assert rt["restart_required"] is True
+
+
+def test_current_runtime_flags_restart_when_gpu_pkg_but_no_cuda_ep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """dist-info 写 onnxruntime-gpu 但 providers 没 CUDA EP → 进程仍是旧 CPU 包。"""
+    monkeypatch.setattr(ors, "_query_dist_info", lambda: ("onnxruntime-gpu", "1.20.0"))
+    fake_ort = MagicMock()
+    fake_ort.get_available_providers.return_value = ["AzureExecutionProvider", "CPUExecutionProvider"]
+    fake_ort.__version__ = "1.20.0"
+    monkeypatch.setitem(__import__("sys").modules, "onnxruntime", fake_ort)
+    rt = ors.current_runtime()
+    assert rt["restart_required"] is True
+
+
+def test_current_runtime_no_restart_when_gpu_pkg_and_cuda_ep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ors, "_query_dist_info", lambda: ("onnxruntime-gpu", "1.20.0"))
+    fake_ort = MagicMock()
+    fake_ort.get_available_providers.return_value = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    fake_ort.__version__ = "1.20.0"
+    monkeypatch.setitem(__import__("sys").modules, "onnxruntime", fake_ort)
+    rt = ors.current_runtime()
+    assert rt["restart_required"] is False
+    assert rt["cuda_available"] is True
 
 
 def test_bootstrap_install_failure_returns_error(

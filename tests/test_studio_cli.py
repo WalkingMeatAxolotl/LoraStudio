@@ -115,7 +115,10 @@ def test_run_starts_backend_and_skips_build_when_dist_exists(
 ) -> None:
     fake_dist = tmp_path / "dist"
     fake_dist.mkdir()
+    # PP9.1 — dist 新鲜度按 dist/index.html 与 src/ 树 mtime 比较；测试里直接屏蔽 stale 检测
+    (fake_dist / "index.html").write_text("<html/>")
     monkeypatch.setattr(cli, "WEB_DIST", fake_dist)
+    monkeypatch.setattr(cli, "_web_dist_is_stale", lambda: False)
     rc = cli.main(["run"])
     assert rc == 0
     # 没有 build 调用

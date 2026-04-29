@@ -98,6 +98,8 @@ export interface WD14Runtime {
   version: string | null
   providers: string[]
   cuda_available: boolean
+  /** 装的包（dist-info）与当前进程已 import 的 .pyd 不一致 → 需重启 Studio。 */
+  restart_required: boolean
   cuda_detect: {
     available: boolean
     driver_version: string | null
@@ -107,6 +109,8 @@ export interface WD14Runtime {
 
 export interface WD14InstallResult extends WD14Runtime {
   target: string
+  installed_pkg: string | null
+  installed_version: string | null
   stdout_tail: string
 }
 
