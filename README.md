@@ -1,6 +1,6 @@
-# AnimaLoraToolkit
+# AnimaLoraStudio
 
-Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaStudio)**。
+Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaLoraStudio)**。
 
 从「准备数据 → 打标 → 正则集 → 训练 → 监控 → 下载 LoRA」一条流水线，在浏览器里点完。也支持纯 CLI 跑训练。
 
@@ -27,7 +27,7 @@ Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaStudio)**
 - bf16 / fp16 训练
 - 训练时 sample 出图 + 实时 loss 曲线
 
-**AnimaStudio Web 工作台 (`studio/`)**
+**AnimaLoraStudio Web 工作台 (`studio/`)**
 - 项目 / 版本 数据模型，每次训练对应一个 `Project` + 一个 `Version`
 - ① 下载（Booru 抓取 + 本地 jpg/png/zip 上传）
 - ② 筛选（download / train 双面板，多选复制 / 移除）
