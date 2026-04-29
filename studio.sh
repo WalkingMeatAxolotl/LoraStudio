@@ -16,13 +16,24 @@ if [ -x "venv/bin/python" ]; then
     PYTHON="venv/bin/python"
 elif [ -x ".venv/bin/python" ]; then
     PYTHON=".venv/bin/python"
-elif command -v python3 >/dev/null 2>&1; then
-    PYTHON="python3"
-elif command -v python >/dev/null 2>&1; then
-    PYTHON="python"
 else
-    echo "studio.sh: no python found (looked for venv/bin/python, .venv/bin/python, python3, python)" >&2
-    exit 1
+    if command -v python3 >/dev/null 2>&1; then
+        BOOTSTRAP_PY="python3"
+    elif command -v python >/dev/null 2>&1; then
+        BOOTSTRAP_PY="python"
+    else
+        echo "studio.sh: no python found (need python3 or python on PATH)" >&2
+        exit 1
+    fi
+    echo "[studio] 未发现 venv，正在创建 venv/ 并安装依赖（首次运行，可能需要几分钟）..."
+    "$BOOTSTRAP_PY" -m venv venv || { echo "studio.sh: 创建 venv 失败" >&2; exit 1; }
+    PYTHON="venv/bin/python"
+    "$PYTHON" -m pip install --upgrade pip || { echo "studio.sh: 升级 pip 失败" >&2; exit 1; }
+    if [ -f requirements.txt ]; then
+        "$PYTHON" -m pip install -r requirements.txt || { echo "studio.sh: pip install -r requirements.txt 失败" >&2; exit 1; }
+    else
+        echo "studio.sh: 找不到 requirements.txt，跳过依赖安装" >&2
+    fi
 fi
 
 echo "studio.sh: using $PYTHON"
