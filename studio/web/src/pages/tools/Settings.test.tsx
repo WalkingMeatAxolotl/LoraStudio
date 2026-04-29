@@ -32,6 +32,7 @@ const initialServerState = {
     threshold_general: 0.35,
     threshold_character: 0.85,
     blacklist_tags: [],
+    batch_size: 8,
   },
   models: { root: null, selected_anima: 'preview3-base' },
 }
@@ -97,6 +98,20 @@ beforeEach(() => {
     if (typeof url === 'string' && url.includes('/api/models/catalog')) {
       return Promise.resolve(
         new Response(JSON.stringify(emptyModelsCatalog), { status: 200 })
+      )
+    }
+    if (typeof url === 'string' && url.includes('/api/wd14/runtime')) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            installed: 'onnxruntime',
+            version: '1.18.0',
+            providers: ['CPUExecutionProvider'],
+            cuda_available: false,
+            cuda_detect: { available: false, driver_version: null, gpu_name: null },
+          }),
+          { status: 200 }
+        )
       )
     }
     return Promise.resolve(

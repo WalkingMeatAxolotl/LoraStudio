@@ -6,6 +6,7 @@ import {
   type ModelsCatalog,
   type Secrets,
   type SecretsPatch,
+  type WD14Runtime,
 } from '../../api/client'
 import { useToast } from '../../components/Toast'
 import { useEventStream } from '../../lib/useEventStream'
@@ -44,6 +45,7 @@ const EMPTY: Secrets = {
     threshold_general: 0.35,
     threshold_character: 0.85,
     blacklist_tags: [],
+    batch_size: 8,
   },
   models: { root: null, selected_anima: 'preview3-base' },
 }
@@ -342,6 +344,19 @@ export default function SettingsPage() {
             className={textInput}
           />
         </Field>
+        <Field label="batch_size (GPU 推理一批塞几张；CPU 自动降到 1)">
+          <input
+            type="number"
+            min={1}
+            max={64}
+            value={draft.wd14.batch_size}
+            onChange={(e) =>
+              update('wd14', 'batch_size', Math.max(1, Number(e.target.value) || 1))
+            }
+            className={textInput}
+          />
+        </Field>
+        <WD14RuntimePanel />
       </Section>
 
       <ModelsSection />
@@ -960,5 +975,143 @@ function DownloadButton({
     >
       {exists ? '↻ 重下' : '⤓ 下载'}
     </button>
+  )
+}
+
+
+// ---------------------------------------------------------------------------
+// PP8 — onnxruntime 运行时面板（CUDA / CPU 显示 + 一键切换）
+// ---------------------------------------------------------------------------
+
+function WD14RuntimePanel() {
+  const [rt, setRt] = useState<WD14Runtime | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<null | 'auto' | 'gpu' | 'cpu'>(null)
+  const { toast } = useToast()
+
+  const refresh = useCallback(async () => {
+    try {
+      const r = await api.getWD14Runtime()
+      setRt(r)
+      setError(null)
+    } catch (e) {
+      setError(String(e))
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const install = async (target: 'auto' | 'gpu' | 'cpu') => {
+    const detail =
+      target === 'auto'
+        ? '将按 nvidia-smi 检测自动选 GPU/CPU 包'
+        : target === 'gpu'
+        ? '将卸载现有 onnxruntime 并安装 onnxruntime-gpu'
+        : '将卸载现有 onnxruntime-gpu 并安装 onnxruntime（CPU）'
+    if (!confirm(`${detail}。装包需要几分钟，期间不要关 Studio。继续？`)) return
+    setBusy(target)
+    try {
+      const result = await api.installWD14Runtime(target)
+      setRt({
+        installed: result.installed,
+        version: result.version,
+        providers: result.providers,
+        cuda_available: result.cuda_available,
+        cuda_detect: result.cuda_detect,
+      })
+      toast(
+        `已切换为 ${result.installed}@${result.version ?? '?'} (${
+          result.cuda_available ? 'CUDA' : 'CPU'
+        })`,
+        'success'
+      )
+    } catch (e) {
+      toast(`装包失败: ${e}`, 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (error) {
+    return (
+      <div className="text-xs text-red-300 font-mono">{error}</div>
+    )
+  }
+  if (!rt) {
+    return <div className="text-xs text-slate-500">加载 runtime 状态...</div>
+  }
+
+  const epLabel = (rt.providers ?? [])
+    .map((p) => p.replace('ExecutionProvider', ''))
+    .join(' / ') || '(none)'
+  const cuda = rt.cuda_detect ?? { available: false, driver_version: null, gpu_name: null }
+  const cudaInfo = cuda.available
+    ? `${cuda.gpu_name ?? '?'} (driver ${cuda.driver_version ?? '?'})`
+    : '未检测到 NVIDIA GPU'
+  const mismatched = cuda.available && !rt.cuda_available
+
+  return (
+    <div className="rounded border border-slate-700 bg-slate-950/40 p-2 space-y-1.5 text-xs">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-slate-500 shrink-0">runtime:</span>
+        <code className="font-mono text-slate-200">
+          {rt.installed ?? '(未安装)'}
+          {rt.version ? `==${rt.version}` : ''}
+        </code>
+        <span
+          className={
+            'text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 ' +
+            (rt.cuda_available
+              ? 'bg-emerald-700/40 text-emerald-200'
+              : 'bg-amber-700/40 text-amber-200')
+          }
+        >
+          {rt.cuda_available ? 'CUDA' : 'CPU only'}
+        </span>
+      </div>
+      <div className="text-slate-500">EP: <code className="text-slate-300 font-mono">{epLabel}</code></div>
+      <div className="text-slate-500">GPU 检测: <span className="text-slate-300">{cudaInfo}</span></div>
+      {mismatched && (
+        <div className="text-amber-300 text-[11px] leading-relaxed">
+          ⚠️ 检测到 NVIDIA GPU 但 onnxruntime 只有 CPU EP — WD14 会跑得很慢。点下方「重装为 GPU 版」修复。
+        </div>
+      )}
+      <div className="flex gap-2 flex-wrap pt-1">
+        <button
+          onClick={() => install('auto')}
+          disabled={busy !== null}
+          className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 disabled:opacity-50"
+          title="按 nvidia-smi 检测自动选 GPU / CPU 包"
+        >
+          {busy === 'auto' ? '⏳ 装包中...' : '🔁 自动检测'}
+        </button>
+        <button
+          onClick={() => install('gpu')}
+          disabled={busy !== null}
+          className="px-2 py-1 rounded bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-50"
+          title="重装 onnxruntime-gpu (CUDA 12.x)"
+        >
+          {busy === 'gpu' ? '⏳ 装包中...' : '⚡ 重装为 GPU'}
+        </button>
+        <button
+          onClick={() => install('cpu')}
+          disabled={busy !== null}
+          className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 disabled:opacity-50"
+          title="重装 onnxruntime (CPU only)"
+        >
+          {busy === 'cpu' ? '⏳ 装包中...' : '🐢 重装为 CPU'}
+        </button>
+        <button
+          onClick={() => void refresh()}
+          disabled={busy !== null}
+          className="px-2 py-1 rounded text-slate-400 hover:text-slate-200 disabled:opacity-50"
+          title="重新读取 runtime 状态"
+        >
+          ↻
+        </button>
+      </div>
+    </div>
   )
 }

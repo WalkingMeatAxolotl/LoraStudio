@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 import numpy as np
 from PIL import Image, ImageOps
@@ -130,6 +130,7 @@ class WD14Tagger:
     # -------------------- inference --------------------
 
     def _preprocess(self, img: Image.Image) -> np.ndarray:
+        """单图 → [H, W, 3] BGR float32。batch 推理时调用方负责 stack 成 [N, H, W, 3]。"""
         size = self._input_size
         img = ImageOps.exif_transpose(img) or img
         if img.mode != "RGB":
@@ -141,13 +142,13 @@ class WD14Tagger:
         arr = np.asarray(canvas, dtype=np.float32)
         # WD14 训练用 BGR
         arr = arr[..., ::-1]
-        return np.expand_dims(arr, 0).copy()
+        return arr
 
-    def _postprocess(
-        self, logits: np.ndarray
+    def _postprocess_one(
+        self, scores: np.ndarray
     ) -> tuple[list[str], dict[str, float]]:
+        """单张图的概率向量 → (sorted_tags, raw_scores_dict)。"""
         cfg = self._cfg()
-        scores = logits[0]
         out: list[tuple[str, float]] = []
         blacklist = set(cfg.blacklist_tags)
         for i, p in enumerate(scores):
@@ -166,6 +167,16 @@ class WD14Tagger:
         out.sort(key=lambda x: -x[1])
         return [t for t, _ in out], dict(out)
 
+    def _effective_batch_size(self) -> int:
+        """batch_size 决议：用户配置 → CPU EP 时强制 1（CPU batch 增益负的）。"""
+        cfg = self._cfg()
+        n = max(1, int(cfg.batch_size or 1))
+        if self._session is not None:
+            providers = list(self._session.get_providers())
+            if "CUDAExecutionProvider" not in providers:
+                return 1
+        return n
+
     def tag(
         self,
         image_paths: list[Path],
@@ -175,13 +186,47 @@ class WD14Tagger:
             self.prepare()
         assert self._session is not None
         total = len(image_paths)
-        for i, p in enumerate(image_paths):
-            try:
-                with Image.open(p) as raw:
-                    arr = self._preprocess(raw)
-                logits = self._session.run(None, {self._input_name: arr})[0]
-                tags, raw_scores = self._postprocess(logits)
-                yield {"image": p, "tags": tags, "raw_scores": raw_scores}
-            except Exception as exc:  # noqa: BLE001
-                yield {"image": p, "tags": [], "error": str(exc)}
-            on_progress(i + 1, total)
+        batch_n = self._effective_batch_size()
+        done = 0
+        i = 0
+        while i < total:
+            chunk = image_paths[i : i + batch_n]
+            # 先逐张 preprocess（PIL 解码失败的图记下 error，跳过推理）
+            arrs: list[np.ndarray] = []
+            ok_idx: list[int] = []  # chunk 内成功 preprocess 的索引
+            errs: dict[int, str] = {}
+            for j, p in enumerate(chunk):
+                try:
+                    with Image.open(p) as raw:
+                        arr = self._preprocess(raw)
+                    arrs.append(arr)
+                    ok_idx.append(j)
+                except Exception as exc:  # noqa: BLE001
+                    errs[j] = str(exc)
+            # batch 推理（剩 0 张就跳过）
+            logits_batch: Optional[np.ndarray] = None
+            if arrs:
+                try:
+                    batch = np.stack(arrs, axis=0).copy()
+                    logits_batch = self._session.run(
+                        None, {self._input_name: batch}
+                    )[0]
+                except Exception as exc:  # noqa: BLE001
+                    # 整 batch 推理失败 → 当作每张图都报错
+                    for j in ok_idx:
+                        errs[j] = f"inference failed: {exc}"
+                    logits_batch = None
+            # 按原 chunk 顺序 yield 结果
+            ok_pos = 0
+            for j, p in enumerate(chunk):
+                if j in errs:
+                    yield {"image": p, "tags": [], "error": errs[j]}
+                elif logits_batch is not None and ok_pos < logits_batch.shape[0]:
+                    tags, raw_scores = self._postprocess_one(logits_batch[ok_pos])
+                    ok_pos += 1
+                    yield {"image": p, "tags": tags, "raw_scores": raw_scores}
+                else:
+                    yield {"image": p, "tags": [], "error": "no logits"}
+                done += 1
+                on_progress(done, total)
+            i += batch_n

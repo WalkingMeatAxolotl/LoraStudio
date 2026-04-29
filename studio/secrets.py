@@ -73,6 +73,8 @@ class WD14Config(BaseModel):
     threshold_general: float = 0.35
     threshold_character: float = 0.85
     blacklist_tags: list[str] = Field(default_factory=list)
+    # PP8 — batch 推理大小；GPU EP 时按这个走，CPU 兜底自动降到 1
+    batch_size: int = 8
 
     @model_validator(mode="after")
     def _ensure_model_ids_invariant(self) -> "WD14Config":

@@ -15,6 +15,7 @@
 | [pp5-regularization.md](pp5-regularization.md) | ✅ 已完成 — PP5（reg_build + auto_tag）+ PP5.1（补足）+ PP5.5（分辨率聚类后处理）|
 | [pp6-train.md](pp6-train.md) | ✅ 已完成 — PP6.1（per-task monitor）+ PP6.2（preset 双向流）+ PP6.3（Train 页 + 入队 + Stepper ⑥）|
 | [pp7-train-export-import.md](pp7-train-export-import.md) | ✅ 已完成 — 训练集（打标后的 train/）导出 zip + 上传新建项目；复用 outputs.zip 的打包/loading 模式 |
+| [pp8-gpu-tagging.md](pp8-gpu-tagging.md) | ✅ 已完成 — 启动期按 GPU 检测装 onnxruntime-gpu / onnxruntime；WD14 batch 推理；Settings 暴露 EP 状态 + 一键重装 |
 
 ## 实施原则
 

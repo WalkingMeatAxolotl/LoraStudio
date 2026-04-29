@@ -82,6 +82,26 @@ export interface WD14Config {
   threshold_general: number
   threshold_character: number
   blacklist_tags: string[]
+  /** PP8 — batch 推理大小；CPU EP 时强制 1。 */
+  batch_size: number
+}
+
+/** PP8 — onnxruntime 装包状态 + nvidia-smi 检测结果。 */
+export interface WD14Runtime {
+  installed: 'onnxruntime' | 'onnxruntime-gpu' | null
+  version: string | null
+  providers: string[]
+  cuda_available: boolean
+  cuda_detect: {
+    available: boolean
+    driver_version: string | null
+    gpu_name: string | null
+  }
+}
+
+export interface WD14InstallResult extends WD14Runtime {
+  target: string
+  stdout_tail: string
 }
 
 export const DEFAULT_WD14_MODELS: readonly string[] = [
@@ -967,6 +987,16 @@ export const api = {
   /** 把 output 目录全部文件打包成 zip 下载的直链。
    * 推荐用 downloadBlob() 调它，能显示 loading（后端打 zip 要时间）。 */
   taskOutputsZipUrl: (id: number) => `/api/queue/${id}/outputs.zip`,
+
+  // PP8 — WD14 运行时 / GPU 装包 ------------------------------------------
+  /** 当前 onnxruntime 状态：包名 / 版本 / providers / nvidia-smi 检测结果。 */
+  getWD14Runtime: () => req<WD14Runtime>('/api/wd14/runtime'),
+  /** 切换 onnxruntime（同步 pip，几分钟级；UI 必须带 loading）。 */
+  installWD14Runtime: (target: 'auto' | 'gpu' | 'cpu') =>
+    req<WD14InstallResult>('/api/wd14/install', {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    }),
 
   // PP7 — 训练集导出 / 导入 -----------------------------------------------
   /** 当前 version 的 train/ 打包 zip 直链。用 downloadBlob() 调它显示 loading。 */

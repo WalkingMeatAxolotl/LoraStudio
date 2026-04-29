@@ -58,6 +58,7 @@ from .services import (
     downloader,
     presets as preset_flow,
     model_downloader,
+    onnxruntime_setup,
     reg_builder,
     tagedit,
     train_io,
@@ -1088,6 +1089,43 @@ class BatchOp(BaseModel):
     new: Optional[str] = None                 # replace
     position: Optional[str] = "back"          # add: front|back
     top: int = 50                             # stats
+
+
+# WD14 runtime / GPU 装包 (PP8) ---------------------------------------------
+
+
+@app.get("/api/wd14/runtime")
+def wd14_runtime() -> dict[str, Any]:
+    """返回 onnxruntime 当前装的是哪个包 + 可用 EP + nvidia-smi 检测结果。"""
+    rt = onnxruntime_setup.current_runtime()
+    return {**rt, "cuda_detect": onnxruntime_setup.detect_cuda()}
+
+
+class WD14InstallRequest(BaseModel):
+    target: str = "auto"  # "auto" | "gpu" | "cpu"
+
+
+@app.post("/api/wd14/install")
+def wd14_install(body: WD14InstallRequest) -> dict[str, Any]:
+    """切换 onnxruntime 包：先 uninstall 两个互斥包，再装目标。
+
+    同步 pip install，几分钟级；前端按钮要带 loading。
+    返回新的 runtime 状态（与 /api/wd14/runtime 同结构）+ pip stdout 末尾。
+    """
+    if body.target not in ("auto", "gpu", "cpu"):
+        raise HTTPException(400, "target must be auto|gpu|cpu")
+    try:
+        res = onnxruntime_setup.install_runtime(body.target)
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    # stdout 可能很长，截尾给前端做 toast / 折叠显示
+    stdout = res.pop("stdout", "")
+    tail = "\n".join(stdout.splitlines()[-30:])
+    return {
+        **res,
+        "cuda_detect": onnxruntime_setup.detect_cuda(),
+        "stdout_tail": tail,
+    }
 
 
 @app.get("/api/tagger/{name}/check")

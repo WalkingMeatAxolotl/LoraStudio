@@ -182,12 +182,40 @@ def _spawn_browser_opener(url: str, *, delay: float = 1.0) -> None:
     t.start()
 
 
+def _bootstrap_onnxruntime() -> None:
+    """PP8 — 启动期检测 GPU 后按需装 onnxruntime / onnxruntime-gpu。
+
+    requirements.txt 不写死它，避免用户机器 CUDA 与硬编码包不匹配踩坑。
+    失败不致命（log + 让用户从 Settings 页手动装）。
+    """
+    try:
+        from studio.services import onnxruntime_setup
+        state = onnxruntime_setup.bootstrap()
+        if state.get("error"):
+            print(f"[studio] onnxruntime 自动安装失败: {state['error']}", file=sys.stderr)
+        elif state.get("cuda_available"):
+            ver = state.get("version") or "?"
+            print(f"[studio] onnxruntime: {state.get('installed')}=={ver} (CUDA EP available)")
+        elif state.get("cuda_detect", {}).get("available"):
+            print(
+                f"[studio] 警告：检测到 NVIDIA GPU 但 onnxruntime 只有 CPU EP "
+                f"(installed={state.get('installed')})。WD14 会跑 CPU。"
+                f"去 Settings → WD14 点「重装为 GPU 版」。",
+                file=sys.stderr,
+            )
+        else:
+            print(f"[studio] onnxruntime: {state.get('installed')} (CPU only - no NVIDIA GPU detected)")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[studio] onnxruntime bootstrap 异常（已忽略）: {exc}", file=sys.stderr)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     if not WEB_DIST.exists() and not args.no_build:
         print("[studio] studio/web/dist 不存在，先构建前端...")
         rc = cmd_build(args)
         if rc != 0:
             return rc
+    _bootstrap_onnxruntime()
     url = f"http://{args.host}:{args.port}/studio/"
     print(f"[studio] 启动后端 → {url}")
     if not args.no_browser:
@@ -205,6 +233,7 @@ def cmd_dev(args: argparse.Namespace) -> int:
     rc = npm_install_if_missing(npm)
     if rc != 0:
         return rc
+    _bootstrap_onnxruntime()
 
     pg = ProcGroup()
     try:

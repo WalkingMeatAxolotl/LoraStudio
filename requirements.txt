@@ -38,8 +38,11 @@ psutil>=5.9.0
 rich>=13.7.0
 requests>=2.31.0
 
-# PP4 — WD14 打标（CPU ONNX；GPU 视用户环境额外装 onnxruntime-gpu）
-onnxruntime>=1.16.0
+# PP4 — WD14 打标
+# onnxruntime 由 studio 启动期按 GPU 检测自动安装（services/onnxruntime_setup.py）：
+# 有 NVIDIA GPU → onnxruntime-gpu>=1.20（PyPI default，CUDA 12.x，覆盖 RTX 30/40/50）
+# 无 → onnxruntime（CPU 兜底）
+# 用户也可在 Settings → WD14 → 重装按钮手动切换。
 huggingface_hub>=0.20.0
 
 # PP5.5 — 正则集分辨率聚类后处理（K-means + silhouette）
