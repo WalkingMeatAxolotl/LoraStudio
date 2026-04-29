@@ -4,9 +4,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# 训练侧已有
-MONITOR_DATA = REPO_ROOT / "monitor_data"
-MONITOR_STATE_FILE = MONITOR_DATA / "state.json"
+# 训练侧已有。`OUTPUT_DIR` 仅给 `/samples/{name}` 端点（无 task_id 时）兜底用，
+# CLI 用户用 `./output/samples/...`；Studio 模式样本落到
+# `studio_data/projects/{id}-{slug}/versions/{label}/output/samples/`。
+# PP6.1 后全局 `monitor_data/` 已退役（监控状态走 per-task），不再保留常量 / 创建目录。
 OUTPUT_DIR = REPO_ROOT / "output"
 LEGACY_MONITOR_HTML = REPO_ROOT / "monitor_smooth.html"
 
@@ -35,5 +36,5 @@ def ensure_dirs() -> None:
     """首次运行时创建必要目录。"""
     STUDIO_DATA.mkdir(parents=True, exist_ok=True)
     migrate_configs_to_presets()
-    for d in (MONITOR_DATA, USER_PRESETS_DIR, LOGS_DIR):
+    for d in (USER_PRESETS_DIR, LOGS_DIR):
         d.mkdir(parents=True, exist_ok=True)

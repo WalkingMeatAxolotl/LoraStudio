@@ -3,8 +3,8 @@
 P1 范围（本文件目前实现）：
     - GET  /                   返回兼容的 monitor_smooth.html（旧监控）
     - GET  /api/health         健康检查
-    - GET  /api/state          读取 monitor_data/state.json
-    - GET  /samples/{name}     代理采样图（output/samples/）
+    - GET  /api/state          读取 task 的 per-task monitor state
+    - GET  /samples/{name}     代理采样图（按 task_id 解析到 version 目录）
     - GET  /studio/...         React 应用（构建后挂载，可缺省）
 
 后续阶段会扩展（参见 plan）：
@@ -67,7 +67,6 @@ from .services.tagger import VALID_TAGGER_NAMES, get_tagger
 from .paths import (
     LEGACY_MONITOR_HTML,
     LOGS_DIR,
-    MONITOR_STATE_FILE,
     OUTPUT_DIR,
     REPO_ROOT,
     STUDIO_DB,
