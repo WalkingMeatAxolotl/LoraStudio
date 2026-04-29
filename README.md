@@ -10,10 +10,9 @@ Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaStudio)**
 
 ## 上游与致谢
 
-本仓库的核心训练脚本最初派生自 [**FHfanshu/Anima_Trainer**](https://github.com/FHfanshu/Anima_Trainer)；之后做了大量重构、改造与扩展，已经与上游完全分歧（独立仓库）。仍感谢原作者打的底子。
+本仓库的核心训练脚本派生自 [**Moeblack/AnimaLoraToolkit**](https://github.com/Moeblack/AnimaLoraToolkit)。
 
 - 主模型 / VAE：[circlestone-labs / Anima](https://huggingface.co/circlestone-labs/Anima)
-- ComfyUI 兼容格式：[comfyanonymous / ComfyUI](https://github.com/comfyanonymous/ComfyUI)
 - 训练监控前端 HTML：单文件 `monitor_smooth.html`
 
 ---
