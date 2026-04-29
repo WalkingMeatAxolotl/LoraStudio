@@ -103,7 +103,7 @@ def test_download_saves_files_with_post_id_names(tmp_path: Path) -> None:
         on_progress=lambda _: None,
         session=sess,
         page_delay=0,
-        image_delay=0,
+        
     )
     assert n == 3
     assert sorted(p.name for p in tmp_path.iterdir()) == [
@@ -124,7 +124,7 @@ def test_download_skips_existing(tmp_path: Path) -> None:
         on_progress=lambda _: None,
         session=sess,
         page_delay=0,
-        image_delay=0,
+        
     )
     # 11 跳过，22 新增
     assert n == 1
@@ -144,7 +144,7 @@ def test_download_stops_when_count_reached(tmp_path: Path) -> None:
         on_progress=lambda _: None,
         session=sess,
         page_delay=0,
-        image_delay=0,
+        
     )
     assert n == 2
     assert len(list(tmp_path.iterdir())) == 2
@@ -163,7 +163,7 @@ def test_download_stops_when_page_returns_below_limit(tmp_path: Path) -> None:
         on_progress=lambda _: None,
         session=sess,
         page_delay=0,
-        image_delay=0,
+        
     )
     assert n == 3
 
@@ -180,7 +180,7 @@ def test_download_writes_booru_tags_when_save_tags(tmp_path: Path) -> None:
     opts.save_tags = True
     downloader.download(
         opts, tmp_path, on_progress=lambda _: None,
-        session=sess, page_delay=0, image_delay=0,
+        session=sess, page_delay=0,
     )
     assert (tmp_path / "11.booru.txt").read_text(encoding="utf-8") == "1girl solo"
 
@@ -212,7 +212,7 @@ def test_cancel_stops_mid_download(tmp_path: Path) -> None:
         cancel_event=cancel,
         session=sess,
         page_delay=0,
-        image_delay=0,
+        
     )
     assert n == 2  # 触发 cancel 后立即返回
 
@@ -231,7 +231,7 @@ def test_convert_to_png_renames_to_png(tmp_path: Path) -> None:
     opts.convert_to_png = True
     downloader.download(
         opts, tmp_path, on_progress=lambda _: None,
-        session=sess, page_delay=0, image_delay=0,
+        session=sess, page_delay=0,
     )
     assert (tmp_path / "11.png").exists()
     assert not (tmp_path / "11.jpg").exists()

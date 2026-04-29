@@ -31,7 +31,12 @@ const EMPTY: Secrets = {
     remove_alpha_channel: false,
   },
   danbooru: { username: '', api_key: '', account_type: 'free' },
-  download: { exclude_tags: [] },
+  download: {
+    exclude_tags: [],
+    parallel_workers: 4,
+    api_rate_per_sec: 2,
+    cdn_rate_per_sec: 5,
+  },
   huggingface: { token: '' },
   joycaption: {
     base_url: 'http://localhost:8000/v1',
@@ -223,6 +228,52 @@ export default function SettingsPage() {
         </Field>
         <p className="text-[11px] text-slate-500 px-1">
           搜索时自动追加 <code>-tag</code>，对 Gelbooru 与 Danbooru 同样生效。
+        </p>
+
+        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800">
+          <Field label="parallel_workers">
+            <input
+              type="number"
+              min={1}
+              max={16}
+              value={draft.download.parallel_workers}
+              onChange={(e) =>
+                update('download', 'parallel_workers', Math.max(1, Number(e.target.value) || 1))
+              }
+              className={textInput}
+            />
+          </Field>
+          <Field label="api_rate_per_sec">
+            <input
+              type="number"
+              step="0.5"
+              min={0.5}
+              max={10}
+              value={draft.download.api_rate_per_sec}
+              onChange={(e) =>
+                update('download', 'api_rate_per_sec', Math.max(0.5, Number(e.target.value) || 0.5))
+              }
+              className={textInput}
+            />
+          </Field>
+          <Field label="cdn_rate_per_sec">
+            <input
+              type="number"
+              step="1"
+              min={1}
+              max={20}
+              value={draft.download.cdn_rate_per_sec}
+              onChange={(e) =>
+                update('download', 'cdn_rate_per_sec', Math.max(1, Number(e.target.value) || 1))
+              }
+              className={textInput}
+            />
+          </Field>
+        </div>
+        <p className="text-[11px] text-slate-500 px-1 leading-relaxed">
+          API host (<code>gelbooru.com</code> / <code>danbooru.donmai.us</code>) 与 CDN host (
+          <code>img*.gelbooru.com</code> / <code>cdn.donmai.us</code>) 各自独立 token bucket。
+          带 api_key 时 gelbooru 实测 5 req/s 拉图很安全；遇到 429 会自动退避 60s + 速率减半。
         </p>
       </Section>
 

@@ -32,7 +32,7 @@ import requests
 from PIL import Image
 
 from ..datasets import IMAGE_EXTS
-from . import booru_api, tagedit
+from . import booru_api, booru_pool, tagedit
 
 
 ProgressFn = Callable[[str], None]
@@ -443,22 +443,35 @@ def _search_with_filters(
     exclude_ids: set[str],
     page: int = 1,
     limit: int = 100,
-    session: Optional[requests.Session] = None,
+    client: Optional[booru_pool.BooruClient] = None,
 ) -> list[dict[str, Any]]:
-    """搜索 + 本地过滤（黑名单 / 已排除 ID / 缺 id 或 url）。"""
+    """搜索 + 本地过滤（黑名单 / 已排除 ID / 缺 id 或 url）。
+
+    PP9: `client` 走统一池子（API token bucket）；不传则直接调底层（旧测兼容）。
+    """
     norm = _normalize_tags(tags)
     query = " ".join(norm)
     try:
-        posts = booru_api.search_posts(
-            api_source,
-            query,
-            page=page,
-            limit=limit,
-            user_id=user_id,
-            api_key=api_key,
-            username=username,
-            session=session,
-        )
+        if client is not None:
+            posts = client.search_posts(
+                api_source,
+                query,
+                page=page,
+                limit=limit,
+                user_id=user_id,
+                api_key=api_key,
+                username=username,
+            )
+        else:
+            posts = booru_api.search_posts(
+                api_source,
+                query,
+                page=page,
+                limit=limit,
+                user_id=user_id,
+                api_key=api_key,
+                username=username,
+            )
     except requests.RequestException:
         return []
 
@@ -502,6 +515,7 @@ def _build_for_subfolder(
     on_progress: ProgressFn,
     cancel_event: Optional[threading.Event],
     pre_existing: Optional[dict[str, Any]] = None,  # PP5.1
+    client: Optional[booru_pool.BooruClient] = None,  # PP9
 ) -> tuple[bool, int]:
     """单子文件夹批量循环。返回 (success_80%达成, 实际下载数)。"""
     label = subfolder_name or "<root>"
@@ -613,6 +627,7 @@ def _build_for_subfolder(
                     exclude_ids=downloaded_ids,
                     page=1,
                     limit=100,
+                    client=client,
                 )
                 if posts:
                     search_tags = cand_tags
@@ -732,13 +747,22 @@ def _build_for_subfolder(
                     on_progress(f"    警告：无法删 {image_path.name}: {exc}")
 
             try:
-                final = booru_api.download_image(
-                    file_url,
-                    image_path,
-                    convert_to_png=opts.convert_to_png,
-                    remove_alpha_channel=opts.remove_alpha_channel,
-                    referer=booru_api.default_base_url(opts.api_source) + "/",
-                )
+                if client is not None:
+                    final = client.download_image(
+                        file_url,
+                        image_path,
+                        convert_to_png=opts.convert_to_png,
+                        remove_alpha_channel=opts.remove_alpha_channel,
+                        referer=booru_api.default_base_url(opts.api_source) + "/",
+                    )
+                else:
+                    final = booru_api.download_image(
+                        file_url,
+                        image_path,
+                        convert_to_png=opts.convert_to_png,
+                        remove_alpha_channel=opts.remove_alpha_channel,
+                        referer=booru_api.default_base_url(opts.api_source) + "/",
+                    )
             except Exception as exc:
                 on_progress(f"    ✗ 下载失败: {pid} ({exc})")
                 if image_path.exists():
@@ -773,12 +797,10 @@ def _build_for_subfolder(
                 on_progress(f"  已达总数量限制 {total_target_count}")
                 break
 
-            if cancel_event:
-                if cancel_event.wait(0.5):
-                    on_progress("  [cancel] 用户中止")
-                    return False, downloaded_count
-            else:
-                time.sleep(0.5)
+            # PP9 — 删每图 0.5s 硬 sleep；速率由 BooruClient 的 token bucket 控
+            if cancel_event and cancel_event.is_set():
+                on_progress("  [cancel] 用户中止")
+                return False, downloaded_count
 
         on_progress(f"  本批次下载: {batch_downloaded}")
 
@@ -811,6 +833,7 @@ def build(
     on_progress: ProgressFn = print,
     cancel_event: Optional[threading.Event] = None,
     incremental: bool = False,
+    client: Optional[booru_pool.BooruClient] = None,
 ) -> RegMeta:
     """构建正则集主流程。返回 RegMeta（即使中途取消也尽量返回部分元数据）。
 
@@ -832,6 +855,43 @@ def build(
     if opts.api_source == "gelbooru" and not (opts.user_id and opts.api_key):
         raise ValueError("gelbooru 需要 user_id + api_key（去 Settings 配置 secrets.gelbooru）")
 
+    # PP9 — 没传 client 就建一个（按 secrets.download.* 调速），用完关掉
+    owns_client = False
+    if client is None:
+        try:
+            from .. import secrets as _secrets
+            d = _secrets.load().download
+            cfg = booru_pool.BooruPoolConfig(
+                parallel_workers=d.parallel_workers,
+                api_rate_per_sec=d.api_rate_per_sec,
+                cdn_rate_per_sec=d.cdn_rate_per_sec,
+            )
+        except Exception:  # noqa: BLE001
+            cfg = booru_pool.BooruPoolConfig()
+        client = booru_pool.BooruClient(cfg)
+        owns_client = True
+
+    try:
+        return _build_inner(
+            opts,
+            client=client,
+            on_progress=on_progress,
+            cancel_event=cancel_event,
+            incremental=incremental,
+        )
+    finally:
+        if owns_client:
+            client.close()
+
+
+def _build_inner(
+    opts: RegBuildOptions,
+    *,
+    client: booru_pool.BooruClient,
+    on_progress: ProgressFn,
+    cancel_event: Optional[threading.Event],
+    incremental: bool,
+) -> RegMeta:
     structure = analyze_dataset_structure(opts.train_dir, on_progress)
     if structure["total_images"] == 0:
         raise ValueError(f"train 目录没有任何带 caption 的图片: {opts.train_dir}")
@@ -905,6 +965,7 @@ def build(
                 on_progress=on_progress,
                 cancel_event=cancel_event,
                 pre_existing=pre_existing_per_sub.get(sub_name),
+                client=client,
             )
             if ok:
                 success_subfolder_count += 1

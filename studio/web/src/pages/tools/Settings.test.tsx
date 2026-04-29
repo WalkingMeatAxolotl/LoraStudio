@@ -13,7 +13,12 @@ const initialServerState = {
     remove_alpha_channel: false,
   },
   danbooru: { username: '', api_key: '' },
-  download: { exclude_tags: [] },
+  download: {
+    exclude_tags: [],
+    parallel_workers: 4,
+    api_rate_per_sec: 2,
+    cdn_rate_per_sec: 5,
+  },
   huggingface: { token: '' },
   joycaption: {
     base_url: 'http://localhost:8000/v1',

@@ -46,6 +46,10 @@ class DownloadConfig(BaseModel):
     """全局下载偏好（跨渠道共享）。"""
     # 全局排除 tag：搜索时自动追加 -tag1 -tag2（gelbooru / danbooru 语法一致）
     exclude_tags: list[str] = Field(default_factory=list)
+    # PP9 — Booru API 池子调速（downloader + reg_builder 共用）
+    parallel_workers: int = 4
+    api_rate_per_sec: float = 2.0
+    cdn_rate_per_sec: float = 5.0
 
 
 class JoyCaptionConfig(BaseModel):

@@ -62,6 +62,12 @@ export interface DanbooruConfig {
 
 export interface DownloadGlobalConfig {
   exclude_tags: string[]
+  /** PP9 — Booru 并发池：worker 数量。 */
+  parallel_workers: number
+  /** PP9 — API host (gelbooru.com / danbooru.donmai.us) 限速。 */
+  api_rate_per_sec: number
+  /** PP9 — CDN host (img*.gelbooru.com / cdn.donmai.us) 限速。 */
+  cdn_rate_per_sec: number
 }
 
 export interface HuggingFaceConfig {
