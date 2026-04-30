@@ -44,6 +44,28 @@ CPU_PACKAGE = "onnxruntime"
 GPU_VERSION_SPEC = ">=1.20"
 CPU_VERSION_SPEC = ">=1.16"
 
+# PP9.6 — onnxruntime-gpu wheel 不打包 CUDA runtime so（libcurand / libcublas
+# / ...），用户机器没系统装 CUDA 时 dlopen 直接挂。靠 PyPI 上的 nvidia-*-cu12
+# wheel 把它们装到 venv 的 site-packages/nvidia/*/lib/，配合本模块顶层的
+# RTLD_GLOBAL preload 让 onnxruntime 后续 dlopen 找到符号。
+#
+# 注意：
+# - **不含 nvidia-cudnn-cu12**：torch 的 GPU build 已经把它装上 + 锁死，再
+#   `pip install nvidia-cudnn-cu12` 不带版本会被升到最新，破坏 torch；只在
+#   它**完全没装**时才补。
+# - 这套 wheel 只有 manylinux 平台；Windows / macOS 上不可用 → 安装函数会
+#   早返回。Windows 上正确路径是用户系统装 CUDA Toolkit + cuDNN。
+_NVIDIA_CUDA_RUNTIME_WHEELS: tuple[str, ...] = (
+    "nvidia-cuda-runtime-cu12",
+    "nvidia-cuda-nvrtc-cu12",
+    "nvidia-cublas-cu12",
+    "nvidia-cufft-cu12",
+    "nvidia-curand-cu12",
+    "nvidia-cusparse-cu12",
+    "nvidia-cusolver-cu12",
+)
+_NVIDIA_CUDNN_WHEEL = "nvidia-cudnn-cu12"
+
 # torch 装 GPU build 时拉的 nvidia-* wheel 安装到 site-packages/nvidia/<sub>/lib/
 # 下面这张表覆盖 onnxruntime-gpu 1.20 (CUDA 12.x / cuDNN 9.x) 创 session 时
 # 真正用到的 so。同 soname 多个候选包按顺序 try（cublasLt 通常在 cublas 包里）。
@@ -288,12 +310,79 @@ def _decide_target(target: str) -> str:
     raise ValueError(f"非法 target: {target!r}（应为 auto/gpu/cpu）")
 
 
+def _is_dist_installed(pkg: str) -> bool:
+    """dist-info 里有没有这个包；不 import，避免触发 native 模块加载。"""
+    try:
+        from importlib.metadata import PackageNotFoundError, version as _ver
+        try:
+            _ver(pkg)
+            return True
+        except PackageNotFoundError:
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _install_cuda_runtime_wheels() -> dict[str, Any]:
+    """PP9.6 — Linux 上把 onnxruntime-gpu 跑起来需要的 CUDA runtime wheels 装上。
+
+    返回 `{"installed": [...新装的], "skipped": [...原本就有的], "platform_skip": bool, "stdout": str}`。
+    失败抛 RuntimeError，并在抛之前**回滚本次刚装的包**（保持 venv 不被污染）。
+
+    cuDNN 单独处理：原本就有就不动（避免撞 torch 锁的版本）；没有才补。
+    """
+    if not sys.platform.startswith("linux"):
+        # Windows / macOS：nvidia-*-cu12 wheel 不可用；用户应靠系统 CUDA Toolkit
+        return {
+            "installed": [],
+            "skipped": [],
+            "platform_skip": True,
+            "stdout": "non-linux platform; skip nvidia-*-cu12 wheels",
+        }
+    targets: list[str] = []
+    skipped: list[str] = []
+    # cuDNN：只在缺时装（torch GPU build 通常已带）
+    if _is_dist_installed(_NVIDIA_CUDNN_WHEEL):
+        skipped.append(_NVIDIA_CUDNN_WHEEL)
+    else:
+        targets.append(_NVIDIA_CUDNN_WHEEL)
+    # 其余 6 个：缺啥装啥
+    for pkg in _NVIDIA_CUDA_RUNTIME_WHEELS:
+        if _is_dist_installed(pkg):
+            skipped.append(pkg)
+        else:
+            targets.append(pkg)
+    if not targets:
+        return {
+            "installed": [],
+            "skipped": skipped,
+            "platform_skip": False,
+            "stdout": "all CUDA runtime wheels already present",
+        }
+    rc, out = _pip(["install", *targets])
+    if rc != 0:
+        # 回滚：把本次想装的从 venv 里再卸掉，保持装包前的状态
+        # （pip install 失败时部分包可能已装；不区分，统一卸）
+        rb_rc, rb_out = _pip(["uninstall", "-y", *targets])
+        raise RuntimeError(
+            f"安装 CUDA runtime wheels 失败（rc={rc}）:\n{out}\n"
+            f"--- rollback (rc={rb_rc}) ---\n{rb_out}"
+        )
+    return {
+        "installed": targets,
+        "skipped": skipped,
+        "platform_skip": False,
+        "stdout": out,
+    }
+
+
 def install_runtime(target: str = "auto") -> dict[str, Any]:
     """先 uninstall 两个互斥包再装目标。
 
     target: "auto" | "gpu" | "cpu"
-    返回 {"target", "installed_pkg", "installed_version", "restart_required": True, "stdout"}
-    失败抛 RuntimeError。
+    返回 `{"target", "installed_pkg", "installed_version", "restart_required": True,
+           "stdout", "cuda_runtime"}`，最后一个字段是 PP9.6 装的 nvidia-*-cu12 报告
+    （仅 GPU 路径；CPU 路径为 None）。失败抛 RuntimeError。
 
     **重要**：onnxruntime 是 C extension，pip 卸装重装后**当前进程**里已 import 的
     .pyd/.so 不会被热替换 —— 必须重启 Studio 才能切换 EP。所以本函数不再尝试 reload；
@@ -305,6 +394,24 @@ def install_runtime(target: str = "auto") -> dict[str, Any]:
     if rc2 != 0:
         raise RuntimeError(f"安装 {spec} 失败（rc={rc2}）:\n{log2}")
 
+    # PP9.6 — GPU 路径补齐 CUDA runtime wheels（onnxruntime-gpu 不打包它们）。
+    # CPU 路径或 auto 检测为 CPU 时跳过。
+    cuda_runtime: Optional[dict[str, Any]] = None
+    if GPU_PACKAGE in spec:
+        try:
+            cuda_runtime = _install_cuda_runtime_wheels()
+        except RuntimeError as exc:
+            # CUDA wheels 装失败不致命：onnxruntime-gpu 已装上，让用户去 Settings 页
+            # 看到 cuda_load_error + 手动修。日志记下原因，UI 也能拿到。
+            logger.error("[onnx_setup] CUDA runtime wheels 装失败: %s", exc)
+            cuda_runtime = {
+                "installed": [],
+                "skipped": [],
+                "platform_skip": False,
+                "stdout": str(exc),
+                "error": str(exc),
+            }
+
     # 直接读 dist-info 拿新装的版本（不 import；进程里仍是旧的 native 模块）
     new_pkg, new_ver = _query_dist_info()
     return {
@@ -313,6 +420,7 @@ def install_runtime(target: str = "auto") -> dict[str, Any]:
         "installed_version": new_ver,
         "restart_required": True,
         "stdout": log1 + log2,
+        "cuda_runtime": cuda_runtime,
     }
 
 

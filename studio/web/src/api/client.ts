@@ -123,6 +123,15 @@ export interface WD14InstallResult extends WD14Runtime {
   installed_pkg: string | null
   installed_version: string | null
   stdout_tail: string
+  /** PP9.6 — GPU 路径连同装的 nvidia-*-cu12 wheels 报告；CPU 路径或非 Linux 为 null。
+   *  含 `error` 字段表示 onnxruntime-gpu 装好但 CUDA wheels 装失败（不致命）。 */
+  cuda_runtime: {
+    installed: string[]
+    skipped: string[]
+    platform_skip: boolean
+    stdout?: string
+    error?: string
+  } | null
 }
 
 export const DEFAULT_WD14_MODELS: readonly string[] = [

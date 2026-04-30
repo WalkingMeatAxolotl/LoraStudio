@@ -1082,7 +1082,20 @@ function WD14RuntimePanel() {
       })
       const newPkg = result.installed_pkg ?? result.installed ?? '?'
       const newVer = result.installed_version ?? result.version ?? '?'
-      toast(`已装 ${newPkg}==${newVer}，请重启 Studio 让 EP 生效`, 'success')
+      const cr = result.cuda_runtime
+      const cudaSuffix = cr
+        ? cr.error
+          ? `；CUDA runtime wheels 装失败（仍可手动 pip 装）`
+          : cr.installed.length > 0
+          ? `；附带装了 ${cr.installed.length} 个 CUDA runtime wheel`
+          : cr.platform_skip
+          ? ''
+          : ''
+        : ''
+      toast(
+        `已装 ${newPkg}==${newVer}${cudaSuffix}，请重启 Studio 让 EP 生效`,
+        cr?.error ? 'error' : 'success'
+      )
     } catch (e) {
       toast(`装包失败: ${e}`, 'error')
     } finally {

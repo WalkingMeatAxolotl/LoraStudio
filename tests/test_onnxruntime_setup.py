@@ -368,6 +368,142 @@ def test_record_cuda_load_error_round_trip(
     assert ors.get_cuda_load_error() is None
 
 
+# ---------------------------------------------------------------------------
+# PP9.6 — CUDA runtime wheels 安装 / 回滚
+# ---------------------------------------------------------------------------
+
+
+def test_install_cuda_runtime_wheels_skip_on_non_linux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ors.sys, "platform", "win32")
+    res = ors._install_cuda_runtime_wheels()
+    assert res["platform_skip"] is True
+    assert res["installed"] == []
+
+
+def test_install_cuda_runtime_wheels_installs_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux 上首次装：cuDNN 已存在 → 跳过；其它 6 个全装。"""
+    monkeypatch.setattr(ors.sys, "platform", "linux")
+    # cuDNN 已装（torch 带的）；其它都没装
+    monkeypatch.setattr(
+        ors,
+        "_is_dist_installed",
+        lambda p: p == ors._NVIDIA_CUDNN_WHEEL,
+    )
+    pip_calls: list[list[str]] = []
+
+    def fake_pip(args):
+        pip_calls.append(args)
+        return 0, "Successfully installed nvidia-curand-cu12 ..."
+
+    monkeypatch.setattr(ors, "_pip", fake_pip)
+    res = ors._install_cuda_runtime_wheels()
+    assert res["platform_skip"] is False
+    assert ors._NVIDIA_CUDNN_WHEEL in res["skipped"]
+    assert ors._NVIDIA_CUDNN_WHEEL not in res["installed"]
+    # 6 个都进了 install args
+    for pkg in ors._NVIDIA_CUDA_RUNTIME_WHEELS:
+        assert pkg in res["installed"]
+    # 单次 pip install 调用
+    install_calls = [c for c in pip_calls if c[0] == "install"]
+    assert len(install_calls) == 1
+
+
+def test_install_cuda_runtime_wheels_noop_when_all_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ors.sys, "platform", "linux")
+    monkeypatch.setattr(ors, "_is_dist_installed", lambda _p: True)
+    pip_calls: list[list[str]] = []
+    monkeypatch.setattr(
+        ors, "_pip", lambda args: (pip_calls.append(args) or (0, "")),
+    )
+    res = ors._install_cuda_runtime_wheels()
+    assert res["installed"] == []
+    assert pip_calls == []  # 全装好了不调 pip
+
+
+def test_install_cuda_runtime_wheels_rolls_back_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pip install 挂 → 把本次想装的全卸掉再抛。venv 不被污染。"""
+    monkeypatch.setattr(ors.sys, "platform", "linux")
+    monkeypatch.setattr(ors, "_is_dist_installed", lambda _p: False)
+    pip_calls: list[list[str]] = []
+
+    def fake_pip(args):
+        pip_calls.append(args)
+        if args[0] == "install":
+            return 1, "ERROR: pip 解析依赖失败"
+        return 0, "uninstalled"
+
+    monkeypatch.setattr(ors, "_pip", fake_pip)
+    with pytest.raises(RuntimeError, match="CUDA runtime wheels"):
+        ors._install_cuda_runtime_wheels()
+    # 必须有一次 uninstall 调用做回滚
+    assert any(c[0] == "uninstall" for c in pip_calls)
+
+
+def test_install_runtime_gpu_path_calls_cuda_wheels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """install_runtime("gpu") 在 onnxruntime-gpu 装好后必须调 _install_cuda_runtime_wheels。"""
+    monkeypatch.setattr(ors, "_pip", lambda _args: (0, "ok"))
+    monkeypatch.setattr(
+        ors, "_query_dist_info", lambda: ("onnxruntime-gpu", "1.20.0"),
+    )
+    called: list[bool] = []
+
+    def fake_install_wheels():
+        called.append(True)
+        return {"installed": ["nvidia-curand-cu12"], "skipped": [], "platform_skip": False, "stdout": ""}
+
+    monkeypatch.setattr(ors, "_install_cuda_runtime_wheels", fake_install_wheels)
+    res = ors.install_runtime("gpu")
+    assert called == [True]
+    assert res["cuda_runtime"]["installed"] == ["nvidia-curand-cu12"]
+
+
+def test_install_runtime_cpu_path_skips_cuda_wheels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ors, "_pip", lambda _args: (0, "ok"))
+    monkeypatch.setattr(
+        ors, "_query_dist_info", lambda: ("onnxruntime", "1.18.0"),
+    )
+    called: list[bool] = []
+    monkeypatch.setattr(
+        ors, "_install_cuda_runtime_wheels",
+        lambda: (called.append(True), {"installed": []})[1],
+    )
+    res = ors.install_runtime("cpu")
+    assert called == []  # CPU 路径不调
+    assert res["cuda_runtime"] is None
+
+
+def test_install_runtime_does_not_fail_when_cuda_wheels_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """onnxruntime-gpu 装好之后 CUDA wheels 装失败 → 不抛，记录 error 让 UI 显示。"""
+    monkeypatch.setattr(ors, "_pip", lambda _args: (0, "ok"))
+    monkeypatch.setattr(
+        ors, "_query_dist_info", lambda: ("onnxruntime-gpu", "1.20.0"),
+    )
+
+    def boom():
+        raise RuntimeError("pip resolver could not satisfy")
+
+    monkeypatch.setattr(ors, "_install_cuda_runtime_wheels", boom)
+    res = ors.install_runtime("gpu")
+    # ort-gpu 已装；不抛
+    assert res["installed_pkg"] == "onnxruntime-gpu"
+    assert "error" in res["cuda_runtime"]
+    assert "pip resolver" in res["cuda_runtime"]["error"]
+
+
 def test_current_runtime_exposes_cuda_load_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
