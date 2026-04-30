@@ -43,21 +43,22 @@ IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
 def find_default_images(n: int) -> list[Path]:
-    """扫 studio_data/projects/*/raw_*/ 找最近一批图。"""
+    """递归扫 studio_data/projects/ 下任意层的图片。
+
+    Studio 项目布局：
+      studio_data/projects/{id}-{slug}/download/...        — booru 下来的原图
+      studio_data/projects/{id}-{slug}/versions/{label}/train/{folder}/...
+    任一存在均可；不限定子目录名。
+    """
     base = REPO_ROOT / "studio_data" / "projects"
     if not base.exists():
         return []
     candidates: list[Path] = []
-    for proj in base.iterdir():
-        if not proj.is_dir():
-            continue
-        for sub in proj.iterdir():
-            if sub.is_dir() and sub.name.startswith("raw"):
-                for f in sub.iterdir():
-                    if f.suffix.lower() in IMG_EXTS:
-                        candidates.append(f)
-                        if len(candidates) >= n:
-                            return candidates[:n]
+    for f in base.rglob("*"):
+        if f.is_file() and f.suffix.lower() in IMG_EXTS:
+            candidates.append(f)
+            if len(candidates) >= n:
+                break
     return candidates[:n]
 
 
