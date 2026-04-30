@@ -42,33 +42,54 @@ Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaLoraStudi
 
 ## 快速开始
 
-### 1. 安装
+### 0. 系统先决条件（需自行安装）
+
+下面这些**不是** Studio 自动装的，得先准备好：
+
+- **NVIDIA GPU 驱动 + CUDA 13.x runtime**（24 GB+ 显存，3090/4090/5090；A 卡 / Apple Silicon 不支持）
+- **Python 3.10+**（PATH 上能直接 `python` 调到）
+- **Node.js 18+**（前端构建用，PATH 上能 `npm`）
+- **Git**
+
+### 1. 拉代码 + 启动 Studio
 
 ```bash
-git clone https://github.com/<your-name>/AnimaLoraToolkit.git
+git clone https://github.com/WalkingMeatAxolotl/AnimaLoraToolkit.git
 cd AnimaLoraToolkit
 
-python -m venv venv
 # Windows
-.\venv\Scripts\activate
-# Linux / macOS
-# source venv/bin/activate
+studio.bat
 
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-pip install -r requirements.txt
+# Linux / macOS
+./studio.sh
 ```
 
-需要 Node 18+（前端构建用）。
+首次运行会自动：建 `venv/` → 装 `requirements.txt` → 按 GPU 检测装 onnxruntime → 构建前端 → 起后端 → 自动开浏览器到 <http://127.0.0.1:8765/studio/>。
 
-### 2. 下载模型
+> ⚠️ `requirements.txt` 里 torch 没指 CUDA index，自举装的是 CPU torch。**首次跑完后**激活 venv 装 CUDA 版覆盖一遍：
+>
+> ```bash
+> # Windows
+> .\venv\Scripts\activate
+> # Linux / macOS: source venv/bin/activate
+>
+> pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu130
+> ```
+>
+> （cu130 = CUDA 13.0；旧驱动按需换 cu128 / cu126 等。）
 
-一条命令下完所有训练所需：
+其它启动方式（等价于上面，便于直接 `python` 调）：
 
 ```bash
-python tools/download_models.py
+python -m studio              # 构建前端（如缺）+ 起后端
+python -m studio dev          # 前后端 watch：vite 5173 + uvicorn 8765 --reload
+python -m studio build        # 仅构建前端
+python -m studio test         # pytest + vitest
 ```
 
-默认走 [hf-mirror.com](https://hf-mirror.com)（国内可直接下）。要用官方源加 `--no-mirror`。
+### 2. 在 Studio 里下载模型
+
+打开后先去 **设置（Settings）→ Models**，点按钮一键下载训练所需的全部权重 + tokenizer（默认走 hf-mirror.com，国内可直接拉；可在页面里切官方源、改根目录、看实时进度）。
 
 下载内容（默认落到 `./models/`）：
 
@@ -79,28 +100,21 @@ python tools/download_models.py
 | Qwen3-0.6B-Base 文本编码器 | [Qwen/Qwen3-0.6B-Base](https://huggingface.co/Qwen/Qwen3-0.6B-Base) | `models/text_encoders/` | ~1.2 GB |
 | T5 tokenizer（仅 3 文件，不下权重）| [google/t5-v1_1-xxl](https://huggingface.co/google/t5-v1_1-xxl) | `models/t5_tokenizer/` | <1 MB |
 
-更多选项：`python tools/download_models.py --help`，包含：
-- `--variant {latest, preview3-base, preview2, preview}` 选 Anima 主模型版本
-- `--skip-{main,vae,qwen,t5}` 单独跳过某项
-- `--output PATH` 自定义目标根目录
-
-也可以**直接进 Studio 设置页里点按钮下载**（与 CLI 共享同一份代码，可选根目录、状态实时刷新）。
-
-### 3. 启动 Studio
+也可以走 CLI（与 UI 共用同一份代码）：
 
 ```bash
-python -m studio              # 构建前端（如缺）+ 起后端，自动开浏览器
+python tools/download_models.py                   # 全量下
+python tools/download_models.py --no-mirror       # 走 HF 官方源
+python tools/download_models.py --variant preview2
+python tools/download_models.py --skip-main --skip-vae
+python tools/download_models.py --output /data/anima
 ```
 
-或开发模式（前后端 watch）：
+WD14 打标模型不在这里——首次进 ③ 打标时自动从 HF 拉到 `models/wd14/`。
 
-```bash
-python -m studio dev          # vite 5173 + uvicorn 8765 --reload
-```
+### 3. 跟着 Stepper 走
 
-Windows 上也可以双击 `studio.bat`。
-
-打开 http://127.0.0.1:8765/studio/，跟着 Stepper 走：
+打开 <http://127.0.0.1:8765/studio/>：
 
 1. 项目页「+ 新建项目」
 2. **① 下载**：Booru 抓图（先在设置填 Gelbooru / Danbooru 凭据）或本地上传 zip
@@ -111,9 +125,7 @@ Windows 上也可以双击 `studio.bat`。
 7. **⑥ 训练**：选 preset 复制进 version 私有 config，改参数 → 入队
 8. 「队列」页查看任务，进**任务详情**看日志 / 监控 / 输出（含一键全量 zip 下载）
 
-### 4. 用 LoRA
-
-LoRA 权重直接 ComfyUI 可加载（**已经是 `lora_unet_*` 格式**），不需要任何转换。
+输出的 LoRA 权重已经是 `lora_unet_*` 格式，**直接拖进 ComfyUI 即可**，不需要任何转换。
 
 ---
 

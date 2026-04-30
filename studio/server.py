@@ -1,7 +1,7 @@
 """AnimaStudio 守护服务（FastAPI）。
 
 P1 范围（本文件目前实现）：
-    - GET  /                   返回兼容的 monitor_smooth.html（旧监控）
+    - GET  /                   302 跳转到 /studio/（旧监控页搬到 /monitor_smooth.html）
     - GET  /api/health         健康检查
     - GET  /api/state          读取 task 的 per-task monitor state
     - GET  /samples/{name}     代理采样图（按 task_id 解析到 version 目录）
@@ -2191,11 +2191,13 @@ if WEB_DIST.exists():
 
 
 @app.get("/", response_model=None)
-def root() -> FileResponse | JSONResponse:
-    """根路径返回兼容的旧监控页（保持现有体验不变）。
-    P3 之后切换为 React 应用，此路由会重定向到 /studio。"""
-    if LEGACY_MONITOR_HTML.exists():
-        return FileResponse(LEGACY_MONITOR_HTML)
+def root() -> RedirectResponse | JSONResponse:
+    """根路径 302 跳转到 React 应用 `/studio/`。
+
+    旧监控页仍可通过 `/monitor_smooth.html` 直达（QueueMonitor iframe 用）。
+    若前端尚未构建（dist 缺失），返回 JSON 提示。"""
+    if WEB_DIST.exists():
+        return RedirectResponse(url="/studio/", status_code=302)
     return JSONResponse(
         {
             "message": "AnimaStudio is running. Build the React app at studio/web/ "
