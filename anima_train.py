@@ -864,239 +864,9 @@ def tokenize_t5_weighted(tokenizer, texts, max_length=512):
 
 
 # ============================================================================
-# LoRA 实现
+# LoRA / LoKr 实现：见 utils.lycoris_adapter.AnimaLycorisAdapter
+# （历史自实现版本于 Stage 3c 删除，使用 lycoris-lora 包替代）
 # ============================================================================
-
-class LoRALayer(torch.nn.Module):
-    """标准 LoRA 层"""
-    def __init__(self, in_features, out_features, rank=4, alpha=1.0, dropout=0.0):
-        super().__init__()
-        self.rank = rank
-        self.alpha = alpha
-        self.scaling = alpha / rank
-        self.lora_down = torch.nn.Linear(in_features, rank, bias=False)
-        self.lora_up = torch.nn.Linear(rank, out_features, bias=False)
-        self.dropout = torch.nn.Dropout(dropout) if dropout > 0 else torch.nn.Identity()
-        torch.nn.init.kaiming_uniform_(self.lora_down.weight, a=5**0.5)
-        torch.nn.init.zeros_(self.lora_up.weight)
-
-    def forward(self, x):
-        return self.lora_up(self.dropout(self.lora_down(x))) * self.scaling
-
-
-class LoKrLayer(torch.nn.Module):
-    """LyCORIS LoKr 层 (ComfyUI 兼容) — w2 低秩分解版"""
-    def __init__(self, in_features, out_features, rank=4, alpha=1.0, factor=8, dropout=0.0):
-        super().__init__()
-        self.alpha = alpha
-
-        # 自动调整 factor 确保能整除
-        factor = self._find_factor(in_features, out_features, factor)
-        self.factor = factor
-
-        self.in_dim = in_features // factor
-        self.out_dim = out_features // factor
-
-        # cap rank 防止小层溢出
-        self.rank = min(rank, self.out_dim, self.in_dim)
-        self.scaling = alpha / self.rank
-
-        # LoKr 分解: W = kron(w1, w2_a @ w2_b) * scaling
-        # w1: [factor, factor]
-        # w2_a: [out_dim, rank], w2_b: [rank, in_dim]
-        self.lokr_w1 = torch.nn.Parameter(torch.empty(factor, factor))
-        self.lokr_w2_a = torch.nn.Parameter(torch.empty(self.out_dim, self.rank))
-        self.lokr_w2_b = torch.nn.Parameter(torch.empty(self.rank, self.in_dim))
-        self.dropout = torch.nn.Dropout(dropout) if dropout > 0 else torch.nn.Identity()
-
-        # LyCORIS 标准初始化: w1=kaiming, w2_a=kaiming, w2_b=zeros
-        torch.nn.init.kaiming_uniform_(self.lokr_w1, a=5**0.5)
-        torch.nn.init.kaiming_uniform_(self.lokr_w2_a, a=5**0.5)
-        torch.nn.init.zeros_(self.lokr_w2_b)
-
-    def _find_factor(self, in_f, out_f, target_factor):
-        """找到能同时整除 in_features 和 out_features 的 factor"""
-        for f in [target_factor, 4, 2, 1]:
-            if in_f % f == 0 and out_f % f == 0:
-                return f
-        return 1
-
-    def forward(self, x):
-        w2 = self.lokr_w2_a @ self.lokr_w2_b
-        weight = torch.kron(self.lokr_w1, w2)
-        return F.linear(self.dropout(x), weight) * self.scaling
-
-
-class LoRALinear(torch.nn.Module):
-    """LoRA 包装的 Linear 层"""
-    def __init__(self, original, rank=4, alpha=1.0, dropout=0.0, use_lokr=False, factor=8):
-        super().__init__()
-        self.original = original
-        self.use_lokr = use_lokr
-
-        if use_lokr:
-            self.adapter = LoKrLayer(
-                original.in_features, original.out_features,
-                rank=rank, alpha=alpha, factor=factor, dropout=dropout
-            )
-        else:
-            self.adapter = LoRALayer(
-                original.in_features, original.out_features,
-                rank=rank, alpha=alpha, dropout=dropout
-            )
-
-        self.adapter.to(device=original.weight.device, dtype=original.weight.dtype)
-        for p in self.original.parameters():
-            p.requires_grad = False
-
-    def forward(self, x):
-        return self.original(x) + self.adapter(x)
-
-    @property
-    def weight(self):
-        return self.original.weight
-
-    @property
-    def bias(self):
-        return self.original.bias
-
-
-class LoRAInjector:
-    """LoRA 注入器"""
-    DEFAULT_TARGETS = ["q_proj", "k_proj", "v_proj", "output_proj", "mlp.layer1", "mlp.layer2"]
-
-    def __init__(self, rank=32, alpha=16.0, dropout=0.0, use_lokr=False, factor=8, targets=None):
-        self.rank = rank
-        self.alpha = alpha
-        self.dropout = dropout
-        self.use_lokr = use_lokr
-        self.factor = factor
-        self.targets = targets or self.DEFAULT_TARGETS
-        self.injected = {}
-
-    def inject(self, model):
-        """注入 LoRA 到模型"""
-        skipped_llm_adapter = 0
-        for name, module in list(model.named_modules()):
-            if not isinstance(module, torch.nn.Linear):
-                continue
-            if not any(t in name for t in self.targets):
-                continue
-            # 跳过 llm_adapter：作者明确建议不要训练它（容易降级文本理解能力）
-            if "llm_adapter" in name:
-                skipped_llm_adapter += 1
-                continue
-
-            lora_linear = LoRALinear(
-                module, rank=self.rank, alpha=self.alpha,
-                dropout=self.dropout, use_lokr=self.use_lokr, factor=self.factor
-            )
-
-            # 替换模块
-            parts = name.split(".")
-            parent = model
-            for p in parts[:-1]:
-                parent = getattr(parent, p)
-            setattr(parent, parts[-1], lora_linear)
-            self.injected[name] = lora_linear
-
-        logger.info(f"注入 {'LoKr' if self.use_lokr else 'LoRA'} 到 {len(self.injected)} 层")
-        if skipped_llm_adapter > 0:
-            logger.info(f"已跳过 llm_adapter 的 {skipped_llm_adapter} 层（避免破坏文本理解）")
-        return self.injected
-
-    def get_params(self):
-        """获取可训练参数"""
-        params = []
-        for lora in self.injected.values():
-            params.extend(lora.adapter.parameters())
-        return params
-
-    def get_param_groups(self, weight_decay):
-        """获取参数组，LoKr 模式下 w1 排除 weight_decay"""
-        if not self.use_lokr or weight_decay == 0:
-            return [{"params": self.get_params(), "weight_decay": weight_decay}]
-
-        no_decay_params = []  # w1
-        decay_params = []     # w2_a, w2_b
-        for lora in self.injected.values():
-            no_decay_params.append(lora.adapter.lokr_w1)
-            decay_params.append(lora.adapter.lokr_w2_a)
-            decay_params.append(lora.adapter.lokr_w2_b)
-
-        return [
-            {"params": decay_params, "weight_decay": weight_decay},
-            {"params": no_decay_params, "weight_decay": 0.0},
-        ]
-
-    def state_dict(self):
-        """导出 LoRA 权重 (ComfyUI 兼容格式)"""
-        sd = {}
-        for name, lora in self.injected.items():
-            # ComfyUI 格式: lora_unet_{key} 其中 key 是模型路径的 . 替换成 _
-            base = "lora_unet_" + name.replace(".", "_")
-            sd[f"{base}.alpha"] = torch.tensor(self.alpha)
-
-            if self.use_lokr:
-                sd[f"{base}.lokr_w1"] = lora.adapter.lokr_w1.data.clone()
-                sd[f"{base}.lokr_w2_a"] = lora.adapter.lokr_w2_a.data.clone()
-                sd[f"{base}.lokr_w2_b"] = lora.adapter.lokr_w2_b.data.clone()
-            else:
-                sd[f"{base}.lora_down.weight"] = lora.adapter.lora_down.weight.data.clone()
-                sd[f"{base}.lora_up.weight"] = lora.adapter.lora_up.weight.data.clone()
-        return sd
-
-    def save(self, path):
-        """保存为 safetensors (ComfyUI 兼容)"""
-        from safetensors.torch import save_file
-        sd = self.state_dict()
-        meta = {
-            "ss_network_dim": str(self.rank),
-            "ss_network_alpha": str(self.alpha),
-            "ss_network_module": "lycoris.kohya" if self.use_lokr else "networks.lora",
-            "ss_network_args": f'{{"algo": "lokr", "factor": {self.factor}}}' if self.use_lokr else "{}",
-        }
-        save_file(sd, path, metadata=meta)
-        logger.info(f"LoRA 保存到: {path}")
-
-    def load(self, path):
-        """从 safetensors 加载已有 LoRA 权重（用于继续训练）"""
-        from safetensors import safe_open
-        
-        logger.info(f"加载已有 LoRA 权重: {path}")
-        
-        # 读取权重
-        sd = {}
-        with safe_open(path, framework="pt", device="cpu") as f:
-            for k in f.keys():
-                sd[k] = f.get_tensor(k)
-        
-        loaded_count = 0
-        for name, lora in self.injected.items():
-            base = "lora_unet_" + name.replace(".", "_")
-            
-            if self.use_lokr:
-                w1_key = f"{base}.lokr_w1"
-                w2a_key = f"{base}.lokr_w2_a"
-                w2b_key = f"{base}.lokr_w2_b"
-                w2_old_key = f"{base}.lokr_w2"
-                if w1_key in sd and w2a_key in sd and w2b_key in sd:
-                    lora.adapter.lokr_w1.data.copy_(sd[w1_key])
-                    lora.adapter.lokr_w2_a.data.copy_(sd[w2a_key])
-                    lora.adapter.lokr_w2_b.data.copy_(sd[w2b_key])
-                    loaded_count += 1
-                elif w1_key in sd and w2_old_key in sd:
-                    logger.warning(f"跳过旧格式 lokr_w2 全矩阵层: {name}（需重新训练）")
-            else:
-                down_key = f"{base}.lora_down.weight"
-                up_key = f"{base}.lora_up.weight"
-                if down_key in sd and up_key in sd:
-                    lora.adapter.lora_down.weight.data.copy_(sd[down_key])
-                    lora.adapter.lora_up.weight.data.copy_(sd[up_key])
-                    loaded_count += 1
-
-        logger.info(f"从 checkpoint 加载了 {loaded_count}/{len(self.injected)} 层 LoRA 权重")
-
 
 # ============================================================================
 # 训练状态保存/恢复（断点续训）
@@ -1128,27 +898,17 @@ def load_training_state(path, injector, optimizer, scheduler=None):
     logger.info(f"加载训练状态: {path}")
     state = torch.load(path, map_location="cpu", weights_only=False)
     
-    # 加载 LoRA 权重
+    # 加载 LoRA 权重（lycoris-lora backend）— 一次性导入 state_dict
+    # 旧自实现 ckpt 在 Stage 4 plan 决策中**不做迁移**，strict=False 让缺失键
+    # 走默认初始化路径而非崩溃；用户应当从头训练新格式 ckpt。
     lora_sd = state["lora_state_dict"]
-    for name, lora in injector.injected.items():
-        base = "lora_unet_" + name.replace(".", "_")
-        if injector.use_lokr:
-            w1_key = f"{base}.lokr_w1"
-            w2a_key = f"{base}.lokr_w2_a"
-            w2b_key = f"{base}.lokr_w2_b"
-            w2_old_key = f"{base}.lokr_w2"
-            if w1_key in lora_sd and w2a_key in lora_sd and w2b_key in lora_sd:
-                lora.adapter.lokr_w1.data.copy_(lora_sd[w1_key])
-                lora.adapter.lokr_w2_a.data.copy_(lora_sd[w2a_key])
-                lora.adapter.lokr_w2_b.data.copy_(lora_sd[w2b_key])
-            elif w1_key in lora_sd and w2_old_key in lora_sd:
-                logger.warning(f"跳过旧格式 lokr_w2 全矩阵层: {name}（需重新训练）")
-        else:
-            down_key = f"{base}.lora_down.weight"
-            up_key = f"{base}.lora_up.weight"
-            if down_key in lora_sd and up_key in lora_sd:
-                lora.adapter.lora_down.weight.data.copy_(lora_sd[down_key])
-                lora.adapter.lora_up.weight.data.copy_(lora_sd[up_key])
+    result = injector.load_state_dict(lora_sd, strict=False)
+    missing = len(getattr(result, "missing_keys", [])) if hasattr(result, "missing_keys") else 0
+    unexpected = len(getattr(result, "unexpected_keys", [])) if hasattr(result, "unexpected_keys") else 0
+    if missing or unexpected:
+        logger.warning(
+            f"resume LoRA: missing={missing}, unexpected={unexpected}（旧格式 ckpt？）"
+        )
     
     # 加载优化器状态
     optimizer.load_state_dict(state["optimizer_state_dict"])
@@ -2130,13 +1890,19 @@ def main():
         args.text_encoder_path, args.t5_tokenizer_path, device, dtype
     )
 
-    # 注入 LoRA
+    # 注入 LoRA（lycoris-lora backend，Stage 3 切换）
     logger.info(f"注入 {args.lora_type.upper()}...")
-    injector = LoRAInjector(
+    from utils.lycoris_adapter import AnimaLycorisAdapter
+    injector = AnimaLycorisAdapter(
+        algo=args.lora_type,
         rank=args.lora_rank,
         alpha=args.lora_alpha,
-        use_lokr=(args.lora_type == "lokr"),
         factor=args.lokr_factor,
+        dropout=float(getattr(args, "lora_dropout", 0.0) or 0.0),
+        rank_dropout=float(getattr(args, "lora_rank_dropout", 0.0) or 0.0),
+        module_dropout=float(getattr(args, "lora_module_dropout", 0.0) or 0.0),
+        weight_decompose=bool(getattr(args, "lora_dora", False)),
+        rs_lora=bool(getattr(args, "lora_rs", False)),
     )
     injector.inject(model)
     
