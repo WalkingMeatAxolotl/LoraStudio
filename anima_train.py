@@ -1128,27 +1128,17 @@ def load_training_state(path, injector, optimizer, scheduler=None):
     logger.info(f"加载训练状态: {path}")
     state = torch.load(path, map_location="cpu", weights_only=False)
     
-    # 加载 LoRA 权重
+    # 加载 LoRA 权重（lycoris-lora backend）— 一次性导入 state_dict
+    # 旧自实现 ckpt 在 Stage 4 plan 决策中**不做迁移**，strict=False 让缺失键
+    # 走默认初始化路径而非崩溃；用户应当从头训练新格式 ckpt。
     lora_sd = state["lora_state_dict"]
-    for name, lora in injector.injected.items():
-        base = "lora_unet_" + name.replace(".", "_")
-        if injector.use_lokr:
-            w1_key = f"{base}.lokr_w1"
-            w2a_key = f"{base}.lokr_w2_a"
-            w2b_key = f"{base}.lokr_w2_b"
-            w2_old_key = f"{base}.lokr_w2"
-            if w1_key in lora_sd and w2a_key in lora_sd and w2b_key in lora_sd:
-                lora.adapter.lokr_w1.data.copy_(lora_sd[w1_key])
-                lora.adapter.lokr_w2_a.data.copy_(lora_sd[w2a_key])
-                lora.adapter.lokr_w2_b.data.copy_(lora_sd[w2b_key])
-            elif w1_key in lora_sd and w2_old_key in lora_sd:
-                logger.warning(f"跳过旧格式 lokr_w2 全矩阵层: {name}（需重新训练）")
-        else:
-            down_key = f"{base}.lora_down.weight"
-            up_key = f"{base}.lora_up.weight"
-            if down_key in lora_sd and up_key in lora_sd:
-                lora.adapter.lora_down.weight.data.copy_(lora_sd[down_key])
-                lora.adapter.lora_up.weight.data.copy_(lora_sd[up_key])
+    result = injector.load_state_dict(lora_sd, strict=False)
+    missing = len(getattr(result, "missing_keys", [])) if hasattr(result, "missing_keys") else 0
+    unexpected = len(getattr(result, "unexpected_keys", [])) if hasattr(result, "unexpected_keys") else 0
+    if missing or unexpected:
+        logger.warning(
+            f"resume LoRA: missing={missing}, unexpected={unexpected}（旧格式 ckpt？）"
+        )
     
     # 加载优化器状态
     optimizer.load_state_dict(state["optimizer_state_dict"])
@@ -2130,13 +2120,19 @@ def main():
         args.text_encoder_path, args.t5_tokenizer_path, device, dtype
     )
 
-    # 注入 LoRA
+    # 注入 LoRA（lycoris-lora backend，Stage 3 切换）
     logger.info(f"注入 {args.lora_type.upper()}...")
-    injector = LoRAInjector(
+    from utils.lycoris_adapter import AnimaLycorisAdapter
+    injector = AnimaLycorisAdapter(
+        algo=args.lora_type,
         rank=args.lora_rank,
         alpha=args.lora_alpha,
-        use_lokr=(args.lora_type == "lokr"),
         factor=args.lokr_factor,
+        dropout=float(getattr(args, "lora_dropout", 0.0) or 0.0),
+        rank_dropout=float(getattr(args, "lora_rank_dropout", 0.0) or 0.0),
+        module_dropout=float(getattr(args, "lora_module_dropout", 0.0) or 0.0),
+        weight_decompose=bool(getattr(args, "lora_dora", False)),
+        rs_lora=bool(getattr(args, "lora_rs", False)),
     )
     injector.inject(model)
     
