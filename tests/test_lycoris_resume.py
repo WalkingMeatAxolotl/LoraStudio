@@ -161,6 +161,29 @@ def test_legacy_state_dict_strict_false_does_not_crash(tmp_path):
     load_training_state(state_path, adapter2, optimizer2)
 
 
+def test_model_eval_cascades_to_lycoris_network():
+    """model.eval() 必须同步到 LycorisNetwork（否则 sample 时走 dropout 分支报 device mismatch）"""
+    model = MockDiT()
+    adapter = AnimaLycorisAdapter(
+        algo="lokr", rank=4, alpha=4, factor=8,
+        rank_dropout=0.1,  # 触发 dropout 分支
+    )
+    adapter.inject(model)
+
+    # inject 时 model 默认 train mode
+    assert adapter.network.training is True
+
+    # model.eval() 应当级联
+    model.eval()
+    assert adapter.network.training is False, "lycoris network 未跟随 model.eval()"
+    for lora in adapter.network.loras:
+        assert lora.training is False, f"{lora.lora_name} 未 eval"
+
+    # model.train() 切回
+    model.train()
+    assert adapter.network.training is True
+
+
 def test_rng_state_restored(tmp_path):
     """resume 后再 sample 一个 random，应等于第一次 sample 的下一个值"""
     adapter, _, optimizer = _make_trained_adapter()

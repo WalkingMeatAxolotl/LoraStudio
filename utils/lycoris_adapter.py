@@ -100,6 +100,21 @@ class AnimaLycorisAdapter:
         except StopIteration:
             pass
 
+        # LycorisNetwork 是独立 nn.Module，不在 model 子树里；model.eval()/.train() 不会
+        # 级联到 lycoris 模块（self.training 永远 True）。这导致 sample 时仍进 rank_dropout
+        # 分支，触发 lycoris 上游 bug：torch.rand(...) 没传 device，CPU mask 与 CUDA weight
+        # 相乘报 device mismatch（lokr.py:380）。
+        # 修复：劫持 model.train()，让 network 跟随；并立刻同步当前模式。
+        _orig_train = model.train
+        _network = self.network
+
+        def _train_with_lycoris(mode: bool = True):
+            _network.train(mode)
+            return _orig_train(mode)
+
+        model.train = _train_with_lycoris  # type: ignore[method-assign]
+        self.network.train(model.training)
+
         n = len(self.network.loras)
         logger.info(f"注入 {self.algo.upper()} 到 {n} 层（lycoris-lora）")
         return {lora.lora_name: lora for lora in self.network.loras}
