@@ -20,6 +20,8 @@ ENV/
 output/
 monitor_data/
 scripts/stage3_smoke_output/
+scripts/stage5_resume_output/
+scripts/stage5_baseline_output/
 config/autosave/
 *.log
 wandb/
