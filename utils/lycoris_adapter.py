@@ -92,6 +92,14 @@ class AnimaLycorisAdapter:
         )
         self.network.apply_to()
 
+        # lycoris 默认在 CPU 创建模块；model 多半已在 CUDA — 必须显式同步 device/dtype，
+        # 否则首次 forward 报 "tensors on cuda:0 and cpu"。从模型首个 parameter 推断。
+        try:
+            ref = next(model.parameters())
+            self.network.to(device=ref.device, dtype=ref.dtype)
+        except StopIteration:
+            pass
+
         n = len(self.network.loras)
         logger.info(f"注入 {self.algo.upper()} 到 {n} 层（lycoris-lora）")
         return {lora.lora_name: lora for lora in self.network.loras}

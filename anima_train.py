@@ -867,8 +867,13 @@ def tokenize_t5_weighted(tokenizer, texts, max_length=512):
 # LoRA 实现
 # ============================================================================
 
+# ============================================================================
+# DEPRECATED — 自实现 LoRA/LoKr 适配器（Stage 3a 起改用 utils.lycoris_adapter，
+# 这些类暂留以备紧急回滚，Stage 3c smoke 验证通过后会整段删除）
+# ============================================================================
+
 class LoRALayer(torch.nn.Module):
-    """标准 LoRA 层"""
+    """[DEPRECATED] 标准 LoRA 层 — 已被 lycoris-lora 替代"""
     def __init__(self, in_features, out_features, rank=4, alpha=1.0, dropout=0.0):
         super().__init__()
         self.rank = rank
@@ -885,7 +890,7 @@ class LoRALayer(torch.nn.Module):
 
 
 class LoKrLayer(torch.nn.Module):
-    """LyCORIS LoKr 层 (ComfyUI 兼容) — w2 低秩分解版"""
+    """[DEPRECATED] LyCORIS LoKr 层 — 已被 lycoris-lora 替代"""
     def __init__(self, in_features, out_features, rank=4, alpha=1.0, factor=8, dropout=0.0):
         super().__init__()
         self.alpha = alpha
@@ -928,7 +933,7 @@ class LoKrLayer(torch.nn.Module):
 
 
 class LoRALinear(torch.nn.Module):
-    """LoRA 包装的 Linear 层"""
+    """[DEPRECATED] LoRA 包装的 Linear 层 — 已被 lycoris-lora 替代"""
     def __init__(self, original, rank=4, alpha=1.0, dropout=0.0, use_lokr=False, factor=8):
         super().__init__()
         self.original = original
@@ -962,7 +967,7 @@ class LoRALinear(torch.nn.Module):
 
 
 class LoRAInjector:
-    """LoRA 注入器"""
+    """[DEPRECATED] LoRA 注入器 — 已被 utils.lycoris_adapter.AnimaLycorisAdapter 替代"""
     DEFAULT_TARGETS = ["q_proj", "k_proj", "v_proj", "output_proj", "mlp.layer1", "mlp.layer2"]
 
     def __init__(self, rank=32, alpha=16.0, dropout=0.0, use_lokr=False, factor=8, targets=None):

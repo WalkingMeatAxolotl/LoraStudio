@@ -19,6 +19,7 @@ ENV/
 # Logs / local outputs
 output/
 monitor_data/
+scripts/stage3_smoke_output/
 config/autosave/
 *.log
 wandb/
