@@ -232,7 +232,9 @@ export default function QueueDetailPage() {
           <LogTab taskId={taskId} status={status ?? null} />
         )}
         {tab === 'monitor' && <MonitorTab taskId={taskId} />}
-        {tab === 'outputs' && <OutputsTab taskId={taskId} />}
+        {tab === 'outputs' && (
+          <OutputsTab taskId={taskId} taskName={task?.name ?? ''} />
+        )}
       </div>
 
       {/* Footer actions — 危险操作集中在这里，跟内容区视觉隔开 */}
@@ -514,7 +516,7 @@ function MonitorTab({ taskId }: { taskId: number }) {
 // Outputs tab — 之前 OutputsModal 的逻辑搬过来
 // ---------------------------------------------------------------------------
 
-function OutputsTab({ taskId }: { taskId: number }) {
+function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) {
   const { toast } = useToast()
   const [data, setData] = useState<TaskOutputs | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -557,7 +559,11 @@ function OutputsTab({ taskId }: { taskId: number }) {
     if (zipping) return
     setZipping(true)
     try {
-      await downloadBlob(api.taskOutputsZipUrl(taskId), `task_${taskId}_outputs.zip`)
+      // task.name 在 PP6.3 起就是 `{slug}_{label}`，与 LoRA ckpt 命名一致；
+      // 老任务（PP1 之前）name 不规范时回落到 task_{id}。
+      const safe = taskName && /^[A-Za-z0-9_.-]+$/.test(taskName)
+      const zipName = safe ? `${taskName}_outputs.zip` : `task_${taskId}_outputs.zip`
+      await downloadBlob(api.taskOutputsZipUrl(taskId), zipName)
     } catch (e) {
       toast(`下载失败: ${e}`, 'error')
     } finally {

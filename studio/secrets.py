@@ -27,7 +27,9 @@ class GelbooruConfig(BaseModel):
     api_key: str = ""
     save_tags: bool = False
     convert_to_png: bool = True
-    remove_alpha_channel: bool = False
+    # 新装默认 true：训练里 4-channel PNG 会让 VAE 把透明区域当噪声学进去，
+    # 多数情况下用户都需要去掉 alpha。已存在 secrets.json 里显式 false 不受影响。
+    remove_alpha_channel: bool = True
 
 
 class DanbooruConfig(BaseModel):

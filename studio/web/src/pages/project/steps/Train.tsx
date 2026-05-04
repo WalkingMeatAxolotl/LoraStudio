@@ -239,8 +239,39 @@ export default function TrainPage() {
           />
         </section>
       ) : (
-        <p className="text-slate-500 text-sm">加载中...</p>
+        <ConfigSkeleton />
       )}
     </div>
+  )
+}
+
+/** 训练配置加载中的 skeleton — 模拟 SchemaForm 的分组卡片结构。 */
+function ConfigSkeleton() {
+  // 一个分组卡片：标题条 + 4-6 行字段（label + input 灰条）
+  const groups = [5, 6, 4, 5]
+  return (
+    <section
+      className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3"
+      role="status"
+      aria-label="加载训练配置中"
+    >
+      {groups.map((rows, gi) => (
+        <div
+          key={gi}
+          className="border border-slate-700 rounded-lg bg-slate-800/40 p-4 animate-pulse"
+        >
+          <div className="h-4 w-32 bg-slate-700 rounded mb-3" />
+          <div className="space-y-2">
+            {Array.from({ length: rows }).map((_, ri) => (
+              <div key={ri} className="space-y-1">
+                <div className="h-3 w-24 bg-slate-700/70 rounded" />
+                <div className="h-7 bg-slate-800 border border-slate-700 rounded" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">加载训练配置中...</span>
+    </section>
   )
 }

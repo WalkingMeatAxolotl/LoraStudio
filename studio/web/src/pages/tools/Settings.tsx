@@ -29,7 +29,7 @@ const EMPTY: Secrets = {
     api_key: '',
     save_tags: false,
     convert_to_png: true,
-    remove_alpha_channel: false,
+    remove_alpha_channel: true,
   },
   danbooru: { username: '', api_key: '', account_type: 'free' },
   download: {
