@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -30,6 +31,36 @@ from .log_tail import LogTailer, MonitorStatePoller
 from .paths import LOGS_DIR, REPO_ROOT, STUDIO_DATA, STUDIO_DB, USER_PRESETS_DIR
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _Slot:
+    """Supervisor 内的一个执行槽位。每个槽位最多跑 1 个子进程。
+
+    PP10.2.a 起从「单 _current_* 字段」改成「list[_Slot]」。10.2.a 仍是单槽位
+    （行为不变），10.2.b 会拆成 TRAIN + DATA 两槽位让训练与数据准备并行。
+    """
+    name: str = "main"
+    proc: Optional[subprocess.Popen] = None
+    kind: Optional[str] = None  # "task" | "job"
+    id: Optional[int] = None
+    log_fp: Optional[Any] = None
+    tailer: Optional[LogTailer] = None
+    state_poller: Optional[MonitorStatePoller] = None
+    cancel_pending: bool = False
+
+    @property
+    def busy(self) -> bool:
+        return self.proc is not None
+
+    def reset(self) -> None:
+        self.proc = None
+        self.kind = None
+        self.id = None
+        self.log_fp = None
+        self.tailer = None
+        self.state_poller = None
+        self.cancel_pending = False
 
 EventCallback = Callable[[dict[str, Any]], None]
 CmdBuilder = Callable[[dict[str, Any], Path], list[str]]
@@ -150,14 +181,9 @@ class Supervisor:
 
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        # 当前活跃单元（task 或 job 二选一）
-        self._current_proc: Optional[subprocess.Popen] = None
-        self._current_kind: Optional[str] = None  # "task" | "job"
-        self._current_id: Optional[int] = None
-        self._current_log_fp: Optional[Any] = None
-        self._current_tailer: Optional[LogTailer] = None
-        self._current_state_poller: Optional[MonitorStatePoller] = None
-        self._cancel_pending = False
+        # PP10.2.a：执行槽位列表。10.2.a 单槽位（行为不变），10.2.b 拆成
+        # TRAIN + DATA 让训练与数据准备并行。
+        self._slots: list[_Slot] = [_Slot(name="main")]
         self._log_seq = itertools.count()
 
     # ------------------------------------------------------------------ 控制
@@ -172,16 +198,23 @@ class Supervisor:
 
     def stop(self, timeout: float = 5.0) -> None:
         self._stop.set()
-        if self._current_proc:
-            self._terminate_current()
+        for slot in self._slots:
+            if slot.busy:
+                self._terminate_slot(slot)
         if self._thread:
             self._thread.join(timeout=timeout)
+
+    def _find_slot(self, *, kind: str, id: int) -> Optional[_Slot]:
+        for slot in self._slots:
+            if slot.kind == kind and slot.id == id:
+                return slot
+        return None
 
     def cancel(self, task_id: int) -> bool:
         """取消 task：pending → status=canceled；running → 异步发信号立即返回。
 
         异步路径关键：**不阻塞 web 请求线程**。supervisor 主循环会自然 poll
-        proc.poll() 拿到退出码并走 `_finish_current` 流程，把 status 写为
+        proc.poll() 拿到退出码并走 `_finish_slot` 流程，把 status 写为
         canceled。后台 grace timer 在 30s 后还没退就强杀整棵进程树。
         """
         with db.connection_for(self._db_path) as conn:
@@ -196,13 +229,11 @@ class Supervisor:
                     {"type": "task_state_changed", "task_id": task_id, "status": "canceled"}
                 )
                 return True
-        if (
-            task["status"] == "running"
-            and self._current_kind == "task"
-            and self._current_id == task_id
-        ):
-            self._signal_terminate_async()
-            return True
+        if task["status"] == "running":
+            slot = self._find_slot(kind="task", id=task_id)
+            if slot is not None:
+                self._signal_terminate_async(slot)
+                return True
         return False
 
     def cancel_job(self, job_id: int) -> bool:
@@ -224,22 +255,26 @@ class Supervisor:
                     }
                 )
                 return True
-        if (
-            job["status"] == "running"
-            and self._current_kind == "job"
-            and self._current_id == job_id
-        ):
-            self._signal_terminate_async()
-            return True
+        if job["status"] == "running":
+            slot = self._find_slot(kind="job", id=job_id)
+            if slot is not None:
+                self._signal_terminate_async(slot)
+                return True
         return False
 
     @property
     def current_task_id(self) -> Optional[int]:
-        return self._current_id if self._current_kind == "task" else None
+        for slot in self._slots:
+            if slot.kind == "task":
+                return slot.id
+        return None
 
     @property
     def current_job_id(self) -> Optional[int]:
-        return self._current_id if self._current_kind == "job" else None
+        for slot in self._slots:
+            if slot.kind == "job":
+                return slot.id
+        return None
 
     # -------------------------------------------------------------- 主循环
     def _loop(self) -> None:
@@ -278,27 +313,44 @@ class Supervisor:
                 logger.info("orphan running jobs → failed: %d", n)
 
     def _tick(self) -> None:
-        if self._current_proc:
-            rc = self._current_proc.poll()
-            if rc is None:
-                return
-            self._finish_current(rc)
-            return
+        # 1) 先收尸：所有 busy 槽位 poll 一遍，退出的走 _finish_slot
+        for slot in self._slots:
+            if not slot.busy:
+                continue
+            assert slot.proc is not None
+            rc = slot.proc.poll()
+            if rc is not None:
+                self._finish_slot(slot, rc)
 
-        # 优先调度 project_jobs（数据准备）
+        # 2) 给空闲槽位派活
+        for slot in self._slots:
+            if slot.busy:
+                continue
+            if self._dispatch(slot):
+                # 派出去就停 — 同一 tick 不再给同槽派第二个活
+                continue
+
+    def _dispatch(self, slot: _Slot) -> bool:
+        """给空闲 slot 找一个 pending 单元跑。返回 True 表示已派活。
+
+        10.2.a：单槽位，沿用 jobs > tasks 的旧优先级，行为不变。
+        10.2.b 起会重写为按槽位职责（TRAIN 槽只看 tasks，DATA 槽按 GPU 策略
+        筛 jobs）。
+        """
         with db.connection_for(self._db_path) as conn:
             job = project_jobs.next_pending(conn)
         if job:
-            self._spawn_job(job)
-            return
-
+            self._spawn_job(slot, job)
+            return True
         with db.connection_for(self._db_path) as conn:
             task = db.next_pending(conn)
         if task:
-            self._spawn_task(task)
+            self._spawn_task(slot, task)
+            return True
+        return False
 
     # -------------------------------------------------------------- 子进程
-    def _spawn_task(self, task: dict[str, Any]) -> None:
+    def _spawn_task(self, slot: _Slot, task: dict[str, Any]) -> None:
         # PP6.3：优先用 task.config_path（version 私有 config 绝对路径）；
         # 没有时降级到老路径 _configs_dir / {config_name}.yaml。
         explicit_cfg = task.get("config_path")
@@ -345,11 +397,11 @@ class Supervisor:
         cmd = self._cmd_builder(task, cfg_path)
         proc = self._popen(cmd, log_fp)
 
-        self._current_proc = proc
-        self._current_kind = "task"
-        self._current_id = task["id"]
-        self._current_log_fp = log_fp
-        self._cancel_pending = False
+        slot.proc = proc
+        slot.kind = "task"
+        slot.id = task["id"]
+        slot.log_fp = log_fp
+        slot.cancel_pending = False
 
         # PP6.4 — log tail → SSE（取代前端 2s 轮询 /api/logs/{id}）
         tid = task["id"]
@@ -362,8 +414,8 @@ class Supervisor:
                 "seq": next(self._log_seq),
             })
 
-        self._current_tailer = LogTailer(log_path, _on_task_log)
-        self._current_tailer.start()
+        slot.tailer = LogTailer(log_path, _on_task_log)
+        slot.tailer.start()
 
         # PP6.4 — monitor_state.json 变化 → SSE（取代前端 1Hz 轮询 /api/state）
         def _on_state(state: dict[str, Any]) -> None:
@@ -373,10 +425,8 @@ class Supervisor:
                 "state": state,
             })
 
-        self._current_state_poller = MonitorStatePoller(
-            monitor_state_path, _on_state
-        )
-        self._current_state_poller.start()
+        slot.state_poller = MonitorStatePoller(monitor_state_path, _on_state)
+        slot.state_poller.start()
 
         with db.connection_for(self._db_path) as conn:
             db.update_task(
@@ -394,9 +444,11 @@ class Supervisor:
                 "status": "running",
             }
         )
-        logger.info("started task %d (pid=%d)", task["id"], proc.pid)
+        logger.info(
+            "started task %d on slot=%s (pid=%d)", task["id"], slot.name, proc.pid
+        )
 
-    def _spawn_job(self, job: dict[str, Any]) -> None:
+    def _spawn_job(self, slot: _Slot, job: dict[str, Any]) -> None:
         log_path = Path(job.get("log_path") or project_jobs.log_path_for(job["id"]))
         log_path.parent.mkdir(parents=True, exist_ok=True)
         # worker 自己 append 模式开 log，supervisor 这里只挂个 stdout 转发到同一文件
@@ -408,11 +460,11 @@ class Supervisor:
         with db.connection_for(self._db_path) as conn:
             project_jobs.mark_running(conn, job["id"], pid=proc.pid)
 
-        self._current_proc = proc
-        self._current_kind = "job"
-        self._current_id = job["id"]
-        self._current_log_fp = log_fp
-        self._cancel_pending = False
+        slot.proc = proc
+        slot.kind = "job"
+        slot.id = job["id"]
+        slot.log_fp = log_fp
+        slot.cancel_pending = False
 
         # tail 增量 → SSE
         jid = job["id"]
@@ -431,8 +483,8 @@ class Supervisor:
                 "seq": next(self._log_seq),
             })
 
-        self._current_tailer = LogTailer(log_path, _on_line)
-        self._current_tailer.start()
+        slot.tailer = LogTailer(log_path, _on_line)
+        slot.tailer.start()
 
         self._on_event({
             "type": "job_state_changed",
@@ -442,7 +494,10 @@ class Supervisor:
             "kind": kind,
             "status": "running",
         })
-        logger.info("started job %d (kind=%s, pid=%d)", jid, kind, proc.pid)
+        logger.info(
+            "started job %d on slot=%s (kind=%s, pid=%d)",
+            jid, slot.name, kind, proc.pid,
+        )
 
     def _popen(self, cmd: list[str], log_fp: Any) -> subprocess.Popen:
         creationflags = 0
@@ -471,27 +526,27 @@ class Supervisor:
             env=env,
         )
 
-    def _finish_current(self, rc: int) -> None:
-        kind = self._current_kind
-        cid = self._current_id
+    def _finish_slot(self, slot: _Slot, rc: int) -> None:
+        kind = slot.kind
+        cid = slot.id
         assert cid is not None and kind is not None
-        if self._current_log_fp:
+        if slot.log_fp:
             try:
-                self._current_log_fp.close()
+                slot.log_fp.close()
             except Exception:
                 pass
-        if self._current_tailer:
+        if slot.tailer:
             try:
-                self._current_tailer.stop()
+                slot.tailer.stop()
             except Exception:
                 pass
-        if self._current_state_poller:
+        if slot.state_poller:
             try:
-                self._current_state_poller.stop()
+                slot.state_poller.stop()
             except Exception:
                 pass
 
-        if self._cancel_pending:
+        if slot.cancel_pending:
             status = "canceled"
         elif rc == 0:
             status = "done"
@@ -535,33 +590,25 @@ class Supervisor:
             })
             logger.info("job %d finished: %s (rc=%d)", cid, status, rc)
 
-        self._current_proc = None
-        self._current_kind = None
-        self._current_id = None
-        self._current_log_fp = None
-        self._current_tailer = None
-        self._current_state_poller = None
-        self._cancel_pending = False
+        slot.reset()
 
-    def _terminate_current(self) -> None:
-        """同步终止当前子进程（仅 supervisor.stop() 用 —— 进程退出时走这里）。
+    def _terminate_slot(self, slot: _Slot) -> None:
+        """同步终止指定槽位的子进程（仅 supervisor.stop() 用）。
 
         web 请求路径下的 cancel 请用 `_signal_terminate_async`，避免阻塞
         请求线程 30 秒。
         """
-        if not self._current_proc:
+        if not slot.proc:
             return
-        self._cancel_pending = True
-        proc = self._current_proc
+        slot.cancel_pending = True
+        proc = slot.proc
         self._send_terminate_signal(proc)
         try:
             proc.wait(timeout=self._grace)
         except subprocess.TimeoutExpired:
             logger.warning(
-                "%s %s did not exit in %.0fs, killing process tree",
-                self._current_kind,
-                self._current_id,
-                self._grace,
+                "%s %s on slot=%s did not exit in %.0fs, killing process tree",
+                slot.kind, slot.id, slot.name, self._grace,
             )
             _kill_process_tree(proc.pid)
             try:
@@ -569,17 +616,17 @@ class Supervisor:
             except subprocess.TimeoutExpired:
                 pass
 
-    def _signal_terminate_async(self) -> None:
+    def _signal_terminate_async(self, slot: _Slot) -> None:
         """非阻塞：发软终止信号，启动后台 grace timer 强杀进程树。
 
         web 请求线程立刻返回，让 reload() 不被取消请求阻塞 30 秒。supervisor
         主循环每 POLL_INTERVAL 秒 poll proc.poll()，进程一旦退出就走
-        `_finish_current` 把 status 改成 canceled 并 publish 事件。
+        `_finish_slot` 把 status 改成 canceled 并 publish 事件。
         """
-        if not self._current_proc:
+        if not slot.proc:
             return
-        self._cancel_pending = True
-        proc = self._current_proc
+        slot.cancel_pending = True
+        proc = slot.proc
         self._send_terminate_signal(proc)
 
         grace = self._grace
