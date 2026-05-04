@@ -149,6 +149,8 @@ export default function Field({
         help={help}
         value={value}
         defaultValue={prop.default}
+        minimum={prop.minimum}
+        maximum={prop.maximum}
         onChange={onChange}
         disabled={disabled}
         hintNode={hintNode}
@@ -176,6 +178,8 @@ interface NumberFieldProps {
   help: string | undefined
   value: unknown
   defaultValue: unknown
+  minimum?: number
+  maximum?: number
   onChange: (v: unknown) => void
   disabled?: boolean
   hintNode?: React.ReactNode
@@ -187,9 +191,15 @@ interface NumberFieldProps {
  * 之前 onChange 立即 parseFloat → 父 setConfig 立即重渲染 → 受控 value 字符串
  * 化把「0.0」截成「0」，用户没法输 0.05。改用 raw 缓冲后输入中状态保留，
  * 仅在 blur 时把合法值上报；外部 value 变化只在 input 不 focus 时同步。
+ *
+ * min/max：blur 时若解析出的数超出 schema 声明的 minimum/maximum，
+ * 回滚到上次合法 value（跟 NaN 同处理）。这是为了恢复 PP10.3 之前
+ * `<input type="number" min max>` 自带的 HTML5 校验—— text 模式下浏览器
+ * 不再阻止超界输入，要前端自己挡。
  */
 function NumberField({
-  label, kind, help, value, defaultValue, onChange, disabled = false, hintNode,
+  label, kind, help, value, defaultValue, minimum, maximum,
+  onChange, disabled = false, hintNode,
 }: NumberFieldProps) {
   const formatNum = (v: unknown) =>
     v === null || v === undefined ? '' : String(v)
@@ -213,6 +223,14 @@ function NumberField({
     const num = kind === 'int' ? parseInt(raw, 10) : parseFloat(raw)
     if (Number.isNaN(num)) {
       // 输入非法 → 回滚到上次合法 value
+      setRaw(formatNum(value))
+      return
+    }
+    if (
+      (minimum !== undefined && num < minimum) ||
+      (maximum !== undefined && num > maximum)
+    ) {
+      // 超出 schema 范围 → 回滚（避免「先存进去再 PUT 时被 400」的滞后反馈）
       setRaw(formatNum(value))
       return
     }

@@ -120,7 +120,27 @@ describe('Field number input (PP10.3)', () => {
     expect(input.value).toBe('0.123')
   })
 
-  it('does not clamp values outside min/max — backend pydantic decides', async () => {
+  it('rolls back values below schema minimum (恢复 type=number min 校验)', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    const propWithRange: SchemaProperty = {
+      ...floatProp,
+      minimum: 0,
+      maximum: 1,
+    }
+    render(
+      <Field name="lr" prop={propWithRange} value={0.5} onChange={onChange} />,
+    )
+
+    const input = screen.getByRole('textbox') as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, '-0.1')
+    await user.tab()
+    expect(onChange).not.toHaveBeenCalled()
+    expect(input.value).toBe('0.5')
+  })
+
+  it('rolls back values above schema maximum', async () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
     const propWithRange: SchemaProperty = {
@@ -136,7 +156,32 @@ describe('Field number input (PP10.3)', () => {
     await user.clear(input)
     await user.type(input, '5')
     await user.tab()
-    expect(onChange).toHaveBeenCalledWith(5) // 不 clamp
+    expect(onChange).not.toHaveBeenCalled()
+    expect(input.value).toBe('0.5')
+  })
+
+  it('accepts values exactly at min / max boundaries', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    const propWithRange: SchemaProperty = {
+      ...floatProp,
+      minimum: 0,
+      maximum: 1,
+    }
+    render(
+      <Field name="lr" prop={propWithRange} value={0.5} onChange={onChange} />,
+    )
+
+    const input = screen.getByRole('textbox') as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, '0')
+    await user.tab()
+    expect(onChange).toHaveBeenLastCalledWith(0)
+
+    await user.clear(input)
+    await user.type(input, '1')
+    await user.tab()
+    expect(onChange).toHaveBeenLastCalledWith(1)
   })
 
   it('disabled input cannot be typed into', () => {
