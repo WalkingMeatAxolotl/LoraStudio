@@ -1589,13 +1589,15 @@ def put_version_config_endpoint(
 ) -> dict[str, Any]:
     """直接写 version 私有 config（全量替换）。
 
-    项目特定字段（data_dir / output_dir / output_name 等）由服务端强制覆盖，
-    防止用户绕过前端 disabled 改路径。
+    PP10.4：项目特定字段（data_dir / output_dir / output_name 等）**不**强制
+    覆盖。fork_preset 时已经预填好；用户在 Train 页可以自由改（例如
+    `resume_lora` 接续训练、自定义 output_name）。改坏了再换一次预设回到
+    默认。
     """
     project, ver = _project_and_version_or_404(pid, vid)
     try:
         version_config.write_version_config(
-            project, ver, body, force_project_overrides=True
+            project, ver, body, force_project_overrides=False
         )
         cfg = version_config.read_version_config(project, ver)
     except version_config.VersionConfigError as exc:

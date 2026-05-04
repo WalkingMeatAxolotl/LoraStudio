@@ -103,7 +103,9 @@ def test_fork_preset_unknown_404(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_put_config_forces_project_overrides(client: TestClient, env) -> None:
+def test_put_config_keeps_user_values(client: TestClient, env) -> None:
+    """PP10.4：PUT 端点不强制覆盖项目特定字段，让用户改 resume_lora /
+    output_name 等。fork preset 时仍预填项目路径（在 from_preset 端点测覆盖）。"""
     pid, vid = _make(client)
     _seed_preset(env, "tpl")
     client.post(
@@ -111,18 +113,34 @@ def test_put_config_forces_project_overrides(client: TestClient, env) -> None:
         json={"name": "tpl"},
     )
     cfg = client.get(f"/api/projects/{pid}/versions/{vid}/config").json()["config"]
-    cfg["data_dir"] = "/etc/passwd"
-    cfg["output_name"] = "hacked"
+    cfg["output_name"] = "custom_lora"
+    cfg["resume_lora"] = "/tmp/some/lora.safetensors"
     cfg["lora_rank"] = 96
     r = client.put(f"/api/projects/{pid}/versions/{vid}/config", json=cfg)
     assert r.status_code == 200
     body = r.json()
-    # data_dir 被服务端覆盖回 train
-    assert body["config"]["data_dir"].endswith("train")
-    # output_name 也被覆盖
-    assert body["config"]["output_name"] != "hacked"
-    # 用户改的非项目字段保留
+    # 用户改的项目特定字段被保留（PP10.4）
+    assert body["config"]["output_name"] == "custom_lora"
+    assert body["config"]["resume_lora"] == "/tmp/some/lora.safetensors"
+    # 用户改的非项目字段也保留
     assert body["config"]["lora_rank"] == 96
+
+
+def test_fork_preset_still_forces_project_overrides(
+    client: TestClient, env
+) -> None:
+    """PP10.4：换预设时项目特定字段仍然被预填成项目路径（force=True 路径未动）。"""
+    pid, vid = _make(client)
+    # preset 故意带错误路径
+    _seed_preset(env, "tpl", data_dir="/wrong/path", output_name="wrong_name")
+    r = client.post(
+        f"/api/projects/{pid}/versions/{vid}/config/from_preset",
+        json={"name": "tpl"},
+    )
+    assert r.status_code == 200
+    cfg = client.get(f"/api/projects/{pid}/versions/{vid}/config").json()["config"]
+    assert cfg["data_dir"].endswith("train")
+    assert cfg["output_name"] != "wrong_name"
 
 
 def test_put_config_invalid_data_400(client: TestClient, env) -> None:

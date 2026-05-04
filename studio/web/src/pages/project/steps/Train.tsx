@@ -51,21 +51,16 @@ export default function TrainPage() {
     void refreshConfig()
   }, [refreshConfig])
 
-  // 项目特定字段（data_dir 等）+ 全局模型路径都灰显 readonly。前者来自后端
-  // project_specific_fields；后者前端 hardcode（统一来自 settings.models 配置）。
+  // 全局模型路径仍然灰显 readonly（值来自 Settings.models 配置；version 维度
+  // 改了没意义）。PP10.4 起项目特定字段（data_dir 等）改成可编辑：fork preset
+  // 时仍然预填项目路径，但用户后续可以自由改（接续训练填 resume_lora 之类）。
   const GLOBAL_MODEL_FIELDS = [
     'transformer_path',
     'vae_path',
     'text_encoder_path',
     't5_tokenizer_path',
   ]
-  const disabledFields = useMemo(
-    () => [
-      ...(configResp?.project_specific_fields ?? []),
-      ...GLOBAL_MODEL_FIELDS,
-    ],
-    [configResp]
-  )
+  const disabledFields = useMemo(() => GLOBAL_MODEL_FIELDS, [])
   const disabledHints = useMemo(() => {
     const h: Record<string, string> = {}
     for (const f of GLOBAL_MODEL_FIELDS) h[f] = '自动 · 全局设置'

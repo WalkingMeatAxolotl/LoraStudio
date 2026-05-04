@@ -223,68 +223,50 @@ function commit() {
 
 ---
 
-## PP10.4 — 项目控制字段「解锁」按钮
+## PP10.4 — 项目控制字段直接放开编辑
 
 ### 问题
-Train 页里 `data_dir / reg_data_dir / output_dir / output_name / resume_lora / resume_state` + 全局 model 路径都是 disabled 状态。用户偶尔需要改：比如 `resume_lora` 想接续训练（spec 里写「除非用户显式 PUT 改写」但 UI 没给入口），或者 `output_name` 想改 LoRA 文件名。需要每条字段一个解锁按钮，点击后变成可编辑。
+Train 页里 `data_dir / reg_data_dir / output_dir / output_name / resume_lora / resume_state` 都是 disabled。用户偶尔需要改（最常见：`resume_lora` 接续训练，自定义 `output_name`），但没有入口。
 
 ### 现状
 
-**前端**
-- `studio/web/src/components/SchemaForm.tsx` 透传 `disabledFields: string[]` 给 Field。
-- `studio/web/src/components/Field.tsx:38` 渲染「自动 · 项目控制」徽章；input 全禁。
-- `studio/web/src/pages/project/steps/Train.tsx:62-68`：`disabledFields = [...project_specific_fields, ...GLOBAL_MODEL_FIELDS]`。
+- 前端：`Train.tsx` 把 `configResp.project_specific_fields + GLOBAL_MODEL_FIELDS` 都列到 `disabledFields`。Field 组件按 `disabled` 全禁。
+- 后端：`PUT /api/projects/{pid}/versions/{vid}/config` 调 `write_version_config(force_project_overrides=True)`，会用 `project_specific_overrides` 强制覆盖 `PROJECT_SPECIFIC_FIELDS`。**前端就算解禁，存盘也会被服务器盖掉。**
 
-**后端**
-- `studio/services/version_config.py` 的 `write_version_config(force_project_overrides=True)`（行 113-138）会用 `project_specific_overrides(p, v)` 强制覆盖 `PROJECT_SPECIFIC_FIELDS`。**这意味着前端就算把字段改了，存盘时也会被服务器盖掉。**所以解锁不只是前端事，得有一份「该 version 用户已解锁的字段」状态。
+### 定稿方案：直接放开编辑（不引入 unlock 状态）
 
-### 改造方案
+讨论时识别出这是**过度工程化**：所谓「锁」的本质就两层（前端 disabled + 后端 force-override），把两层都关掉，字段就回到普通可编辑状态；fork preset 时仍走 `force=True` 路径预填项目路径，所以「自动填」语义没变。
 
-#### 推荐方案：version 级 `unlocked_fields` 数组，前端 + 后端共同尊重
+**前端 `Train.tsx`**
+- `disabledFields` 只保留 `GLOBAL_MODEL_FIELDS`（来自 Settings.models 的全局值，version 维度改它没意义）。
+- 去掉 `project_specific_fields` 那一段。
 
-**数据**
-- 在 version 私有 config.yaml 里加一个 meta key（不进入 TrainingConfig schema 校验）。最简：在 yaml 顶部加一段注释或单独的旁路文件 `versions/{label}/.unlocked.json`。
-  - **更干净的选择**：旁路文件 `versions/{label}/.unlocked.json`，内容是 `{"fields": ["resume_lora", "output_name"]}`。schema 不动，pydantic `extra=forbid` 不破。
-- API：`GET /api/projects/{pid}/versions/{vid}/config` 返回 `{has_config, config, project_specific_fields, unlocked_fields}`。
-- 新端点：`POST /api/projects/{pid}/versions/{vid}/config/unlock` body `{field: "resume_lora"}`；`POST /.../lock` 反向。
+**后端 `PUT /api/projects/{pid}/versions/{vid}/config`**
+- `write_version_config(..., force_project_overrides=False)`。
 
-**后端 `write_version_config` 逻辑**
-- `force_project_overrides=True` 时：用 `project_specific_overrides` 但跳过 `unlocked_fields` 列表里那几个，让用户值生效。
-- pseudo：
-  ```python
-  overrides = project_specific_overrides(p, v)
-  for f in unlocked_fields(p, v):
-      overrides.pop(f, None)
-  payload.update(overrides)
-  ```
+**保留不变**
+- `write_version_config` 函数默认仍是 `force_project_overrides=True`。
+- `fork_preset_for_version`（services/presets.py）仍显式 `force=True` —— 换预设时项目特定字段被预填成 `versions/{label}/train` 等。
+- PP10.1 `versions.create_version` 在 fork 时也仍 `force=True` 重写一次刷新路径。
+- 这样「换预设 / 复制版本」的预填行为完全不变；只有用户在 Train 页**手动 PUT** 时才尊重用户值。
 
-**前端**
-- Field 组件已经接收 `disabled` + `disabledHint`。新增 prop `onUnlock?: () => void`。
-- 当 `disabled=true` 且 `onUnlock` 给了，徽章右边加一个小按钮「🔓 解锁」。点击 → 调 `api.unlockField(pid, vid, name)` → setUnlockedFields → 重新计算 disabledFields（从 disabledFields 里去掉这个 name）。
-- 解锁的字段右上角换成「⚠️ 已解锁」徽章，提示「保存时不会用项目路径覆盖」；旁边给「🔒 重新锁定」按钮。
-- 全局 model 字段（`transformer_path` 等）**不**走解锁路径——那些是用户在 Settings 里改的源头，Train 页解锁了存到 version config 也没有意义（且新建 version 后又会被覆盖回去）。所以解锁只对 `PROJECT_SPECIFIC_FIELDS` 开放。
-
-#### 候选 B：全局解锁开关（一个按钮把六个字段全打开）
-
-**优点**：UI 简单。
-
-**缺点**：用户大多数场景只想改 1 个字段（比如 `resume_lora`），全开后下次保存把所有字段都按用户值落盘，路径错位风险高。**不推荐**。
-
-#### 候选 C：在 yaml 里加 `# unlock: resume_lora` 注释行
-
-**优点**：零端点改动。
-
-**缺点**：注释靠 yaml round-trip 保留；pydantic 走 dict 之后注释丢失。**不推荐**。
+**得到的语义**
+- 进 Train 页：项目特定字段都已经预填好（fork preset 的产物）。
+- 用户可以直接改任意字段（`resume_lora` 接续 / `output_name` 改名 / 极端情况下改 `data_dir`）。
+- 保存 → yaml 落用户值。
+- 想恢复默认值？再换一次预设。
 
 ### 风险 / 边界
-- **解锁后的字段不再被项目重命名跟随**：比如解锁了 `output_dir` 后，用户改 project slug（PP1 决定 slug 不可改，所以这个风险其实不存在），路径也不会自动跟。OK。
-- **`resume_lora` 解锁是常见用法**：用户接续训练时填上一次的 `_final.safetensors` 路径。让这条 work 起来很有价值。
-- **fork preset 后 unlocked 状态怎么办**：换预设时 `.unlocked.json` 应该被清掉（重置成默认锁住所有项目字段）。fork_preset_for_version 那条路径加一行 unlink。
-- **从老 version 复制（PP10.1）后 unlocked 状态怎么办**：建议**不**复制 `.unlocked.json`，新 version 默认全锁；用户自己再开。
-- **测试**：新增 2-3 个测试：unlock + write 后字段保留用户值；lock 后字段被重新覆盖；fork preset 清空 unlocked。
+- 用户改坏 `data_dir` → 训练读错路径。但 Curation / Stepper / Tagging 等页面都不读 `data_dir`，按 `versions/{label}/train` 操作，影响范围限定在「真去训练时数据从哪读」。
+- 现有测试 `test_write_forces_project_overrides` 测的是函数默认值（仍 True），不需要改。
+- 现有测试 `test_fork_preset_for_version_applies_overrides` 测 fork preset 路径强制覆盖，仍 True，不变。
+- 新增测试：PUT 端点不强制覆盖 —— 用户传错的 `data_dir` 会被保留。
 
 ### 切片
-单一 commit：旁路文件 + 2 个端点 + Field 加按钮 + Train 页传 onUnlock + 几个测试。比 PP10.1/10.3 略大但仍单 PR。
+单一 commit：
+- 后端 `server.py` PUT 端点参数改 `force=False`。
+- 前端 `Train.tsx` `disabledFields` 去掉 `project_specific_fields`。
+- pytest 加 1 个 case：PUT 端点尊重用户值。
 
 ---
 
