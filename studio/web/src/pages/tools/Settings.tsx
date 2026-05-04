@@ -425,7 +425,7 @@ export default function SettingsPage() {
               onChange={(v) => update('queue', 'allow_gpu_during_train', v)}
             />
             <span className="text-[10px] text-amber-300">
-              ⚠ 仅在显存充裕（≥ 24GB 且训练用量 ≤ 18GB）时打开；否则可能 OOM
+              ⚠ WD14 打标推理 onnxruntime-gpu 大约占 ~2 GB；确认训练之外的剩余显存够再打开，否则 OOM
             </span>
           </div>
         </Field>
