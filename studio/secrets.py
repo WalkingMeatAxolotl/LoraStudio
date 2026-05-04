@@ -27,7 +27,9 @@ class GelbooruConfig(BaseModel):
     api_key: str = ""
     save_tags: bool = False
     convert_to_png: bool = True
-    remove_alpha_channel: bool = False
+    # 新装默认 true：训练里 4-channel PNG 会让 VAE 把透明区域当噪声学进去，
+    # 多数情况下用户都需要去掉 alpha。已存在 secrets.json 里显式 false 不受影响。
+    remove_alpha_channel: bool = True
 
 
 class DanbooruConfig(BaseModel):
@@ -97,6 +99,18 @@ class WD14Config(BaseModel):
         return self
 
 
+class QueueConfig(BaseModel):
+    """队列调度策略（PP10.2）。
+
+    Studio supervisor 使用双槽位调度：TRAIN 槽跑训练 task，DATA 槽跑
+    数据准备 job（download / tag / reg_build）。download 永远与训练并行
+    （IO-only，不抢 GPU）；tag / reg_build 走 GPU，默认在训练时**推迟执行**
+    避免 OOM。把 `allow_gpu_during_train` 打开后才允许并行（用户自己确认
+    显存够）。
+    """
+    allow_gpu_during_train: bool = False
+
+
 class ModelsConfig(BaseModel):
     """全局模型配置（PP7）。
 
@@ -119,6 +133,7 @@ class Secrets(BaseModel):
     joycaption: JoyCaptionConfig = Field(default_factory=JoyCaptionConfig)
     wd14: WD14Config = Field(default_factory=WD14Config)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
+    queue: QueueConfig = Field(default_factory=QueueConfig)
 
 
 # ---------------------------------------------------------------------------

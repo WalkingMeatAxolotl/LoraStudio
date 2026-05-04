@@ -51,21 +51,16 @@ export default function TrainPage() {
     void refreshConfig()
   }, [refreshConfig])
 
-  // 项目特定字段（data_dir 等）+ 全局模型路径都灰显 readonly。前者来自后端
-  // project_specific_fields；后者前端 hardcode（统一来自 settings.models 配置）。
+  // 全局模型路径仍然灰显 readonly（值来自 Settings.models 配置；version 维度
+  // 改了没意义）。PP10.4 起项目特定字段（data_dir 等）改成可编辑：fork preset
+  // 时仍然预填项目路径，但用户后续可以自由改（接续训练填 resume_lora 之类）。
   const GLOBAL_MODEL_FIELDS = [
     'transformer_path',
     'vae_path',
     'text_encoder_path',
     't5_tokenizer_path',
   ]
-  const disabledFields = useMemo(
-    () => [
-      ...(configResp?.project_specific_fields ?? []),
-      ...GLOBAL_MODEL_FIELDS,
-    ],
-    [configResp]
-  )
+  const disabledFields = useMemo(() => GLOBAL_MODEL_FIELDS, [])
   const disabledHints = useMemo(() => {
     const h: Record<string, string> = {}
     for (const f of GLOBAL_MODEL_FIELDS) h[f] = '自动 · 全局设置'
@@ -229,11 +224,14 @@ export default function TrainPage() {
         </button>
       </section>
 
-      {!configResp?.has_config ? (
+      {configResp === null || !schema ? (
+        // 初次加载（configResp 还没 fetch 回来 / schema 还没拉到）→ skeleton
+        <ConfigSkeleton />
+      ) : !configResp.has_config ? (
         <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
           请先从下拉「换一个预设」选一个，复制进当前 version 后即可编辑配置。
         </div>
-      ) : config && schema ? (
+      ) : config ? (
         <section className="flex-1 min-h-0 overflow-y-auto pr-1">
           <SchemaForm
             schema={schema}
@@ -244,8 +242,39 @@ export default function TrainPage() {
           />
         </section>
       ) : (
-        <p className="text-slate-500 text-sm">加载中...</p>
+        <ConfigSkeleton />
       )}
     </div>
+  )
+}
+
+/** 训练配置加载中的 skeleton — 模拟 SchemaForm 的分组卡片结构。 */
+function ConfigSkeleton() {
+  // 一个分组卡片：标题条 + 4-6 行字段（label + input 灰条）
+  const groups = [5, 6, 4, 5]
+  return (
+    <section
+      className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3"
+      role="status"
+      aria-label="加载训练配置中"
+    >
+      {groups.map((rows, gi) => (
+        <div
+          key={gi}
+          className="border border-slate-700 rounded-lg bg-slate-800/40 p-4 animate-pulse"
+        >
+          <div className="h-4 w-32 bg-slate-700 rounded mb-3" />
+          <div className="space-y-2">
+            {Array.from({ length: rows }).map((_, ri) => (
+              <div key={ri} className="space-y-1">
+                <div className="h-3 w-24 bg-slate-700/70 rounded" />
+                <div className="h-7 bg-slate-800 border border-slate-700 rounded" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">加载训练配置中...</span>
+    </section>
   )
 }

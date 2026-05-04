@@ -981,7 +981,9 @@ class ImageDataset(Dataset):
     1. JSON 文件（优先）- 支持分类 shuffle
     2. TXT 文件（回退）- 传统 shuffle
     """
-    EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+    # 保持与 studio/datasets.py:IMAGE_EXTS 同步（anima_train.py 是独立 CLI 脚本，
+    # 不强制 import studio package；改一处时另一处也要跟着改）。
+    EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 
     def __init__(self, data_dir, resolution=1024, bucket_mgr=None,
                  shuffle_caption=False, keep_tokens=0, flip_augment=False,

@@ -10,13 +10,13 @@ describe('TagEditor (PP4 chip mode)', () => {
     expect(screen.getByText('b')).toBeInTheDocument()
   })
 
-  it('Enter adds a tag', async () => {
+  it('Enter adds a tag at the front (default position)', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
     render(<TagEditor tags={['a']} onChange={onChange} />)
     const input = screen.getByPlaceholderText(/添加标签/)
     await user.type(input, 'new{Enter}')
-    expect(onChange).toHaveBeenCalledWith(['a', 'new'])
+    expect(onChange).toHaveBeenCalledWith(['new', 'a'])
   })
 
   it('comma also adds a tag', async () => {

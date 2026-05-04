@@ -39,6 +39,18 @@ def test_reject_unsupported_format(tmp_path: Path) -> None:
     assert "格式不支持" in out.skipped[0]["reason"]
 
 
+def test_accepts_extended_image_formats(tmp_path: Path) -> None:
+    """PP10：上传白名单与全链路 IMAGE_EXTS 对齐，webp/bmp/gif 也接受。"""
+    for fname, payload in [
+        ("a.webp", b"WEBP"),
+        ("b.bmp", b"BMP"),
+        ("c.gif", b"GIF"),
+    ]:
+        out = uploads.accept_one(fname, io.BytesIO(payload), tmp_path)
+        assert out.added == [fname], f"{fname} 应被接受"
+        assert (tmp_path / fname).read_bytes() == payload
+
+
 def test_skip_existing_does_not_overwrite(tmp_path: Path) -> None:
     (tmp_path / "p.png").write_bytes(b"old")
     out = uploads.accept_one("p.png", io.BytesIO(b"new"), tmp_path)

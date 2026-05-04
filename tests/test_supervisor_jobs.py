@@ -36,47 +36,158 @@ def _setup_project(isolated) -> dict:
         return projects.create_project(conn, title="P")
 
 
-def test_jobs_take_priority_over_tasks(isolated) -> None:
-    """同时入队 task 与 job：job 先跑。"""
+def test_download_job_runs_in_parallel_with_training_task(isolated, tmp_path) -> None:
+    """PP10.2.b：download job (IO-only) 应该跟训练 task 并行跑，不互相堵塞。"""
     p = _setup_project(isolated)
     events: list[dict] = []
-    job_cmd = lambda j: [sys.executable, "-c", "print('hi')"]
-    task_cmd = lambda t, _cfg: [sys.executable, "-c", "print('task')"]
+    # task 走慢 sleep，download job 走慢 sleep；如果是串行，两者 running 不会重叠
+    task_sleep = lambda t, _cfg: [
+        sys.executable, "-c", "import time; time.sleep(0.5)"
+    ]
+    job_sleep = lambda j: [sys.executable, "-c", "import time; time.sleep(0.5)"]
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    (configs / "fake.yaml").write_text("epochs: 1\n", encoding="utf-8")
+
     sup = Supervisor(
         on_event=events.append,
-        cmd_builder=task_cmd,
-        job_cmd_builder=job_cmd,
+        cmd_builder=task_sleep,
+        job_cmd_builder=job_sleep,
         db_path=isolated["db"],
         logs_dir=isolated["logs"],
+        configs_dir=configs,
         poll_interval=0.05,
         terminate_grace=2.0,
     )
     with db.connection_for(isolated["db"]) as conn:
-        # 任意 task（preset 路径不存在 → 标 failed，但不会先于 job 跑）
-        db.create_task(conn, name="t1", config_name="not_exist")
+        tid = db.create_task(conn, name="t1", config_name="fake")
         job = project_jobs.create_job(
             conn, project_id=p["id"], kind="download", params={}
         )
     sup.start()
     try:
+        # 等到两边都进入 running
         assert _wait_until(
             lambda: any(
-                e.get("type") == "job_state_changed" and e.get("status") == "running"
+                e.get("type") == "task_state_changed" and e.get("status") == "running"
                 for e in events
             )
+            and any(
+                e.get("type") == "job_state_changed" and e.get("status") == "running"
+                for e in events
+            ),
+            timeout=5.0,
+        ), "task 和 download job 没能同时进入 running（疑似仍串行）"
+    finally:
+        sup.stop(timeout=10.0)
+
+
+def test_gpu_job_deferred_during_training_by_default(isolated, tmp_path) -> None:
+    """PP10.2.b：训练 task 在跑时，tag / reg_build job 默认推迟（避免抢 GPU）。"""
+    p = _setup_project(isolated)
+    events: list[dict] = []
+    task_sleep = lambda t, _cfg: [
+        sys.executable, "-c", "import time; time.sleep(0.6)"
+    ]
+    job_quick = lambda j: [sys.executable, "-c", "print('tag done')"]
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    (configs / "fake.yaml").write_text("epochs: 1\n", encoding="utf-8")
+
+    sup = Supervisor(
+        on_event=events.append,
+        cmd_builder=task_sleep,
+        job_cmd_builder=job_quick,
+        db_path=isolated["db"],
+        logs_dir=isolated["logs"],
+        configs_dir=configs,
+        poll_interval=0.05,
+        terminate_grace=2.0,
+    )
+    with db.connection_for(isolated["db"]) as conn:
+        tid = db.create_task(conn, name="t1", config_name="fake")
+        job = project_jobs.create_job(
+            conn, project_id=p["id"], kind="tag", params={}
+        )
+    sup.start()
+    try:
+        # 等到训练 task running
+        assert _wait_until(
+            lambda: any(
+                e.get("type") == "task_state_changed" and e.get("status") == "running"
+                for e in events
+            ),
+            timeout=5.0,
+        )
+        # 给 tag job 一点时间被错误调度起来 — 它**不应**跑
+        time.sleep(0.3)
+        with db.connection_for(isolated["db"]) as conn:
+            job_now = project_jobs.get_job(conn, job["id"])
+        assert job_now["status"] == "pending", \
+            f"tag job 不应在训练中起跑，当前状态={job_now['status']}"
+        # 等训练结束 → tag job 应该自动跑起来
+        assert _wait_until(
+            lambda: project_jobs.get_job(
+                db.connect(isolated["db"]), job["id"]
+            )["status"] == "done",
+            timeout=10.0,
         )
     finally:
-        sup.stop(timeout=5.0)
-    # job_running 事件出现的位置应该早于 task 的任何事件出现
-    job_run_idx = next(
-        i for i, e in enumerate(events)
-        if e.get("type") == "job_state_changed" and e.get("status") == "running"
-    )
-    task_evt_indices = [
-        i for i, e in enumerate(events) if e.get("type") == "task_state_changed"
+        sup.stop(timeout=10.0)
+
+
+def test_gpu_job_runs_during_training_when_allowed(isolated, tmp_path, monkeypatch) -> None:
+    """PP10.2.b：开 secrets.queue.allow_gpu_during_train=True 后，tag job
+    可以跟训练 task 并行（用户自己确认显存够）。"""
+    from studio import secrets as _sec
+    # 写一份 secrets 进 tmp，monkeypatch 切到这里
+    secrets_file = tmp_path / "secrets.json"
+    monkeypatch.setattr(_sec, "SECRETS_FILE", secrets_file)
+    sec = _sec.Secrets()
+    sec.queue.allow_gpu_during_train = True
+    _sec.save(sec)
+
+    p = _setup_project(isolated)
+    events: list[dict] = []
+    task_sleep = lambda t, _cfg: [
+        sys.executable, "-c", "import time; time.sleep(0.5)"
     ]
-    if task_evt_indices:
-        assert job_run_idx < min(task_evt_indices)
+    job_sleep = lambda j: [sys.executable, "-c", "import time; time.sleep(0.5)"]
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    (configs / "fake.yaml").write_text("epochs: 1\n", encoding="utf-8")
+
+    sup = Supervisor(
+        on_event=events.append,
+        cmd_builder=task_sleep,
+        job_cmd_builder=job_sleep,
+        db_path=isolated["db"],
+        logs_dir=isolated["logs"],
+        configs_dir=configs,
+        poll_interval=0.05,
+        terminate_grace=2.0,
+    )
+    with db.connection_for(isolated["db"]) as conn:
+        tid = db.create_task(conn, name="t1", config_name="fake")
+        job = project_jobs.create_job(
+            conn, project_id=p["id"], kind="tag", params={}
+        )
+    sup.start()
+    try:
+        # 应该两边都跑起来
+        assert _wait_until(
+            lambda: any(
+                e.get("type") == "task_state_changed" and e.get("status") == "running"
+                for e in events
+            )
+            and any(
+                e.get("type") == "job_state_changed" and e.get("status") == "running"
+                for e in events
+            ),
+            timeout=5.0,
+        ), "开关打开后 tag job 仍被推迟"
+    finally:
+        sup.stop(timeout=10.0)
 
 
 def test_job_lifecycle_done(isolated) -> None:

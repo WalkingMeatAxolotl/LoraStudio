@@ -50,7 +50,8 @@ export default function TagEditor({
       setDraft('')
       return
     }
-    onChange([...tags, t])
+    // 新 tag 默认插到开头（用户偏好：训练时主标签更靠前）
+    onChange([t, ...tags])
     setDraft('')
   }
 

@@ -21,6 +21,7 @@ type Section =
   | 'joycaption'
   | 'wd14'
   | 'models'
+  | 'queue'
 
 const EMPTY: Secrets = {
   gelbooru: {
@@ -28,7 +29,7 @@ const EMPTY: Secrets = {
     api_key: '',
     save_tags: false,
     convert_to_png: true,
-    remove_alpha_channel: false,
+    remove_alpha_channel: true,
   },
   danbooru: { username: '', api_key: '', account_type: 'free' },
   download: {
@@ -53,6 +54,7 @@ const EMPTY: Secrets = {
     batch_size: 8,
   },
   models: { root: null, selected_anima: 'preview3-base' },
+  queue: { allow_gpu_during_train: false },
 }
 
 export default function SettingsPage() {
@@ -408,6 +410,25 @@ export default function SettingsPage() {
           />
         </Field>
         <WD14RuntimePanel />
+      </Section>
+
+      <Section title="队列调度">
+        <p className="text-[11px] text-slate-500 px-1">
+          训练任务（占满 GPU）跟数据准备任务（下载 / 打标 / 正则集）
+          走两个独立槽位。下载（IO-only）始终跟训练并行；打标 / 正则集吃
+          GPU，默认在训练时推迟，避免抢显存 OOM。
+        </p>
+        <Field label="允许 GPU 任务与训练并行">
+          <div className="flex items-center gap-3">
+            <Bool
+              value={draft.queue.allow_gpu_during_train}
+              onChange={(v) => update('queue', 'allow_gpu_during_train', v)}
+            />
+            <span className="text-[10px] text-amber-300">
+              ⚠ WD14 打标推理 onnxruntime-gpu 大约占 ~2 GB；确认训练之外的剩余显存够再打开，否则 OOM
+            </span>
+          </div>
+        </Field>
       </Section>
 
       <ModelsSection />

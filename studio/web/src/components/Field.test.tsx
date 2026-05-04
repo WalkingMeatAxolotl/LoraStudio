@@ -1,0 +1,199 @@
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
+import type { SchemaProperty } from '../api/client'
+import Field from './Field'
+
+const floatProp: SchemaProperty = {
+  type: 'number',
+  default: 0.5,
+  group: 'misc',
+  control: 'auto',
+  description: '',
+}
+
+const intProp: SchemaProperty = {
+  type: 'integer',
+  default: 1,
+  group: 'misc',
+  control: 'auto',
+  description: '',
+}
+
+describe('Field number input (PP10.3)', () => {
+  it('does not commit on each keystroke — typing 0.05 stays intact', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(<Field name="lr" prop={floatProp} value={0.5} onChange={onChange} />)
+
+    const input = screen.getByRole('textbox') as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, '0.05')
+    // 输入过程中父 onChange 不应被调用
+    expect(onChange).not.toHaveBeenCalled()
+    // raw 缓冲保留完整输入
+    expect(input.value).toBe('0.05')
+  })
+
+  it('commits parsed number on blur', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(<Field name="lr" prop={floatProp} value={0.5} onChange={onChange} />)
+
+    const input = screen.getByRole('textbox') as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, '0.05')
+    await user.tab() // 触发 blur
+    expect(onChange).toHaveBeenCalledWith(0.05)
+  })
+
+  it('commits parsed number on Enter', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(<Field name="lr" prop={floatProp} value={0.5} onChange={onChange} />)
+
+    const input = screen.getByRole('textbox') as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, '0.05{Enter}')
+    expect(onChange).toHaveBeenCalledWith(0.05)
+  })
+
+  it('blur with empty input writes back default', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(<Field name="lr" prop={floatProp} value={0.5} onChange={onChange} />)
+
+    const input = screen.getByRole('textbox') as HTMLInputElement
+    await user.clear(input)
+    await user.tab()
+    expect(onChange).toHaveBeenCalledWith(0.5) // floatProp.default
+    expect(input.value).toBe('0.5')
+  })
+
+  it('blur with invalid input rolls back to current value', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(<Field name="lr" prop={floatProp} value={0.5} onChange={onChange} />)
+
+    const input = screen.getByRole('textbox') as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, 'abc')
+    await user.tab()
+    expect(onChange).not.toHaveBeenCalled()
+    expect(input.value).toBe('0.5') // 回滚
+  })
+
+  it('int field also uses raw buffer', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(<Field name="batch" prop={intProp} value={4} onChange={onChange} />)
+
+    const input = screen.getByRole('textbox') as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, '16')
+    expect(onChange).not.toHaveBeenCalled()
+    await user.tab()
+    expect(onChange).toHaveBeenCalledWith(16)
+  })
+
+  it('external value change syncs raw only when input is not focused', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <Field name="lr" prop={floatProp} value={0.5} onChange={onChange} />,
+    )
+    const input = screen.getByRole('textbox') as HTMLInputElement
+
+    // 用户 focus 进去开始输入
+    await user.click(input)
+    await user.clear(input)
+    await user.type(input, '0.0')
+    expect(input.value).toBe('0.0')
+
+    // 此时外部 value 变化（如 SSE / 别的字段触发的 reset）—— 不应覆盖用户半截输入
+    rerender(<Field name="lr" prop={floatProp} value={0.999} onChange={onChange} />)
+    expect(input.value).toBe('0.0')
+
+    // blur 后再改外部 value → 这次同步
+    await user.tab()
+    rerender(<Field name="lr" prop={floatProp} value={0.123} onChange={onChange} />)
+    expect(input.value).toBe('0.123')
+  })
+
+  it('rolls back values below schema minimum (恢复 type=number min 校验)', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    const propWithRange: SchemaProperty = {
+      ...floatProp,
+      minimum: 0,
+      maximum: 1,
+    }
+    render(
+      <Field name="lr" prop={propWithRange} value={0.5} onChange={onChange} />,
+    )
+
+    const input = screen.getByRole('textbox') as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, '-0.1')
+    await user.tab()
+    expect(onChange).not.toHaveBeenCalled()
+    expect(input.value).toBe('0.5')
+  })
+
+  it('rolls back values above schema maximum', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    const propWithRange: SchemaProperty = {
+      ...floatProp,
+      minimum: 0,
+      maximum: 1,
+    }
+    render(
+      <Field name="lr" prop={propWithRange} value={0.5} onChange={onChange} />,
+    )
+
+    const input = screen.getByRole('textbox') as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, '5')
+    await user.tab()
+    expect(onChange).not.toHaveBeenCalled()
+    expect(input.value).toBe('0.5')
+  })
+
+  it('accepts values exactly at min / max boundaries', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    const propWithRange: SchemaProperty = {
+      ...floatProp,
+      minimum: 0,
+      maximum: 1,
+    }
+    render(
+      <Field name="lr" prop={propWithRange} value={0.5} onChange={onChange} />,
+    )
+
+    const input = screen.getByRole('textbox') as HTMLInputElement
+    await user.clear(input)
+    await user.type(input, '0')
+    await user.tab()
+    expect(onChange).toHaveBeenLastCalledWith(0)
+
+    await user.clear(input)
+    await user.type(input, '1')
+    await user.tab()
+    expect(onChange).toHaveBeenLastCalledWith(1)
+  })
+
+  it('disabled input cannot be typed into', () => {
+    render(
+      <Field
+        name="lr"
+        prop={floatProp}
+        value={0.5}
+        onChange={() => {}}
+        disabled
+      />,
+    )
+    expect(screen.getByRole('textbox')).toBeDisabled()
+  })
+})

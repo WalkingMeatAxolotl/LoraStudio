@@ -16,6 +16,7 @@ export default function ProjectLayout() {
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [creatingBusy, setCreatingBusy] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -81,16 +82,29 @@ export default function ProjectLayout() {
     }
   }
 
-  const handleCreateVersion = async (label: string) => {
-    if (!project) return
+  const handleCreateVersion = async (
+    label: string,
+    forkFromVersionId: number | null,
+  ) => {
+    if (!project || creatingBusy) return
+    setCreatingBusy(true)
     try {
-      const v = await api.createVersion(project.id, { label })
+      const body: { label: string; fork_from_version_id?: number } = { label }
+      if (forkFromVersionId !== null) body.fork_from_version_id = forkFromVersionId
+      const v = await api.createVersion(project.id, body)
       await api.activateVersion(project.id, v.id)
       await reload()
       setCreating(false)
-      toast(`已创建版本 ${label}`, 'success')
+      toast(
+        forkFromVersionId !== null
+          ? `已从副本创建版本 ${label}`
+          : `已创建版本 ${label}`,
+        'success',
+      )
     } catch (e) {
       toast(String(e), 'error')
+    } finally {
+      setCreatingBusy(false)
     }
   }
 
@@ -208,7 +222,12 @@ export default function ProjectLayout() {
       {creating && (
         <NewVersionDialog
           existingLabels={project.versions.map((v) => v.label)}
-          onCancel={() => setCreating(false)}
+          existingVersions={project.versions.map((v) => ({ id: v.id, label: v.label }))}
+          busy={creatingBusy}
+          onCancel={() => {
+            if (creatingBusy) return
+            setCreating(false)
+          }}
           onSubmit={handleCreateVersion}
         />
       )}
@@ -216,26 +235,34 @@ export default function ProjectLayout() {
   )
 }
 
-function NewVersionDialog({
+export function NewVersionDialog({
   existingLabels,
+  existingVersions,
+  busy = false,
   onCancel,
   onSubmit,
 }: {
   existingLabels: string[]
+  existingVersions: { id: number; label: string }[]
+  busy?: boolean
   onCancel: () => void
-  onSubmit: (label: string) => void
+  onSubmit: (label: string, forkFromVersionId: number | null) => void
 }) {
   const [label, setLabel] = useState('')
+  // '' = 从空白开始；其他值 = string 化的 version id
+  const [forkFrom, setForkFrom] = useState<string>('')
   const [err, setErr] = useState<string | null>(null)
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (busy) return
     const l = label.trim()
     if (!l) return setErr('label 不能为空')
     if (!/^[A-Za-z0-9_.-]+$/.test(l))
       return setErr('label 只允许字母 / 数字 / 下划线 / 连字符 / 点')
     if (existingLabels.includes(l)) return setErr('label 已存在')
-    onSubmit(l)
+    const fid = forkFrom === '' ? null : Number(forkFrom)
+    onSubmit(l, fid)
   }
 
   return (
@@ -262,20 +289,44 @@ function NewVersionDialog({
             placeholder="例：baseline / high-lr"
           />
         </label>
+        {existingVersions.length > 0 && (
+          <label className="block">
+            <span className="text-xs text-slate-400 font-mono">从…创建</span>
+            <select
+              value={forkFrom}
+              onChange={(e) => setForkFrom(e.target.value)}
+              className="mt-1 w-full px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-sm focus:outline-none focus:border-cyan-500"
+            >
+              <option value="">从空白开始</option>
+              {existingVersions.map((v) => (
+                <option key={v.id} value={String(v.id)}>
+                  从 {v.label} 复制
+                </option>
+              ))}
+            </select>
+            {forkFrom !== '' && (
+              <p className="text-[10px] text-slate-500 mt-1">
+                将复制 train/、reg/、训练配置、解锁状态（output/、samples/ 不复制）
+              </p>
+            )}
+          </label>
+        )}
         {err && <p className="text-xs text-red-400">{err}</p>}
         <div className="flex gap-2 justify-end">
           <button
             type="button"
             onClick={onCancel}
-            className="px-3 py-1.5 rounded text-sm bg-slate-700 hover:bg-slate-600"
+            disabled={busy}
+            className="px-3 py-1.5 rounded text-sm bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             取消
           </button>
           <button
             type="submit"
-            className="px-3 py-1.5 rounded text-sm bg-cyan-600 hover:bg-cyan-500"
+            disabled={busy}
+            className="px-3 py-1.5 rounded text-sm bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500"
           >
-            创建
+            {busy ? '创建中...' : '创建'}
           </button>
         </div>
       </form>

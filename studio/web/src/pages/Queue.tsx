@@ -80,6 +80,7 @@ function fmtDuration(start: number | null, end: number | null): string {
 export default function QueuePage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [configs, setConfigs] = useState<ConfigSummary[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const reloadTimer = useRef<number | null>(null)
@@ -96,6 +97,8 @@ export default function QueuePage() {
       setConfigs(cfgList)
     } catch (e) {
       setError(String(e))
+    } finally {
+      setLoaded(true)
     }
   }, [])
 
@@ -237,7 +240,26 @@ export default function QueuePage() {
           </div>
         </header>
 
-        {tasks.length === 0 ? (
+        {!loaded ? (
+          <ul
+            className="divide-y divide-slate-800"
+            role="status"
+            aria-label="加载队列中"
+          >
+            {Array.from({ length: 3 }).map((_, i) => (
+              <li key={i} className="px-3 py-3 animate-pulse flex items-center gap-3">
+                <div className="h-3 w-6 bg-slate-700 rounded" />
+                <div className="flex-1 space-y-1">
+                  <div className="h-3 w-40 bg-slate-700 rounded" />
+                  <div className="h-2.5 w-28 bg-slate-800 rounded" />
+                </div>
+                <div className="h-5 w-14 bg-slate-700/70 rounded" />
+                <div className="h-3 w-24 bg-slate-700/60 rounded" />
+              </li>
+            ))}
+            <span className="sr-only">加载队列中...</span>
+          </ul>
+        ) : tasks.length === 0 ? (
           <p className="px-4 py-8 text-center text-slate-500 text-sm">
             队列为空
           </p>

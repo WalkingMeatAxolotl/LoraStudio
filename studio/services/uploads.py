@@ -1,10 +1,11 @@
-"""本地上传：单图（jpg/png）或 zip 压缩包（自动解压拍平），落盘到 download/。
+"""本地上传：单图或 zip 压缩包（自动解压拍平），落盘到 download/。
 
 用户通过浏览器 file picker / 拖拽上传文件 → server 端解析 → 写入项目的
 `download/` 目录，与 booru 下载共享同一份「全量备份」。
 
 约束：
-- 仅接受 .jpg / .jpeg / .png 单图；zip 包内同样仅提取 jpg/png。
+- 接受 IMAGE_EXTS 里所有格式的单图（png / jpg / jpeg / webp / bmp / gif）；
+  zip 包内同样按这套白名单提取，原样落盘（不做格式转换）。
 - zip 内的子目录结构会被拍平（取 basename）。
 - 文件名冲突保守跳过，不覆盖、不自动重命名 —— 让用户知道哪里跳过了。
 - zip 损坏时整包跳过并报告，不影响其它文件。
@@ -17,7 +18,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO, Iterable
 
-ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
+from ..datasets import IMAGE_EXTS
+
+# PP10 起复用全链路白名单：上传 / 下载 / curation / 训练共用一份。
+ALLOWED_IMAGE_EXTS = IMAGE_EXTS
 ZIP_EXT = ".zip"
 
 
@@ -50,8 +54,8 @@ def accept_one(
 ) -> UploadResult:
     """处理单个上传文件。
 
-    - jpg/jpeg/png → 直接拷到 dest_dir
-    - zip → 解压所有 jpg/png（拍平）
+    - IMAGE_EXTS 内任一格式 → 直接拷到 dest_dir（不做格式转换）
+    - zip → 解压所有图片格式（拍平）
     - 其他 / 没扩展名 → 拒绝
     """
     base = _safe_basename(src_name or "")
@@ -101,8 +105,9 @@ def accept_one(
             result.skipped.append({"name": base, "reason": "zip 损坏"})
         return result
 
+    allowed = ", ".join(sorted(ALLOWED_IMAGE_EXTS)) + ", .zip"
     result.skipped.append(
-        {"name": base, "reason": "格式不支持（仅 .jpg / .png / .zip）"}
+        {"name": base, "reason": f"格式不支持（仅 {allowed}）"}
     )
     return result
 

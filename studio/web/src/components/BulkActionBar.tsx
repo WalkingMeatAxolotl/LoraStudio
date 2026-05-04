@@ -32,7 +32,7 @@ export default function BulkActionBar({
   const [tagsInput, setTagsInput] = useState('')
   const [oldTag, setOldTag] = useState('')
   const [newTag, setNewTag] = useState('')
-  const [position, setPosition] = useState<'front' | 'back'>('back')
+  const [position, setPosition] = useState<'front' | 'back'>('front')
 
   const closePopover = () => {
     setOpenOp(null)
@@ -177,8 +177,8 @@ export default function BulkActionBar({
               onChange={(e) => setPosition(e.target.value as 'front' | 'back')}
               className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs"
             >
-              <option value="back">追加到末尾</option>
               <option value="front">插到开头</option>
+              <option value="back">追加到末尾</option>
             </select>
           )}
           {openOp === 'replace' && (

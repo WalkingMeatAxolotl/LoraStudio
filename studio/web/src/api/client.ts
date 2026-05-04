@@ -150,6 +150,12 @@ export interface ModelsConfig {
   selected_anima: string
 }
 
+export interface QueueConfig {
+  /** PP10.2：默认 false，训练时推迟 tag/reg_build job 避免 GPU OOM。
+   * 用户开后允许 GPU job 与训练并行（自己确认显存够）。 */
+  allow_gpu_during_train: boolean
+}
+
 export interface Secrets {
   gelbooru: GelbooruConfig
   danbooru: DanbooruConfig
@@ -158,6 +164,7 @@ export interface Secrets {
   joycaption: JoyCaptionConfig
   wd14: WD14Config
   models: ModelsConfig
+  queue: QueueConfig
 }
 
 /** PUT /api/secrets 的 body：嵌套的 partial dict；MASK ("***") 表示「保持不变」。 */

@@ -8,7 +8,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".jxl"}
+# 全链路图片格式白名单 —— 上传 / 下载 / curation / tag / reg / 训练都引用这个集合。
+# 保持与 anima_train.py:EXTS 同步（trainer 是独立脚本，不 import studio）。
+# 删了 .jxl：PIL 12 没注册 .jxl，需要 pillow-jxl-plugin 才能解，booru 生态见不到。
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 KOHYA_PREFIX = re.compile(r"^(\d+)_(.+)$")
 
 
