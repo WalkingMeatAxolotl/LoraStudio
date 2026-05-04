@@ -16,6 +16,7 @@ export default function ProjectLayout() {
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [creatingBusy, setCreatingBusy] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -85,7 +86,8 @@ export default function ProjectLayout() {
     label: string,
     forkFromVersionId: number | null,
   ) => {
-    if (!project) return
+    if (!project || creatingBusy) return
+    setCreatingBusy(true)
     try {
       const body: { label: string; fork_from_version_id?: number } = { label }
       if (forkFromVersionId !== null) body.fork_from_version_id = forkFromVersionId
@@ -101,6 +103,8 @@ export default function ProjectLayout() {
       )
     } catch (e) {
       toast(String(e), 'error')
+    } finally {
+      setCreatingBusy(false)
     }
   }
 
@@ -219,7 +223,11 @@ export default function ProjectLayout() {
         <NewVersionDialog
           existingLabels={project.versions.map((v) => v.label)}
           existingVersions={project.versions.map((v) => ({ id: v.id, label: v.label }))}
-          onCancel={() => setCreating(false)}
+          busy={creatingBusy}
+          onCancel={() => {
+            if (creatingBusy) return
+            setCreating(false)
+          }}
           onSubmit={handleCreateVersion}
         />
       )}
@@ -230,11 +238,13 @@ export default function ProjectLayout() {
 export function NewVersionDialog({
   existingLabels,
   existingVersions,
+  busy = false,
   onCancel,
   onSubmit,
 }: {
   existingLabels: string[]
   existingVersions: { id: number; label: string }[]
+  busy?: boolean
   onCancel: () => void
   onSubmit: (label: string, forkFromVersionId: number | null) => void
 }) {
@@ -245,6 +255,7 @@ export function NewVersionDialog({
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (busy) return
     const l = label.trim()
     if (!l) return setErr('label 不能为空')
     if (!/^[A-Za-z0-9_.-]+$/.test(l))
@@ -305,15 +316,17 @@ export function NewVersionDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="px-3 py-1.5 rounded text-sm bg-slate-700 hover:bg-slate-600"
+            disabled={busy}
+            className="px-3 py-1.5 rounded text-sm bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             取消
           </button>
           <button
             type="submit"
-            className="px-3 py-1.5 rounded text-sm bg-cyan-600 hover:bg-cyan-500"
+            disabled={busy}
+            className="px-3 py-1.5 rounded text-sm bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500"
           >
-            创建
+            {busy ? '创建中...' : '创建'}
           </button>
         </div>
       </form>
