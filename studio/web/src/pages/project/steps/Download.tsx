@@ -12,8 +12,9 @@ import ImageGrid, { applySelection } from '../../../components/ImageGrid'
 import { useToast } from '../../../components/Toast'
 import { useEventStream } from '../../../lib/useEventStream'
 
+// 跟 studio/datasets.py:IMAGE_EXTS 对齐 — 上传白名单 = 全链路图片白名单 + .zip。
 const UPLOAD_ACCEPT =
-  '.jpg,.jpeg,.png,.zip,image/jpeg,image/png,application/zip'
+  '.png,.jpg,.jpeg,.webp,.bmp,.gif,.zip,image/png,image/jpeg,image/webp,image/bmp,image/gif,application/zip'
 
 interface Ctx {
   project: ProjectDetail
@@ -567,7 +568,7 @@ function UploadPanel({
         />
         <span className="font-medium">点击选择 / 拖入</span>
         <span className="text-slate-500">
-          · .jpg / .png / .zip(自动解压)
+          · png / jpg / webp / bmp / gif / .zip(自动解压)
         </span>
         <span className="flex-1" />
         {picked.length > 0 && (
