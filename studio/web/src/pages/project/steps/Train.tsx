@@ -224,11 +224,14 @@ export default function TrainPage() {
         </button>
       </section>
 
-      {!configResp?.has_config ? (
+      {configResp === null || !schema ? (
+        // 初次加载（configResp 还没 fetch 回来 / schema 还没拉到）→ skeleton
+        <ConfigSkeleton />
+      ) : !configResp.has_config ? (
         <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
           请先从下拉「换一个预设」选一个，复制进当前 version 后即可编辑配置。
         </div>
-      ) : config && schema ? (
+      ) : config ? (
         <section className="flex-1 min-h-0 overflow-y-auto pr-1">
           <SchemaForm
             schema={schema}
