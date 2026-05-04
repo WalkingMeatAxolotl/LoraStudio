@@ -26,19 +26,30 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from . import db, project_jobs
+from . import db, project_jobs, secrets as _secrets
 from .log_tail import LogTailer, MonitorStatePoller
 from .paths import LOGS_DIR, REPO_ROOT, STUDIO_DATA, STUDIO_DB, USER_PRESETS_DIR
 
 logger = logging.getLogger(__name__)
+
+# PP10.2.b：哪些 job kind 吃 GPU。这些 kind 在训练运行中默认会被推迟，
+# 除非 secrets.queue.allow_gpu_during_train=True 显式允许并行。
+GPU_BOUND_JOB_KINDS: frozenset[str] = frozenset({"tag", "reg_build"})
+
+# 槽位名常量
+SLOT_TRAIN = "train"
+SLOT_DATA = "data"
 
 
 @dataclass
 class _Slot:
     """Supervisor 内的一个执行槽位。每个槽位最多跑 1 个子进程。
 
-    PP10.2.a 起从「单 _current_* 字段」改成「list[_Slot]」。10.2.a 仍是单槽位
-    （行为不变），10.2.b 会拆成 TRAIN + DATA 两槽位让训练与数据准备并行。
+    PP10.2.a 起从「单 _current_* 字段」改成「list[_Slot]」；10.2.b 拆成
+    两个槽位：
+      - TRAIN 槽：只跑 training tasks（db.tasks 表）
+      - DATA  槽：只跑 project_jobs（download / tag / reg_build）
+    download 永远跟训练并行；tag / reg_build 看 settings 开关。
     """
     name: str = "main"
     proc: Optional[subprocess.Popen] = None
@@ -181,9 +192,12 @@ class Supervisor:
 
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        # PP10.2.a：执行槽位列表。10.2.a 单槽位（行为不变），10.2.b 拆成
-        # TRAIN + DATA 让训练与数据准备并行。
-        self._slots: list[_Slot] = [_Slot(name="main")]
+        # PP10.2.b：双槽位。TRAIN 槽只跑 tasks，DATA 槽只跑 project_jobs。
+        # download 永远跟训练并行；tag / reg_build 默认在训练时推迟。
+        self._slots: list[_Slot] = [
+            _Slot(name=SLOT_TRAIN),
+            _Slot(name=SLOT_DATA),
+        ]
         self._log_seq = itertools.count()
 
     # ------------------------------------------------------------------ 控制
@@ -322,32 +336,58 @@ class Supervisor:
             if rc is not None:
                 self._finish_slot(slot, rc)
 
-        # 2) 给空闲槽位派活
+        # 2) 给空闲槽位派活（按槽位职责分工）
         for slot in self._slots:
             if slot.busy:
                 continue
-            if self._dispatch(slot):
-                # 派出去就停 — 同一 tick 不再给同槽派第二个活
-                continue
+            if slot.name == SLOT_TRAIN:
+                self._dispatch_train(slot)
+            elif slot.name == SLOT_DATA:
+                self._dispatch_data(slot)
 
-    def _dispatch(self, slot: _Slot) -> bool:
-        """给空闲 slot 找一个 pending 单元跑。返回 True 表示已派活。
-
-        10.2.a：单槽位，沿用 jobs > tasks 的旧优先级，行为不变。
-        10.2.b 起会重写为按槽位职责（TRAIN 槽只看 tasks，DATA 槽按 GPU 策略
-        筛 jobs）。
-        """
-        with db.connection_for(self._db_path) as conn:
-            job = project_jobs.next_pending(conn)
-        if job:
-            self._spawn_job(slot, job)
-            return True
+    def _dispatch_train(self, slot: _Slot) -> None:
+        """TRAIN 槽：只跑 db.tasks 表里的训练 task。"""
         with db.connection_for(self._db_path) as conn:
             task = db.next_pending(conn)
         if task:
             self._spawn_task(slot, task)
-            return True
+
+    def _dispatch_data(self, slot: _Slot) -> None:
+        """DATA 槽：跑 project_jobs（download / tag / reg_build）。
+
+        - download 永远 OK（IO-only，不抢 GPU）
+        - tag / reg_build 是 GPU-bound：训练正在跑且未开
+          `secrets.queue.allow_gpu_during_train` → 跳过这条 job，等训练结束
+          再拉。下一条非 GPU job 仍可派。
+        """
+        train_busy = self._train_busy()
+        allow_gpu = self._allow_gpu_during_train()
+        # 简单实现：取 next_pending 那一条；若 GPU-bound 且训练在跑，留着不动
+        # （让它仍然 pending），其他 IO-only job 会在下一次 tick 通过 next_pending
+        # 重新被取到（next_pending 按 id ASC，下一次同样会指向这条；所以需要
+        # 跳过）。这里用 list_jobs 选第一条**可跑**的。
+        with db.connection_for(self._db_path) as conn:
+            pending = project_jobs.list_jobs(conn, status="pending")
+        # list_jobs 默认 ORDER BY id DESC；按入队顺序应该 ASC
+        pending.sort(key=lambda j: j["id"])
+        for job in pending:
+            kind = job["kind"]
+            if kind in GPU_BOUND_JOB_KINDS and train_busy and not allow_gpu:
+                continue  # 训练中暂缓 GPU job
+            self._spawn_job(slot, job)
+            return
+
+    def _train_busy(self) -> bool:
+        for slot in self._slots:
+            if slot.name == SLOT_TRAIN and slot.busy:
+                return True
         return False
+
+    def _allow_gpu_during_train(self) -> bool:
+        try:
+            return bool(_secrets.load().queue.allow_gpu_during_train)
+        except Exception:
+            return False
 
     # -------------------------------------------------------------- 子进程
     def _spawn_task(self, slot: _Slot, task: dict[str, Any]) -> None:

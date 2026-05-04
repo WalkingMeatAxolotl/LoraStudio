@@ -40,6 +40,7 @@ const initialServerState = {
     batch_size: 8,
   },
   models: { root: null, selected_anima: 'preview3-base' },
+  queue: { allow_gpu_during_train: false },
 }
 
 const emptyModelsCatalog = {

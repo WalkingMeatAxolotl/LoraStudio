@@ -71,78 +71,44 @@
 ## PP10.2 — 队列并行：训练 ∥ 数据准备
 
 ### 问题
-现在所有任务（download / tag / reg_build / training）都在 supervisor 单进程串行跑。训练一个 LoRA 要几小时，期间下一个项目的下载、打标都堵在队列里。用户希望「炼第一个的时候同时给第二个项目下载、打标」。
+原本所有任务（download / tag / reg_build / training）在 supervisor 单进程串行。训练一个 LoRA 要几小时，期间下一个项目的下载 / 打标都堵在队列里。
 
-### 现状
-- `studio/supervisor.py` 单 `_current_proc` / `_current_kind` / `_current_id`（行 153-160），同一时刻只有一个子进程在跑。
-- `_tick()` 调度顺序：先 `project_jobs.next_pending`（download/tag/reg_build），再 `db.next_pending`（training tasks）—— 数据准备**优先**，但仍然是串行（行 280-298）。
-- 取消逻辑围绕单 `_current_proc` / `_current_kind`（`cancel`、`cancel_job`、`_signal_terminate_async`）。
-- 进程结束后 `_finish_current` 清掉 4 块状态字段（proc/kind/id/log_fp/tailer）。
+### 定稿方案：双槽位调度器
 
-### 改造方案
+**槽位**
 
-核心思路：把 supervisor 改成「多槽位调度器」。每个槽位独立：自己的 `_current_proc` / 状态字段 / log tailer / cancel 路径。
-
-#### 推荐方案：双槽位（training 槽 + data 槽）
-
-**槽位定义**
 | 槽位 | 接的活 | 资源画像 |
 |---|---|---|
 | TRAIN | `tasks` 表（训练）| 长任务、占满 GPU |
-| DATA  | `project_jobs` 表（download / tag / reg_build）| 短任务、CPU+IO 为主，tag/reg_build 也吃 GPU |
+| DATA  | `project_jobs` 表（download / tag / reg_build）| download IO-only；tag / reg_build 吃 GPU |
 
-**调度策略**
-- TRAIN 槽空 → 拉一条 pending task。
-- DATA 槽空 → 拉一条 pending job；但**如果 TRAIN 槽正在跑且新 job 是 GPU-bound（tag、reg_build）**，先看 settings 里的开关 `allow_gpu_during_train`：默认 **off**（保守，避免抢显存 OOM），用户在 Settings 里勾上才并行。download job 不受这个限制（IO-only）。
-- 「GPU-bound」判定：job.kind ∈ `{tag, reg_build}` 当作 GPU；download 当作 CPU。reg_build 实际 90% 时间在 booru 拉图（IO），但末尾的 auto_tag 阶段才吃 GPU——粒度不够细，先按整 job 标 GPU-bound 处理。如果之后觉得太保守，再拆 reg_build 的 phase。
+**调度策略（`_dispatch_train` / `_dispatch_data`）**
+- TRAIN 槽空 → 取 `db.next_pending(tasks)` 派活。
+- DATA 槽空 → 扫 `project_jobs.list_jobs(status='pending')`（按 id ASC），找第一条**可跑**的：若是 GPU-bound (`{tag, reg_build}`) 且 TRAIN 槽 busy 且 `secrets.queue.allow_gpu_during_train=False` → 跳过。download 永远直接跑。
+- 训练结束 → 下一 tick 自动把推迟的 GPU job 拉起来。
 
-**取消 / 终止改造**
-- `cancel(task_id)` 只看 TRAIN 槽。
-- `cancel_job(job_id)` 只看 DATA 槽。
-- `Supervisor.stop()` 同时终止两个槽。
-- `_signal_terminate_async` 改成参数化：`_signal_terminate_async(slot)`。
+**实现层（PP10.2.a 重构 + PP10.2.b 行为）**
+- `@dataclass _Slot`：`name / proc / kind / id / log_fp / tailer / state_poller / cancel_pending` + `busy` / `reset()`。
+- `Supervisor._slots: list[_Slot] = [_Slot(SLOT_TRAIN), _Slot(SLOT_DATA)]`。
+- `_tick`：先 poll 所有 busy 槽收尸，再给空槽派活（按槽位 name 分流）。
+- `cancel(task_id)` / `cancel_job(job_id)` 用 `_find_slot(kind, id)` 定位槽位发信号。
+- `Supervisor.stop()` 遍历所有 busy 槽 `_terminate_slot`。
+- `_signal_terminate_async(slot)` / `_finish_slot(slot, rc)` 都接 slot 参数。
 
-**SSE / event 不变**
-- 前端 Queue 页和 project_jobs 那条 SSE 消息已经是 per-task / per-job 区分的，多槽位不影响订阅契约。
-
-**字段重构（实现层）**
-当前 `_current_*` 5 个字段抽成一个 `_Slot` 内部类：
-```
-class _Slot:
-    proc / kind / id / log_fp / tailer / state_poller / cancel_pending
-```
-然后 `Supervisor` 拥有 `self._train_slot` 和 `self._data_slot`。每个 `_tick` 轮询两个槽各自的 `proc.poll()`，独立结束。
-
-#### 候选 B：通用 N 槽位 + 资源标签
-
-**做法**：每个 worker 声明所需资源（`gpu`、`cpu`、`io`）；槽位池按资源画像匹配。
-
-**优点**：以后加 sample preview / 第二张 GPU 都能复用。
-
-**缺点**：第一版过度抽象。当前只有「GPU 训练」「IO 下载」「GPU 打标」三类，明确双槽足够。
-
-**结论**：先双槽（推荐方案），架构上把 `_Slot` 抽成可扩展的列表（一个 `list[_Slot]`），以后想加第三槽（比如 sample preview 槽）只是 append 一个槽 + 调度规则。
-
-#### 候选 C：完全独立的两个 supervisor 线程
-
-**做法**：起两个 `Supervisor` 实例，一个只看 tasks 一个只看 project_jobs。
-
-**优点**：代码改动最少。
-
-**缺点**：两份 `_loop` / `_reconcile_orphans` 重复；两个线程读同一 SQLite 的并发锁需要小心；`stop()` 协调要写两遍。**不推荐**。
+**Settings**
+- `secrets.QueueConfig.allow_gpu_during_train: bool = False`。
+- Settings 页加「队列调度」section + 风险提示。
 
 ### 风险 / 边界
-- **GPU 显存抢占**：训练 anima 一般占 14-22 GB（4090 24G），WD14 onnxruntime-gpu 占 1-2 GB；同时跑可能 OOM 或大幅降速。**默认 off** 是关键防线。Settings 页加一行开关 + 风险提示。
-- **磁盘 IO 抢占**：训练读 train/ 是顺序读 + 缓存住，下载是写 `download/`，互不冲突。可忽略。
-- **日志文件互不冲突**：每个 task / job 自己一份 log，已经分开（`logs/{task_id}.log` / `jobs/{job_id}.log`），没问题。
-- **重启恢复**：`_reconcile_orphans` 已分别清 tasks 和 project_jobs（行 257-278），双槽不影响这套逻辑。
-- **测试**：现有 `test_supervisor.py` 注入 `cmd_builder` 模拟，需要新增 1-2 个并发 case（同时 spawn 一个 task 和一个 download job）。
+- **GPU 显存抢占**：训练占 14-22 GB（4090 24G），WD14 onnxruntime-gpu 占 1-2 GB；同时跑可能 OOM。**默认 off** 是关键防线。
+- **磁盘 IO 抢占**：训练读 train/ 顺序读 + 缓存，下载写 `download/`，互不冲突。
+- **日志文件**：每个 task / job 自己一份 log，已分开。
+- **重启恢复**：`_reconcile_orphans` 已分别清 tasks 和 project_jobs，双槽不影响。
+- **reg_build 粒度**：整 job 标 GPU-bound（实际 90% 时间是 booru 拉图 IO，末尾才 auto_tag 吃 GPU）—— 第一刀保守。觉得太保守再拆 phase。
 
 ### 切片
-- **PP10.2.a**：把 supervisor 单槽位重构成 `_Slot` + `_slots: list[_Slot]`，先不开并行（仍只有一个槽）。验证测试不挂。
-- **PP10.2.b**：加第二槽 + 调度策略（download 总并行、tag/reg_build 看 settings 开关）。Settings 页加开关 UI。新增 2 个测试。
-
-两个 commit。10.2.a 是纯重构、风险低；10.2.b 是行为改动。
+- **PP10.2.a** (`a6fbf20`)：把 `_current_*` 字段抽到 `_Slot` 数据类 + `self._slots: list[_Slot]`（暂留单槽 main）；行为完全不变；pytest 525 全过。
+- **PP10.2.b** (本片)：拆 TRAIN + DATA 双槽 + 调度策略 + Settings 开关 + 3 个新 supervisor case；pytest 527 / vitest 57。
 
 ---
 
