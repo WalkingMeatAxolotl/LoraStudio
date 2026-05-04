@@ -46,7 +46,7 @@ Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaLoraStudi
 
 下面这些**不是** Studio 自动装的，得先准备好：
 
-- **NVIDIA GPU 驱动 + CUDA 13.x runtime**（24 GB+ 显存，3090/4090/5090；A 卡 / Apple Silicon 不支持）
+- **NVIDIA GPU 驱动 + CUDA runtime**（16 GB+ 显存；A 卡 / Apple Silicon 不支持）
 - **Python 3.10+**（PATH 上能直接 `python` 调到）
 - **Node.js 18+**（前端构建用，PATH 上能 `npm`）
 - **Git**
@@ -54,7 +54,7 @@ Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaLoraStudi
 ### 1. 拉代码 + 启动 Studio
 
 ```bash
-git clone https://github.com/WalkingMeatAxolotl/AnimaLoraToolkit.git
+git clone https://github.com/WalkingMeatAxolotl/AnimaLoraStudio
 cd AnimaLoraToolkit
 
 # Windows
