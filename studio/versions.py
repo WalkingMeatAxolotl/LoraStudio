@@ -98,6 +98,13 @@ def list_versions(
     ]
 
 
+# PP10.1 — fork 时源 stage 落到新 version 的映射。
+# done / training 的 version 已经训完或在训，新 version 重新进入待训练态；
+# 其他 stage（curating / tagging / regularizing / ready）原样跟随，让用户从
+# 副本所处的同一 step 接着干。
+_FORK_STAGE_RESET: frozenset[str] = frozenset({"done", "training"})
+
+
 def create_version(
     conn: sqlite3.Connection,
     *,
@@ -108,9 +115,12 @@ def create_version(
 ) -> dict[str, Any]:
     """label 校验：仅 [A-Za-z0-9_.-]+；同 project 内唯一。
 
-    fork_from_version_id 给了：复制源 version 的 train/ 目录树（递归 copy）。
-    config_name 也一起拷过来 —— 注意 PP6 才会真用 config_name；这里只是字段层
-    继承，避免后续切预设时漏 fork。
+    fork_from_version_id 给了 → 全量复制源 version 的用户产物：
+        train/、reg/、config.yaml、.unlocked.json（PP10.4）
+    输出类（output/、samples/、monitor_state.json）一律不复制。
+    复制 config.yaml 后立即重写一次，把 data_dir / reg_data_dir / output_dir /
+    output_name 强制刷成新 version 的路径。
+    stage 跟随源（done/training → ready；其他原样）。
     """
     p = projects.get_project(conn, project_id)
     if not p:
@@ -127,6 +137,7 @@ def create_version(
         raise VersionError(f"label 已存在: {label!r}")
 
     src_config_name: Optional[str] = None
+    src_stage: str = "curating"
     if fork_from_version_id is not None:
         src = get_version(conn, fork_from_version_id)
         if not src or src["project_id"] != project_id:
@@ -134,12 +145,13 @@ def create_version(
                 f"fork 源不存在或不属于当前项目: id={fork_from_version_id}"
             )
         src_config_name = src["config_name"]
+        src_stage = "ready" if src["stage"] in _FORK_STAGE_RESET else src["stage"]
 
     now = time.time()
     cur = conn.execute(
         "INSERT INTO versions(project_id, label, config_name, stage, created_at, note) "
-        "VALUES (?, ?, ?, 'curating', ?, ?)",
-        (project_id, label, src_config_name, now, note),
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (project_id, label, src_config_name, src_stage, now, note),
     )
     conn.commit()
     vid = int(cur.lastrowid)
@@ -149,9 +161,33 @@ def create_version(
 
     if fork_from_version_id is not None:
         src = _must_get(conn, fork_from_version_id)
-        src_train = version_dir(project_id, p["slug"], src["label"]) / "train"
-        if src_train.exists():
-            _copytree_train(src_train, vdir / "train")
+        src_vdir = version_dir(project_id, p["slug"], src["label"])
+        # train / reg：递归复制目录（存在才复制）
+        for sub in ("train", "reg"):
+            src_sub = src_vdir / sub
+            if src_sub.exists():
+                _copytree(src_sub, vdir / sub)
+        # config.yaml + .unlocked.json：单文件复制
+        for fname in ("config.yaml", ".unlocked.json"):
+            src_file = src_vdir / fname
+            if src_file.exists():
+                shutil.copy2(src_file, vdir / fname)
+        # config.yaml 复制过来后，data_dir / reg_data_dir / output_dir /
+        # output_name 还指向源 version；用 force_project_overrides=True 重写
+        # 一次刷成新 version 的路径。reg_data_dir 由 project_specific_overrides
+        # 自动检测新 version 的 reg/meta.json 是否存在 → 跟随复制结果。
+        v_for_rewrite = _must_get(conn, vid)
+        new_cfg_path = vdir / "config.yaml"
+        if new_cfg_path.exists():
+            from .services import version_config as _vc  # 延迟避免循环
+            try:
+                cfg = _vc.read_version_config(p, v_for_rewrite)
+                _vc.write_version_config(
+                    p, v_for_rewrite, cfg, force_project_overrides=True
+                )
+            except _vc.VersionConfigError:
+                # 源 config 损坏不阻断新建；用户去 Train 页换预设
+                pass
 
     v = _must_get(conn, vid)
     _write_version_json(v, vdir)
@@ -163,16 +199,17 @@ def create_version(
     return v
 
 
-def _copytree_train(src: Path, dst: Path) -> None:
-    """复制训练树（含子文件夹与 .txt/.json 同名 metadata）。
+def _copytree(src: Path, dst: Path) -> None:
+    """递归复制目录（含子文件夹与同名 metadata 文件）。
 
     Win 上硬链接受限较多，统一走 copy（PP1 说明这点）。
+    PP10.1 起从 _copytree_train 通用化 — train / reg 都用这个。
     """
     dst.mkdir(parents=True, exist_ok=True)
     for sub in src.iterdir():
         target = dst / sub.name
         if sub.is_dir():
-            _copytree_train(sub, target)
+            _copytree(sub, target)
         else:
             shutil.copy2(sub, target)
 

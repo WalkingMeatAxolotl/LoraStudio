@@ -81,14 +81,24 @@ export default function ProjectLayout() {
     }
   }
 
-  const handleCreateVersion = async (label: string) => {
+  const handleCreateVersion = async (
+    label: string,
+    forkFromVersionId: number | null,
+  ) => {
     if (!project) return
     try {
-      const v = await api.createVersion(project.id, { label })
+      const body: { label: string; fork_from_version_id?: number } = { label }
+      if (forkFromVersionId !== null) body.fork_from_version_id = forkFromVersionId
+      const v = await api.createVersion(project.id, body)
       await api.activateVersion(project.id, v.id)
       await reload()
       setCreating(false)
-      toast(`已创建版本 ${label}`, 'success')
+      toast(
+        forkFromVersionId !== null
+          ? `已从副本创建版本 ${label}`
+          : `已创建版本 ${label}`,
+        'success',
+      )
     } catch (e) {
       toast(String(e), 'error')
     }
@@ -208,6 +218,7 @@ export default function ProjectLayout() {
       {creating && (
         <NewVersionDialog
           existingLabels={project.versions.map((v) => v.label)}
+          existingVersions={project.versions.map((v) => ({ id: v.id, label: v.label }))}
           onCancel={() => setCreating(false)}
           onSubmit={handleCreateVersion}
         />
@@ -216,16 +227,20 @@ export default function ProjectLayout() {
   )
 }
 
-function NewVersionDialog({
+export function NewVersionDialog({
   existingLabels,
+  existingVersions,
   onCancel,
   onSubmit,
 }: {
   existingLabels: string[]
+  existingVersions: { id: number; label: string }[]
   onCancel: () => void
-  onSubmit: (label: string) => void
+  onSubmit: (label: string, forkFromVersionId: number | null) => void
 }) {
   const [label, setLabel] = useState('')
+  // '' = 从空白开始；其他值 = string 化的 version id
+  const [forkFrom, setForkFrom] = useState<string>('')
   const [err, setErr] = useState<string | null>(null)
 
   const submit = (e: React.FormEvent) => {
@@ -235,7 +250,8 @@ function NewVersionDialog({
     if (!/^[A-Za-z0-9_.-]+$/.test(l))
       return setErr('label 只允许字母 / 数字 / 下划线 / 连字符 / 点')
     if (existingLabels.includes(l)) return setErr('label 已存在')
-    onSubmit(l)
+    const fid = forkFrom === '' ? null : Number(forkFrom)
+    onSubmit(l, fid)
   }
 
   return (
@@ -262,6 +278,28 @@ function NewVersionDialog({
             placeholder="例：baseline / high-lr"
           />
         </label>
+        {existingVersions.length > 0 && (
+          <label className="block">
+            <span className="text-xs text-slate-400 font-mono">从…创建</span>
+            <select
+              value={forkFrom}
+              onChange={(e) => setForkFrom(e.target.value)}
+              className="mt-1 w-full px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-sm focus:outline-none focus:border-cyan-500"
+            >
+              <option value="">从空白开始</option>
+              {existingVersions.map((v) => (
+                <option key={v.id} value={String(v.id)}>
+                  从 {v.label} 复制
+                </option>
+              ))}
+            </select>
+            {forkFrom !== '' && (
+              <p className="text-[10px] text-slate-500 mt-1">
+                将复制 train/、reg/、训练配置、解锁状态（output/、samples/ 不复制）
+              </p>
+            )}
+          </label>
+        )}
         {err && <p className="text-xs text-red-400">{err}</p>}
         <div className="flex gap-2 justify-end">
           <button
