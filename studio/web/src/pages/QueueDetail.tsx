@@ -9,6 +9,7 @@ import {
 } from '../api/client'
 import { useToast } from '../components/Toast'
 import { useEventStream } from '../lib/useEventStream'
+import MonitorDashboard from '../components/MonitorDashboard'
 
 type Tab = 'overview' | 'log' | 'monitor' | 'outputs'
 
@@ -453,30 +454,8 @@ function LogTab({ taskId }: { taskId: number }) {
 
 function MonitorTab({ taskId }: { taskId: number }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, padding: 16 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-xs)',
-        paddingBottom: 10, flexShrink: 0,
-      }}>
-        <span style={{ color: 'var(--fg-tertiary)' }}>训练监控 · 实时</span>
-        <span style={{ flex: 1 }} />
-        <a
-          href={`/monitor_smooth.html?task_id=${taskId}`}
-          target="_blank" rel="noopener"
-          className="btn btn-ghost btn-sm"
-          style={{ textDecoration: 'none' }}
-        >独立窗口打开 ↗</a>
-      </div>
-      <iframe
-        src={`/monitor_smooth.html?task_id=${taskId}`}
-        title={`monitor-task-${taskId}`}
-        style={{
-          flex: 1, width: '100%',
-          borderRadius: 'var(--r-md)',
-          border: '1px solid var(--border-subtle)',
-          background: 'var(--bg-sunken)',
-        }}
-      />
+    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <MonitorDashboard taskId={taskId} />
     </div>
   )
 }
