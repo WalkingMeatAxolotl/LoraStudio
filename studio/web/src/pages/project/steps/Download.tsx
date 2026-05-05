@@ -167,114 +167,125 @@ export default function DownloadPage() {
     <StepShell
       idx={1}
       title="下载图片"
-      subtitle={`Booru 抓取 + 本地上传，落到 ${project.slug}/download/。在「设置」配置 exclude / 凭据。`}
+      subtitle="Booru 抓取 + 本地上传"
       actions={
         <Link to="/tools/settings" className="btn btn-ghost btn-sm">
           设置
         </Link>
       }
     >
-    <div className="flex flex-col h-full gap-2 min-h-0" style={{ padding: '16px 24px' }}>
+    <div className="flex flex-col h-full gap-3 min-h-0">
 
-      {/* 操作行：两个紧凑 panel 并排（窄屏堆叠） */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 shrink-0">
-        <BooruPanel
-          tag={tag}
-          setTag={setTag}
-          apiSource={apiSource}
-          setApiSource={setApiSource}
-          estimate={estimate}
-          count={count}
-          setCount={setCount}
-          maxCount={maxCount}
-          busy={busy}
-          isLive={!!isLive}
-          onEstimate={doEstimate}
-          onStart={start}
-        />
-        <UploadPanel
-          pid={project.id}
-          onUploaded={(r) => {
-            setLastUpload(r)
-            void refreshFiles()
-            void reload()
-          }}
-        />
-      </div>
+      {/* 主体左右两栏：左（booru/upload + 状态 + grid） / 右（下载统计侧边栏） */}
+      <div className="grid gap-3 flex-1 min-h-0" style={{ gridTemplateColumns: '1fr 240px' }}>
 
-      {/* 状态条：仅在有 job / 上次上传结果时出现，details 折叠 */}
-      {(job || lastUpload) && (
-        <div className="flex flex-col gap-1.5 shrink-0">
-          {job && (
-            <JobStrip
-              job={job}
-              logs={logs}
-              onCancel={isLive ? cancel : undefined}
+        {/* 左栏 */}
+        <div className="flex flex-col gap-2 min-h-0 min-w-0">
+
+          {/* 操作行：两个紧凑 panel 并排（窄屏堆叠） */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 shrink-0">
+            <BooruPanel
+              tag={tag}
+              setTag={setTag}
+              apiSource={apiSource}
+              setApiSource={setApiSource}
+              estimate={estimate}
+              count={count}
+              setCount={setCount}
+              maxCount={maxCount}
+              busy={busy}
+              isLive={!!isLive}
+              onEstimate={doEstimate}
+              onStart={start}
             />
-          )}
-          {lastUpload && (
-            <UploadResultStrip
-              result={lastUpload}
-              onDismiss={() => setLastUpload(null)}
+            <UploadPanel
+              pid={project.id}
+              onUploaded={(r) => {
+                setLastUpload(r)
+                void refreshFiles()
+                void reload()
+              }}
             />
+          </div>
+
+          {/* 状态条：仅在有 job / 上次上传结果时出现，details 折叠 */}
+          {(job || lastUpload) && (
+            <div className="flex flex-col gap-1.5 shrink-0">
+              {job && (
+                <JobStrip
+                  job={job}
+                  logs={logs}
+                  onCancel={isLive ? cancel : undefined}
+                />
+              )}
+              {lastUpload && (
+                <UploadResultStrip
+                  result={lastUpload}
+                  onDismiss={() => setLastUpload(null)}
+                />
+              )}
+            </div>
           )}
+
+          {/* 已下载 grid — 占满剩余高度，支持多选 + 删除 */}
+          <DownloadedGrid
+            project={project}
+            files={files}
+            selected={selected}
+            anchor={anchor}
+            deleting={deleting}
+            onSelect={(name, e) => {
+              const r = applySelection(
+                selected,
+                name,
+                e,
+                files.map((f) => f.name),
+                anchor
+              )
+              setSelected(r.next)
+              setAnchor(r.anchor)
+            }}
+            onSelectAll={() => setSelected(new Set(files.map((f) => f.name)))}
+            onClear={() => {
+              setSelected(new Set())
+              setAnchor(null)
+            }}
+            onDelete={async () => {
+              if (selected.size === 0) return
+              if (
+                !window.confirm(
+                  `从 download/ 删除 ${selected.size} 张图片（含同名 caption metadata）？\n操作不可恢复。`
+                )
+              )
+                return
+              setDeleting(true)
+              try {
+                const r = await api.deleteProjectFiles(
+                  project.id,
+                  Array.from(selected)
+                )
+                toast(
+                  `已删除 ${r.deleted.length} 张${
+                    r.missing.length ? ` · 跳过 ${r.missing.length} 张（不存在）` : ''
+                  }`,
+                  'success'
+                )
+                setSelected(new Set())
+                setAnchor(null)
+                await refreshFiles()
+                void reload()
+              } catch (e) {
+                toast(String(e), 'error')
+              } finally {
+                setDeleting(false)
+              }
+            }}
+          />
         </div>
-      )}
 
-      {/* 已下载 grid — 占满剩余高度，支持多选 + 删除 */}
-      <DownloadedGrid
-        project={project}
-        files={files}
-        selected={selected}
-        anchor={anchor}
-        deleting={deleting}
-        onSelect={(name, e) => {
-          const r = applySelection(
-            selected,
-            name,
-            e,
-            files.map((f) => f.name),
-            anchor
-          )
-          setSelected(r.next)
-          setAnchor(r.anchor)
-        }}
-        onSelectAll={() => setSelected(new Set(files.map((f) => f.name)))}
-        onClear={() => {
-          setSelected(new Set())
-          setAnchor(null)
-        }}
-        onDelete={async () => {
-          if (selected.size === 0) return
-          if (
-            !window.confirm(
-              `从 download/ 删除 ${selected.size} 张图片（含同名 caption metadata）？\n操作不可恢复。`
-            )
-          )
-            return
-          setDeleting(true)
-          try {
-            const r = await api.deleteProjectFiles(
-              project.id,
-              Array.from(selected)
-            )
-            toast(
-              `已删除 ${r.deleted.length} 张${
-                r.missing.length ? ` · 跳过 ${r.missing.length} 张（不存在）` : ''
-              }`,
-              'success'
-            )
-            setSelected(new Set())
-            setAnchor(null)
-            await refreshFiles()
-            void reload()
-          } catch (e) {
-            toast(String(e), 'error')
-          } finally {
-            setDeleting(false)
-          }
-        }}
-      />
+        {/* 右栏：下载统计侧边栏 */}
+        <DownloadStatsSidebar files={files} projectDownloadCount={project.download_image_count} />
+      </div>
     </div>
     </StepShell>
   )
@@ -800,5 +811,101 @@ function PanelTitle({
       <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: dotBg, flexShrink: 0 }} />
       {children}
     </h3>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 下载统计侧边栏
+// ---------------------------------------------------------------------------
+function DownloadStatsSidebar({
+  files,
+  projectDownloadCount,
+}: {
+  files: DownloadFile[]
+  projectDownloadCount: number
+}) {
+  // 按扩展名分组统计
+  const extCounts = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const f of files) {
+      const ext = f.name.split('.').pop()?.toLowerCase() ?? '?'
+      m[ext] = (m[ext] ?? 0) + 1
+    }
+    return Object.entries(m).sort((a, b) => b[1] - a[1])
+  }, [files])
+
+  return (
+    <div className="flex flex-col gap-3" style={{ minWidth: 0 }}>
+      {/* 总量卡片 */}
+      <div style={{
+        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)', padding: '10px 12px',
+      }}>
+        <PanelTitle accent="cyan">下载统计</PanelTitle>
+        <StatRow label="总量" value={projectDownloadCount} />
+        <StatRow label="本页可见" value={files.length} />
+        {files.length > 0 && (
+          <StatRow
+            label="总大小"
+            value={files.reduce((s, f) => s + f.size, 0)}
+            format="bytes"
+          />
+        )}
+      </div>
+
+      {/* 来源分布 */}
+      <div style={{
+        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)', padding: '10px 12px',
+        flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
+      }}>
+        <PanelTitle accent="emerald">格式分布</PanelTitle>
+        {files.length === 0 ? (
+          <p style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', margin: 0, marginTop: 6 }}>
+            还没有图片
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6, flex: 1, overflowY: 'auto' }}>
+            {extCounts.map(([ext, count]) => {
+              const pct = Math.round((count / files.length) * 100)
+              return (
+                <div key={ext} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{
+                    fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
+                    color: 'var(--fg-primary)', width: 36, textTransform: 'uppercase', textAlign: 'right',
+                  }}>{ext}</span>
+                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--bg-sunken)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', background: 'var(--accent)', borderRadius: 3, width: `${pct}%`, transition: 'width 0.3s ease' }} />
+                  </div>
+                  <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', width: 36, textAlign: 'right' }}>{count}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function StatRow({
+  label,
+  value,
+  format,
+}: {
+  label: string
+  value: number
+  format?: 'bytes'
+}) {
+  const display = format === 'bytes'
+    ? value > 1024 * 1024
+      ? `${(value / 1024 / 1024).toFixed(1)} MB`
+      : `${(value / 1024).toFixed(0)} KB`
+    : String(value)
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6, fontSize: 'var(--t-xs)' }}>
+      <span style={{ color: 'var(--fg-tertiary)' }}>{label}</span>
+      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)', fontWeight: 500 }}>{display}</span>
+    </div>
   )
 }

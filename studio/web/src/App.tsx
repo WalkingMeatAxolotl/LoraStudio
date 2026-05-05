@@ -38,11 +38,11 @@ export default function App() {
     <ProjectContext.Provider value={projectCtx}>
       <ProjectSetterContext.Provider value={setProjectCtx}>
     <BrowserRouter basename="/studio">
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+        <Sidebar />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <Topbar />
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          <Sidebar />
-          <main style={{ flex: 1, padding: '16px', overflowY: 'auto' }} className="overflow-auto">
+        <main style={{ flex: 1, overflow: 'auto', background: 'var(--bg-canvas)' }}>
           <Routes>
             <Route path="/" element={<ProjectsPage />} />
             <Route path="/queue" element={<QueuePage />} />

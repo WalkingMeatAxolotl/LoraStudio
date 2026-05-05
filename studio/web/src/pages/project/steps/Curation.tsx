@@ -491,7 +491,7 @@ export default function CurationPage() {
     <StepShell
       idx={2}
       title="筛选图片"
-      subtitle="download → train · download 目录永远保留原图 · 按住 Alt 悬停缩略图查看大图"
+      subtitle="download → train"
       actions={
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)' }}>
           排序
@@ -509,7 +509,7 @@ export default function CurationPage() {
         </label>
       }
     >
-    <div className="flex flex-col h-full gap-3" style={{ padding: '16px 24px' }}>
+    <div className="flex flex-col h-full gap-3">
 
       {/* Download + Train 两列平分整宽；预览改为 alt+hover 浮层，不占布局位置。 */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 items-stretch flex-1 min-h-0">
@@ -701,7 +701,7 @@ function FolderSummary({
   if (folders.length === 0) {
     return (
       <p style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-tertiary)' }}>
-        还没有训练文件夹（默认应有 1_data，可在右上「+ 新建」）
+        还没有训练文件夹，点击「+ 新建」创建
       </p>
     )
   }

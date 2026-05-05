@@ -1,6 +1,16 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import type { VersionStage } from '../api/client'
+
+/** Map version stage → 0-based index of the current active step */
+const STAGE_TO_STEP_IDX: Record<VersionStage, number> = {
+  curating: 1,     // download done, curate active
+  tagging: 2,      // download+curate done, tag active
+  regularizing: 4, // download+curate+tag+edit done, reg active
+  ready: 5,        // download+curate+tag+edit+reg done, train active
+  training: 5,     // same, train running
+  done: 6,         // all 6 steps done
+}
 import { useProjectCtx } from '../context/ProjectContext'
 
 // ── icons ──────────────────────────────────────────────────────────────────
@@ -120,6 +130,19 @@ function VersionPanel({ collapsed }: { collapsed: boolean }) {
       padding: '8px 8px 6px',
       display: 'flex', flexDirection: 'column', gap: 4,
     }}>
+      {/* Project name header */}
+      <div style={{ padding: '0 2px' }}>
+        <div style={{ fontWeight: 600, color: 'var(--fg-primary)', fontSize: 'var(--t-sm)' }}>
+          {project.title}
+        </div>
+        <div style={{
+          fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)',
+          color: 'var(--fg-tertiary)', marginTop: 2,
+        }}>
+          v / {activeVersion?.label ?? '—'}
+        </div>
+      </div>
+
       {/* Version list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         {project.versions.map((v) => {
@@ -207,13 +230,16 @@ const STEPS = [
   { key: 'train',    label: '训练',     idx: '6', icon: I.train },
 ]
 
-function ProjectStepperNav({ pid, activeVid, currentStep, collapsed }: {
+function ProjectStepperNav({ pid, activeVid, currentStep, stage, collapsed }: {
   pid: string
-  activeVid: string | null  // active version id used for building step hrefs
+  activeVid: string | null
   currentStep: string | null
+  stage: VersionStage
   collapsed: boolean
 }) {
   const overviewActive = currentStep === null
+  const activeStepIdx = STAGE_TO_STEP_IDX[stage] ?? 0
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 4px' }}>
       {/* 概览 */}
@@ -246,25 +272,32 @@ function ProjectStepperNav({ pid, activeVid, currentStep, collapsed }: {
         {!collapsed && <span style={{ flex: 1 }}>概览</span>}
       </Link>
 
-      {STEPS.map((s) => {
+      {STEPS.map((s, i) => {
         const isActive = s.key === currentStep
+        const isDone = i < activeStepIdx
+
         const href = s.key === 'download'
           ? `/projects/${pid}/download`
           : activeVid ? `/projects/${pid}/v/${activeVid}/${s.key}` : null
 
-        const dotBg = isActive ? 'var(--accent-soft)' : 'var(--bg-overlay)'
-        const dotColor = isActive ? 'var(--accent)' : 'var(--fg-tertiary)'
+        // Step status colors: done=green, current(active)=accent, pending=gray
+        const stepBg = isDone ? 'var(--ok-soft)'
+          : isActive ? 'var(--accent-soft)'
+          : 'var(--bg-overlay)'
+        const stepColor = isDone ? 'var(--ok)'
+          : isActive ? 'var(--accent)'
+          : 'var(--fg-tertiary)'
 
         const inner = (
           <>
             <span style={{
               width: 20, height: 20, borderRadius: '50%',
-              background: dotBg, color: dotColor,
+              background: stepBg, color: stepColor,
               display: 'grid', placeItems: 'center',
               fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-mono)',
               flexShrink: 0,
             }}>
-              {s.idx}
+              {isDone ? I.check : s.idx}
             </span>
             {!collapsed && <span style={{ flex: 1, textAlign: 'left' }}>{s.label}</span>}
             {!collapsed && isActive && <span className="dot dot-running" />}
@@ -357,6 +390,7 @@ export default function Sidebar() {
       display: 'flex', flexDirection: 'column',
       transition: 'width 160ms ease',
       overflow: 'hidden',
+      height: '100%',
     }}>
       {/* header / logo */}
       <div style={{
@@ -384,19 +418,10 @@ export default function Sidebar() {
 
         {inProject && pid && (
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {!collapsed && (
-              <div style={{ padding: '4px 10px 2px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  {ctx?.project?.title ?? pid}
-                </span>
-                <span style={{ flex: 1, height: 1, background: 'var(--border-subtle)' }} />
-              </div>
-            )}
-
-            {/* Version selector + export */}
+            {/* Version selector + export with project name embedded */}
             <VersionPanel collapsed={collapsed} />
 
-            <ProjectStepperNav pid={pid} activeVid={activeVid} currentStep={currentStep} collapsed={collapsed} />
+            <ProjectStepperNav pid={pid} activeVid={activeVid} currentStep={currentStep} stage={ctx?.activeVersion?.stage ?? 'curating'} collapsed={collapsed} />
           </div>
         )}
       </nav>
