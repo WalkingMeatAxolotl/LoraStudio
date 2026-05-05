@@ -416,8 +416,8 @@ export default function PresetsPage() {
                 </section>
               )}
 
-              {/* Schema 表单 */}
-              {(!schema || !config) ? (
+              {/* Schema 表单：仅在「已选中但数据还未回来」时显示骨架屏 */}
+              {(!schema || (!isNew && !config)) ? (
                 <div style={{ height: 200, borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)', padding: 14 }}>
                   <SkeletonGroups />
                 </div>
@@ -432,7 +432,7 @@ export default function PresetsPage() {
                   </div>
                   <SchemaForm
                     schema={schema}
-                    values={config}
+                    values={config ?? {}}
                     onChange={setConfig}
                   />
                 </section>
@@ -452,10 +452,12 @@ export default function PresetsPage() {
                     另存为新预设
                   </button>
                 )}
-                <button onClick={handleSave} disabled={busy || !hasAnyChange || !config}
+                <button
+                  onClick={handleSave}
+                  disabled={busy || (!isNew && !hasAnyChange) || (!isNew && !config)}
                   className="btn btn-primary btn-sm"
                 >
-                  {hasAnyChange ? '保存预设' : '已保存'}
+                  {isNew ? '创建预设' : hasAnyChange ? '保存预设' : '已保存'}
                 </button>
               </section>
             </>
