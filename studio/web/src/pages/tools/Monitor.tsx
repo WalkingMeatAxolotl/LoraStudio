@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type HealthResponse, type Task } from '../../api/client'
+import MonitorDashboard from '../../components/MonitorDashboard'
 
 export default function MonitorPage() {
   const [health, setHealth] = useState<HealthResponse | null>(null)
@@ -27,12 +28,9 @@ export default function MonitorPage() {
 
   const ok = !error && health?.status === 'ok'
   const selectedTask = tasks.find((t) => t.id === taskId)
-  const iframeSrc = taskId
-    ? `/monitor_smooth.html?task_id=${taskId}`
-    : '/monitor_smooth.html'
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
       {/* 顶部状态栏 */}
       <section style={{
         borderRadius: 'var(--r-md)',
@@ -41,6 +39,7 @@ export default function MonitorPage() {
         padding: '10px 16px',
         display: 'flex', alignItems: 'center', gap: 12,
         fontSize: 'var(--t-xs)', flexShrink: 0, flexWrap: 'wrap',
+        margin: '0 0 12px 0',
       }}>
         {/* 健康指示 */}
         <span style={{
@@ -96,37 +95,24 @@ export default function MonitorPage() {
         )}
 
         <span style={{ flex: 1 }} />
-
-        <a
-          href={iframeSrc}
-          target="_blank"
-          rel="noreferrer"
-          style={{
-            fontSize: 'var(--t-xs)',
-            color: 'var(--fg-tertiary)',
-            textDecoration: 'none',
-          }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--fg-primary)' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--fg-tertiary)' }}
-        >
-          独立窗口打开 ↗
-        </a>
       </section>
 
-      {/* 监控 iframe */}
-      <iframe
-        key={iframeSrc}
-        src={iframeSrc}
-        title="Anima Training Monitor"
-        style={{
-          flex: 1,
-          width: '100%',
-          borderRadius: 'var(--r-md)',
-          border: '1px solid var(--border-subtle)',
-          background: 'var(--bg-sunken)',
-          minHeight: 0,
-        }}
-      />
+      {/* 监控主体 */}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {taskId !== null ? (
+          <MonitorDashboard taskId={taskId} />
+        ) : (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            height: '100%', color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)',
+            flexDirection: 'column', gap: 8,
+          }}>
+            <span style={{ fontSize: 'var(--t-xl)' }}>📊</span>
+            <span>暂无训练任务</span>
+            <span style={{ fontSize: 'var(--t-xs)' }}>启动训练后将自动显示监控数据</span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
