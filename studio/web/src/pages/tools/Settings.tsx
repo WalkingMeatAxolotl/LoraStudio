@@ -8,6 +8,7 @@ import {
   type SecretsPatch,
   type WD14Runtime,
 } from '../../api/client'
+import PageHeader from '../../components/PageHeader'
 import { useToast } from '../../components/Toast'
 import { useEventStream } from '../../lib/useEventStream'
 
@@ -128,17 +129,25 @@ export default function SettingsPage() {
   }
 
   return (
-    <div style={{ maxWidth: 900, display: 'flex', flexDirection: 'column', gap: 32, paddingBottom: 48 }}>
-      <header style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <h1 style={{ fontSize: 'var(--t-2xl)', fontWeight: 600, flex: 1, color: 'var(--fg-primary)' }}>设置</h1>
-        <button
-          onClick={save}
-          disabled={!dirty || saving}
-          className="btn btn-primary btn-sm"
-        >
-          {saving ? '保存中...' : '保存'}
-        </button>
-      </header>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <PageHeader
+        eyebrow="全局 · settings"
+        title="设置"
+        subtitle="API 密钥、路径、模型和队列行为。"
+        sticky
+        actions={
+          <button
+            onClick={save}
+            disabled={!dirty || saving}
+            className="btn btn-primary btn-sm"
+          >
+            {saving ? '保存中...' : '保存'}
+          </button>
+        }
+      />
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 48px' }}>
+      <div style={{ maxWidth: 900, display: 'flex', flexDirection: 'column', gap: 32 }}>
 
       {error && (
         <div style={{ padding: 12, borderRadius: 'var(--r-md)', background: 'var(--err-soft)', border: '1px solid var(--err)', color: 'var(--err)', fontSize: 'var(--t-sm)', fontFamily: 'var(--font-mono)' }}>
@@ -388,6 +397,8 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <ModelsSection />
+    </div>
+    </div>
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { useLocation } from 'react-router-dom'
+import { useProjectCtx } from '../context/ProjectContext'
 
 const SearchIcon = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -10,6 +11,7 @@ interface Crumb { label: string; mono?: boolean }
 
 function useBreadcrumbs(): Crumb[] {
   const { pathname } = useLocation()
+  const ctx = useProjectCtx()
   const parts = pathname.split('/').filter(Boolean)
 
   if (parts.length === 0) return [{ label: '项目' }]
@@ -26,10 +28,15 @@ function useBreadcrumbs(): Crumb[] {
 
   if (parts[0] === 'projects') {
     const crumbs: Crumb[] = [{ label: '项目' }]
-    if (parts[1]) crumbs.push({ label: parts[1], mono: true })
+
+    // Use context for project title + version label; fall back to URL parts while loading
+    const projectLabel = ctx?.project?.title ?? (parts[1] ? `#${parts[1]}` : null)
+    if (projectLabel) crumbs.push({ label: projectLabel })
+
     const vIdx = parts.indexOf('v')
     if (vIdx !== -1 && parts[vIdx + 1]) {
-      crumbs.push({ label: `v${parts[vIdx + 1]}`, mono: true })
+      const versionLabel = ctx?.activeVersion?.label ?? `v${parts[vIdx + 1]}`
+      crumbs.push({ label: versionLabel, mono: true })
       const stepLabels: Record<string, string> = {
         curate: '筛选', tag: '打标', edit: '标签编辑', reg: '正则集', train: '训练',
       }
