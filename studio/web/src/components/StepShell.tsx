@@ -7,20 +7,22 @@ interface Props {
   subtitle?: string
   actions?: ReactNode
   children: ReactNode
+  eyebrow?: string | false
 }
 
-export default function StepShell({ idx, title, subtitle, actions, children }: Props) {
+export default function StepShell({ idx, title, subtitle, actions, children, eyebrow }: Props) {
+  const eb = eyebrow ?? (idx === -1 ? false : `第 ${idx} 步`)
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <PageHeader
-        eyebrow={`第 ${idx} 步 · pipeline`}
+        eyebrow={eb || undefined}
         title={title}
         subtitle={subtitle}
         actions={actions}
         sticky
       />
       {/* flex: 1 + minHeight: 0 lets fixed-height children (dual-pane grids) fill remaining space */}
-      <div style={{ flex: 1, minHeight: 0 }}>
+      <div style={{ flex: 1, minHeight: 0, padding: 24 }}>
         {children}
       </div>
     </div>

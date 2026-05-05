@@ -3,11 +3,8 @@ import { useMemo, useState } from 'react'
 type Sort = 'count_desc' | 'count_asc' | 'name_asc' | 'name_desc'
 
 interface Props {
-  /** 完整 tag 缓存（key → tags）。 */
   cache: Map<string, string[]>
-  /** 选中的 key 集合；非空 → stats 反映选中；空 → 全部。 */
   selectedKeys: string[]
-  /** 点 tag 反向选中含此 tag 的所有图。 */
   onPickTag: (tag: string) => void
 }
 
@@ -46,64 +43,100 @@ export default function TagStatsPanel({
     return sorted.filter(([t]) => t.toLowerCase().includes(f))
   }, [sorted, filter])
 
+  const maxCount = filtered.length > 0 ? filtered[0][1] : 1
+
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-800/40 flex flex-col min-h-0 flex-1 w-full min-w-0">
-      <header className="px-3 py-1.5 border-b border-slate-700 flex items-center gap-2 text-xs flex-wrap">
-        <span className="font-semibold text-slate-100">📊 Tag 统计</span>
-        <span
-          className={
-            'text-[10px] px-1.5 py-0.5 rounded ' +
-            (usingSelection
-              ? 'bg-cyan-700/40 text-cyan-200'
-              : 'bg-slate-700/60 text-slate-300')
-          }
-        >
+    <section style={{
+      borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+      background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
+      minHeight: 0, flex: 1, minWidth: 0, overflow: 'hidden',
+    }}>
+      {/* header */}
+      <div style={{
+        padding: '6px 10px', borderBottom: '1px solid var(--border-subtle)',
+        display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-xs)',
+        flexShrink: 0, flexWrap: 'wrap',
+      }}>
+        <span style={{ fontWeight: 600, color: 'var(--fg-primary)' }}>标签分布</span>
+        <span style={{
+          padding: '1px 6px', borderRadius: 'var(--r-sm)',
+          background: usingSelection ? 'var(--accent-soft)' : 'var(--bg-sunken)',
+          color: usingSelection ? 'var(--accent)' : 'var(--fg-tertiary)',
+          fontSize: 'var(--t-2xs)',
+        }}>
           {usingSelection ? `选中 ${selectedKeys.length}` : '全部'}
         </span>
-        <span className="text-slate-500">{items.length} tag</span>
-        <span className="text-slate-700">|</span>
-        <span className="text-slate-400">排序</span>
+        <span style={{ color: 'var(--fg-tertiary)' }}>{items.length} tag</span>
+        <span style={{ color: 'var(--border-default)' }}>|</span>
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as Sort)}
-          className="px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-xs"
+          className="input"
+          style={{ fontSize: 'var(--t-xs)', padding: '1px 6px' }}
         >
           <option value="count_desc">数量 ↓</option>
           <option value="count_asc">数量 ↑</option>
           <option value="name_asc">名称 A→Z</option>
           <option value="name_desc">名称 Z→A</option>
         </select>
-        <span className="flex-1" />
+        <span style={{ flex: 1 }} />
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="过滤..."
-          className="px-2 py-0.5 text-xs rounded bg-slate-950 border border-slate-700 w-32"
+          className="input"
+          style={{ fontSize: 'var(--t-xs)', padding: '1px 8px', width: 120 }}
         />
-      </header>
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      </div>
+
+      {/* body */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {filtered.length === 0 ? (
-          <p className="px-3 py-2 text-xs text-slate-500">
+          <p style={{ padding: '8px 10px', fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>
             {usingSelection ? '选中的图还没有 tag' : '还没有 tag'}
           </p>
         ) : (
-          <div
-            className="grid gap-x-3 gap-y-0.5 px-2 py-1"
-            style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}
-          >
-            {filtered.map(([t, c]) => (
-              <button
-                key={t}
-                onClick={() => onPickTag(t)}
-                title={`选中所有含「${t}」的图`}
-                className="text-left text-xs flex items-center gap-2 px-2 py-0.5 rounded hover:bg-slate-700/40 cursor-pointer min-w-0"
-              >
-                <span className="font-mono text-slate-200 truncate flex-1 min-w-0">
-                  {t}
-                </span>
-                <span className="text-slate-400 tabular-nums">{c}</span>
-              </button>
-            ))}
+          <div style={{ padding: '4px 6px', display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {filtered.map(([t, c]) => {
+              const pct = Math.max((c / maxCount) * 100, 3)
+              return (
+                <button
+                  key={t}
+                  onClick={() => onPickTag(t)}
+                  title={`选中所有含「${t}」的图`}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '3px 8px', borderRadius: 'var(--r-sm)',
+                    background: 'transparent', border: 'none',
+                    cursor: 'pointer', textAlign: 'left' as const,
+                    fontSize: 'var(--t-xs)', minWidth: 0,
+                    position: 'relative',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                >
+                  {/* bar */}
+                  <span style={{
+                    position: 'absolute', inset: 0, borderRadius: 'var(--r-sm)',
+                    background: 'var(--accent-soft)', opacity: pct / 100 * 0.35,
+                    width: `${pct}%`, zIndex: 0,
+                  }} />
+                  <span style={{
+                    fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)',
+                    flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    position: 'relative', zIndex: 1,
+                  }}>
+                    {t}
+                  </span>
+                  <span style={{
+                    color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)',
+                    fontSize: 'var(--t-2xs)', position: 'relative', zIndex: 1,
+                  }}>
+                    {c}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

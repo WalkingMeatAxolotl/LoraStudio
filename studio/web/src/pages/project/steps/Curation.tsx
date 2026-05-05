@@ -296,19 +296,19 @@ export default function CurationPage() {
 
   if (!activeVersion) {
     return (
-      <p className="text-slate-500">
+      <p style={{ color: 'var(--fg-tertiary)', padding: 24 }}>
         请先选择 / 创建一个版本（左上 VersionTabs）
       </p>
     )
   }
   if (error) {
     return (
-      <div className="p-3 rounded bg-red-900/40 border border-red-700 text-red-300 font-mono text-sm">
+      <div style={{ padding: 12, borderRadius: 'var(--r-md)', background: 'var(--err-soft)', border: '1px solid var(--err)', color: 'var(--err)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-sm)' }}>
         {error}
       </div>
     )
   }
-  if (!view) return <p className="text-slate-500">加载...</p>
+  if (!view) return <p style={{ color: 'var(--fg-tertiary)', padding: 24 }}>加载...</p>
 
   const switchRightFolder = (next: string) => {
     setRightFolder(next)
@@ -491,7 +491,7 @@ export default function CurationPage() {
     <StepShell
       idx={2}
       title="筛选图片"
-      subtitle="download → train · download 目录永远保留原图 · 按住 Alt 悬停缩略图查看大图"
+      subtitle="download → train"
       actions={
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)' }}>
           排序
@@ -509,7 +509,7 @@ export default function CurationPage() {
         </label>
       }
     >
-    <div className="flex flex-col h-full gap-3" style={{ padding: '16px 24px' }}>
+    <div className="flex flex-col h-full gap-3">
 
       {/* Download + Train 两列平分整宽；预览改为 alt+hover 浮层，不占布局位置。 */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 items-stretch flex-1 min-h-0">
@@ -568,7 +568,8 @@ export default function CurationPage() {
                 value={newFolder}
                 onChange={(e) => setNewFolder(e.target.value)}
                 placeholder="+ 新建:5_concept"
-                className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs w-36"
+                className="input input-mono"
+                style={{ width: 144, padding: '3px 8px', fontSize: 'var(--t-sm)' }}
               />
               <BtnSecondary
                 onClick={doCreateFolder}
@@ -611,8 +612,8 @@ export default function CurationPage() {
           />
 
           {renaming && (
-            <div className="flex items-center gap-2 my-3 text-xs">
-              <span className="text-slate-400">改名 {renaming.target} →</span>
+            <div className="flex items-center gap-2 my-3" style={{ fontSize: 'var(--t-sm)' }}>
+              <span style={{ color: 'var(--fg-secondary)' }}>改名 {renaming.target} →</span>
               <input
                 autoFocus
                 value={renaming.value}
@@ -623,14 +624,15 @@ export default function CurationPage() {
                   if (e.key === 'Enter') doRenameFolder()
                   if (e.key === 'Escape') setRenaming(null)
                 }}
-                className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs w-44"
+                className="input input-mono"
+                style={{ width: 176, padding: '3px 8px' }}
               />
               <BtnPrimary onClick={doRenameFolder} disabled={busy}>
                 确认
               </BtnPrimary>
               <button
                 onClick={() => setRenaming(null)}
-                className="text-xs px-2 py-1 rounded text-slate-400 hover:text-slate-200"
+                className="btn btn-ghost btn-sm"
               >
                 取消
               </button>
@@ -698,46 +700,44 @@ function FolderSummary({
 }) {
   if (folders.length === 0) {
     return (
-      <p className="text-xs text-slate-500">
-        还没有训练文件夹（默认应有 1_data，可在右上「+ 新建」）
+      <p style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-tertiary)' }}>
+        还没有训练文件夹，点击「+ 新建」创建
       </p>
     )
   }
   const total = folders.reduce((s, f) => s + (counts[f] ?? 0), 0)
   return (
-    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+    <div className="flex flex-wrap items-center gap-1.5" style={{ fontSize: 'var(--t-sm)' }}>
       {folders.map((f) => {
         const isActive = f === activeFolder
         return (
           <span
             key={f}
-            className={
-              'group inline-flex items-center rounded border transition-colors ' +
-              (isActive
-                ? 'border-cyan-600 bg-cyan-950/30'
-                : 'border-slate-700 bg-slate-900/40 hover:border-slate-500')
-            }
+            className="group inline-flex items-center transition-colors"
+            style={{
+              borderRadius: 'var(--r-md)',
+              border: isActive ? '1px solid var(--accent)' : '1px solid var(--border-default)',
+              background: isActive ? 'var(--accent-soft)' : 'var(--bg-surface)',
+            }}
           >
             <button
               onClick={() => onSwitch(f)}
-              title={
-                isActive ? '当前查看（也是复制目标）' : '点击切换查看 + 复制目标'
-              }
-              className={
-                'px-2 py-1 ' +
-                (isActive
-                  ? 'text-cyan-200'
-                  : 'text-slate-300 hover:text-slate-100')
-              }
+              title={isActive ? '当前查看（也是复制目标）' : '点击切换查看 + 复制目标'}
+              style={{
+                padding: '2px 8px',
+                color: isActive ? 'var(--accent)' : 'var(--fg-secondary)',
+                fontFamily: 'var(--font-mono)',
+              }}
             >
-              <span className="font-mono">{f}</span>
-              <span className="text-slate-500"> ({counts[f] ?? 0})</span>
+              {f}
+              <span style={{ color: 'var(--fg-tertiary)' }}> ({counts[f] ?? 0})</span>
             </button>
             <button
               onClick={() => onRename(f)}
               disabled={busy}
               title="改名"
-              className="px-1 py-1 text-[10px] text-slate-600 opacity-0 group-hover:opacity-100 hover:text-slate-200"
+              className="opacity-0 group-hover:opacity-100"
+              style={{ padding: '2px 4px', fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}
             >
               ✎
             </button>
@@ -745,14 +745,15 @@ function FolderSummary({
               onClick={() => onDelete(f)}
               disabled={busy}
               title="删除文件夹"
-              className="px-1 py-1 text-[10px] text-slate-600 opacity-0 group-hover:opacity-100 hover:text-red-400"
+              className="opacity-0 group-hover:opacity-100"
+              style={{ padding: '2px 4px', fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}
             >
               ×
             </button>
           </span>
         )
       })}
-      <span className="text-slate-500 ml-2">总 {total} 张</span>
+      <span style={{ color: 'var(--fg-tertiary)', marginLeft: 8 }}>总 {total} 张</span>
     </div>
   )
 }
@@ -770,27 +771,39 @@ function AltHoverPreview({ focus }: { focus: Focus }) {
       aria-hidden
       className="fixed inset-0 z-40 pointer-events-none flex items-center justify-center p-6"
     >
-      <div className="relative bg-black/85 rounded-lg border border-slate-700 shadow-2xl flex flex-col overflow-hidden max-w-[95vw] max-h-[95vh]">
+      <div
+        className="relative flex flex-col overflow-hidden"
+        style={{
+          background: 'rgba(20, 18, 12, 0.9)',
+          borderRadius: 'var(--r-lg)',
+          border: '1px solid var(--border-strong)',
+          boxShadow: 'var(--sh-xl)',
+          maxWidth: '95vw',
+          maxHeight: '95vh',
+        }}
+      >
         <img
           src={focus.url}
           alt={focus.name}
           className="max-w-[95vw] max-h-[88vh] object-contain"
         />
-        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-slate-800 text-xs">
+        <div
+          className="flex items-center gap-2 shrink-0"
+          style={{ padding: '6px 12px', borderTop: '1px solid rgba(255,255,255,0.08)' }}
+        >
           <span
-            className={
-              'text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 ' +
-              (focus.side === 'left'
-                ? 'bg-emerald-700/40 text-emerald-200'
-                : 'bg-cyan-700/40 text-cyan-200')
-            }
+            className={focus.side === 'left' ? 'badge badge-ok' : 'badge badge-info'}
+            style={{ flexShrink: 0 }}
           >
             {sourceLabel}
           </span>
-          <code className="text-slate-200 truncate flex-1 min-w-0">
+          <code
+            className="mono truncate flex-1 min-w-0"
+            style={{ color: 'var(--fg-inverse)', fontSize: 'var(--t-sm)' }}
+          >
             {focus.name}
           </code>
-          <span className="text-[10px] text-slate-500 shrink-0">
+          <span style={{ fontSize: 'var(--t-xs)', color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}>
             松开 Alt 关闭
           </span>
         </div>
@@ -799,9 +812,9 @@ function AltHoverPreview({ focus }: { focus: Focus }) {
   )
 }
 
-const ACCENT_BAR: Record<'emerald' | 'cyan', string> = {
-  emerald: 'bg-emerald-500/70',
-  cyan: 'bg-cyan-500/70',
+const ACCENT_BAR_COLOR: Record<'emerald' | 'cyan', string> = {
+  emerald: 'var(--ok)',
+  cyan: 'var(--info)',
 }
 
 function PanelCard({
@@ -818,15 +831,21 @@ function PanelCard({
   children: React.ReactNode
 }) {
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-800/30 overflow-hidden flex flex-col min-h-0">
-      <div className={`h-0.5 w-full ${ACCENT_BAR[accent]}`} />
-      <header className="px-3 py-1.5 border-b border-slate-700 flex flex-wrap items-center gap-1.5">
-        <h3 className="text-xs font-semibold text-slate-100">{title}</h3>
-        <span className="text-[11px] text-slate-500">{subtitle}</span>
+    <section
+      className="flex flex-col min-h-0"
+      style={{ borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)', overflow: 'hidden' }}
+    >
+      <div style={{ height: 2, background: ACCENT_BAR_COLOR[accent] }} />
+      <header
+        className="flex flex-wrap items-center gap-1.5"
+        style={{ padding: '6px 10px', borderBottom: '1px solid var(--border-subtle)', fontSize: 'var(--t-sm)' }}
+      >
+        <h3 style={{ fontWeight: 600 }}>{title}</h3>
+        <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>{subtitle}</span>
         <span className="flex-1" />
         {actions}
       </header>
-      <div className="p-2 flex-1 min-h-0 flex flex-col">{children}</div>
+      <div className="flex-1 min-h-0 flex flex-col" style={{ padding: 8 }}>{children}</div>
     </section>
   )
 }
@@ -836,10 +855,7 @@ function BtnPrimary({
   ...rest
 }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button
-      {...rest}
-      className="text-xs px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500"
-    >
+    <button {...rest} className="btn btn-primary btn-sm">
       {children}
     </button>
   )
@@ -850,10 +866,7 @@ function BtnSecondary({
   ...rest
 }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button
-      {...rest}
-      className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
-    >
+    <button {...rest} className="btn btn-secondary btn-sm">
       {children}
     </button>
   )
@@ -866,7 +879,8 @@ function BtnDanger({
   return (
     <button
       {...rest}
-      className="text-xs px-3 py-1 rounded bg-red-700/80 hover:bg-red-600 disabled:bg-slate-700 disabled:text-slate-500"
+      className="btn btn-sm"
+      style={{ background: 'var(--err-soft)', color: 'var(--err)' }}
     >
       {children}
     </button>

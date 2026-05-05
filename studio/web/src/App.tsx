@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import Topbar from './components/Topbar'
+import { ProjectContext, ProjectSetterContext, type ProjectCtxValue } from './context/ProjectContext'
 import ProjectsPage from './pages/Projects'
 import QueuePage from './pages/Queue'
 import QueueDetailPage from './pages/QueueDetail'
@@ -30,13 +32,17 @@ function QueueDetailRedirect({ tab }: { tab: 'log' | 'monitor' }) {
 }
 
 export default function App() {
+  const [projectCtx, setProjectCtx] = useState<ProjectCtxValue | null>(null)
+
   return (
+    <ProjectContext.Provider value={projectCtx}>
+      <ProjectSetterContext.Provider value={setProjectCtx}>
     <BrowserRouter basename="/studio">
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+        <Sidebar />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <Topbar />
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          <Sidebar />
-          <main style={{ flex: 1, padding: '16px', overflowY: 'auto' }} className="overflow-auto">
+        <main style={{ flex: 1, overflow: 'auto', background: 'var(--bg-canvas)' }}>
           <Routes>
             <Route path="/" element={<ProjectsPage />} />
             <Route path="/queue" element={<QueuePage />} />
@@ -84,5 +90,7 @@ export default function App() {
         </div>
       </div>
     </BrowserRouter>
+      </ProjectSetterContext.Provider>
+    </ProjectContext.Provider>
   )
 }

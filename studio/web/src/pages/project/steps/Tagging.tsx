@@ -114,7 +114,7 @@ export default function TaggingPage() {
   })
 
   if (!activeVersion) {
-    return <p className="text-slate-500">请先选择 / 创建一个版本</p>
+    return <p style={{ color: 'var(--fg-tertiary)', padding: 24 }}>请先选择 / 创建一个版本</p>
   }
 
   const isLive = job?.status === 'running' || job?.status === 'pending'
@@ -168,7 +168,7 @@ export default function TaggingPage() {
     <StepShell
       idx={3}
       title="自动打标"
-      subtitle="WD14 ONNX 本地推理，或 JoyCaption 远程 vLLM。每张图生成 .txt caption。完成后到「标签编辑」校对。"
+      subtitle="WD14 本地推理 或 JoyCaption 远程 vLLM"
       actions={
         <button
           onClick={startTagging}
@@ -179,77 +179,107 @@ export default function TaggingPage() {
         </button>
       }
     >
-    <div className="flex flex-col h-full gap-3" style={{ padding: '16px 24px' }}>
+    <div className="flex flex-col h-full gap-3">
 
-      {/* tagger / format / 启动 */}
-      <section className="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 flex flex-wrap items-center gap-2 text-xs shrink-0">
-        <span className="text-slate-400">tagger</span>
-        <select
-          value={tagger}
-          onChange={(e) => setTagger(e.target.value as TaggerName)}
-          className="px-2 py-1 rounded bg-slate-950 border border-slate-700"
-        >
-          <option value="wd14">WD14（本地 ONNX）</option>
-          <option value="joycaption">JoyCaption（远程 vLLM）</option>
-        </select>
-        <span
-          className={
-            'px-1.5 py-0.5 rounded text-[10px] font-mono ' +
-            (taggerStatus
-              ? taggerStatus.ok
-                ? 'bg-emerald-700/40 text-emerald-200'
-                : 'bg-red-800/40 text-red-200'
-              : 'bg-slate-700/60 text-slate-400')
-          }
-          title={taggerStatus?.msg ?? '检查中...'}
-        >
-          {taggerStatus
-            ? taggerStatus.ok
-              ? `✓ ${taggerStatus.msg}`
-              : `✗ ${taggerStatus.msg}`
-            : '检查中...'}
-        </span>
+      {/* 主体两栏：左（tagger 控制 + 模型卡片 + 参数） / 右（预览面板） */}
+      <div className="grid gap-3 flex-1 min-h-0" style={{ gridTemplateColumns: '1.5fr 1fr' }}>
 
-        <span className="text-slate-700">|</span>
-        <span className="text-slate-400">format</span>
-        <select
-          value={outputFormat}
-          onChange={(e) => setOutputFormat(e.target.value as 'txt' | 'json')}
-          className="px-2 py-1 rounded bg-slate-950 border border-slate-700"
-        >
-          <option value="txt">.txt</option>
-          <option value="json">.json</option>
-        </select>
+        {/* 左栏 */}
+        <div className="flex flex-col gap-3 min-h-0 min-w-0" style={{ overflowY: 'auto' }}>
 
-        <span className="flex-1" />
-      </section>
+          {/* tagger / format 控制栏 */}
+          <section style={{
+            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-surface)', padding: '8px 12px',
+            display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8,
+            flexShrink: 0, fontSize: 'var(--t-sm)',
+          }}>
+            <span style={{ color: 'var(--fg-tertiary)' }}>tagger</span>
+            <select
+              value={tagger}
+              onChange={(e) => setTagger(e.target.value as TaggerName)}
+              className="input"
+              style={{ padding: '3px 8px', fontSize: 'var(--t-sm)' }}
+            >
+              <option value="wd14">WD14（本地 ONNX）</option>
+              <option value="joycaption">JoyCaption（远程 vLLM）</option>
+            </select>
+            <span
+              className={
+                taggerStatus
+                  ? taggerStatus.ok ? 'badge badge-ok' : 'badge badge-err'
+                  : 'badge badge-neutral'
+              }
+              title={taggerStatus?.msg ?? '检查中...'}
+            >
+              {taggerStatus
+                ? taggerStatus.ok ? `✓ ${taggerStatus.msg}` : `✗ ${taggerStatus.msg}`
+                : '检查中...'}
+            </span>
 
-      {/* WD14 本次参数；预填充全局 settings，不写回 */}
-      {tagger === 'wd14' && (
-        <Wd14Panel
-          form={wd14Form}
-          defaults={wd14Defaults}
-          onChange={setWd14Form}
-          advOpen={advOpen}
-          setAdvOpen={setAdvOpen}
-          disabled={isLive}
+            <span style={{ color: 'var(--border-default)' }}>|</span>
+            <span style={{ color: 'var(--fg-tertiary)' }}>format</span>
+            <select
+              value={outputFormat}
+              onChange={(e) => setOutputFormat(e.target.value as 'txt' | 'json')}
+              className="input"
+              style={{ padding: '3px 8px', fontSize: 'var(--t-sm)' }}
+            >
+              <option value="txt">.txt</option>
+              <option value="json">.json</option>
+            </select>
+
+            <span className="flex-1" />
+          </section>
+
+          {/* WD14 本次参数；预填充全局 settings，不写回 */}
+          {tagger === 'wd14' && (
+            <Wd14Panel
+              form={wd14Form}
+              defaults={wd14Defaults}
+              onChange={setWd14Form}
+              advOpen={advOpen}
+              setAdvOpen={setAdvOpen}
+              disabled={isLive}
+            />
+          )}
+
+          {job && (
+            <JobProgress
+              job={job}
+              logs={logs}
+              onCancel={async () => {
+                try {
+                  await api.cancelJob(job.id)
+                  toast('已取消', 'success')
+                } catch (e) {
+                  toast(String(e), 'error')
+                }
+              }}
+            />
+          )}
+
+          {/* 开始打标按钮（放到左栏底部） */}
+          {!isLive && taggerStatus?.ok && (
+            <button
+              onClick={startTagging}
+              disabled={isLive || !taggerStatus?.ok}
+              className="btn btn-primary"
+              style={{ alignSelf: 'flex-start' }}
+            >
+              开始打标全部
+            </button>
+          )}
+        </div>
+
+        {/* 右栏：预览面板 */}
+        <TagPreviewPanel
+          tagger={tagger}
+          taggerStatus={taggerStatus}
+          isLive={isLive}
+          taggerOk={taggerStatus?.ok ?? false}
         />
-      )}
-
-      {job && (
-        <JobProgress
-          job={job}
-          logs={logs}
-          onCancel={async () => {
-            try {
-              await api.cancelJob(job.id)
-              toast('已取消', 'success')
-            } catch (e) {
-              toast(String(e), 'error')
-            }
-          }}
-        />
-      )}
+      </div>
     </div>
     </StepShell>
   )
@@ -276,7 +306,11 @@ function Wd14Panel({
 }) {
   if (!form || !defaults) {
     return (
-      <section className="rounded-lg border border-slate-700 bg-slate-800/30 px-3 py-1.5 text-[11px] text-slate-500 shrink-0">
+      <section style={{
+        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)', padding: '8px 12px',
+        fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', flexShrink: 0,
+      }}>
         加载 wd14 默认参数...
       </section>
     )
@@ -293,19 +327,18 @@ function Wd14Panel({
   const restore = () => onChange(fromConfig(defaults))
 
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-800/30 px-3 py-2 space-y-1.5 text-xs shrink-0">
+    <section style={{
+      borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+      background: 'var(--bg-surface)', padding: '10px 14px',
+      display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0,
+      fontSize: 'var(--t-sm)',
+    }}>
       <div className="flex items-center gap-2 flex-wrap">
         <PanelDot />
-        <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-          WD14 参数
-        </h3>
-        <span className="text-[11px] text-slate-500">
+        <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em' }}>WD14 参数</span>
+        <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>
           预填{' '}
-          <Link
-            to="/tools/settings"
-            className="text-cyan-400 hover:underline"
-            title="去设置页编辑全局默认"
-          >
+          <Link to="/tools/settings" style={{ color: 'var(--accent)' }} title="去设置页编辑全局默认">
             全局设置
           </Link>{' '}
           · 本次有效，不写回
@@ -313,11 +346,11 @@ function Wd14Panel({
         <span className="flex-1" />
         {dirty && (
           <>
-            <span className="text-amber-300 text-[10px]">已改</span>
+            <span className="badge badge-warn">已改</span>
             <button
               onClick={restore}
               disabled={disabled}
-              className="text-[11px] px-1.5 py-0.5 rounded text-slate-300 hover:text-slate-100 hover:bg-slate-700/60"
+              className="btn btn-ghost btn-sm"
               title="还原为全局设置"
             >
               ↻ 还原
@@ -344,7 +377,7 @@ function Wd14Panel({
         <button
           type="button"
           onClick={() => setAdvOpen(!advOpen)}
-          className="text-[11px] text-slate-400 hover:text-slate-200"
+          style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px' }}
         >
           {advOpen ? '▾' : '▸'} 高级
         </button>
@@ -412,7 +445,7 @@ function ThresholdInput({
   const modified = value !== base
   return (
     <label className="flex items-center gap-1.5">
-      <span className="text-slate-400 font-mono">{label}</span>
+      <span style={{ color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>{label}</span>
       <input
         type="number"
         min={0}
@@ -424,10 +457,8 @@ function ThresholdInput({
           if (!Number.isNaN(n)) onChange(Math.max(0, Math.min(1, n)))
         }}
         disabled={disabled}
-        className={
-          'px-1.5 py-0.5 rounded bg-slate-950 border text-xs w-20 focus:outline-none focus:border-cyan-500 ' +
-          (modified ? 'border-amber-600/70' : 'border-slate-700')
-        }
+        className="input input-mono"
+        style={{ width: 72, borderColor: modified ? 'var(--warn)' : undefined }}
         title={modified ? `全局 ${base}` : undefined}
       />
     </label>
@@ -452,20 +483,16 @@ function LabeledInput({
   className?: string
 }) {
   return (
-    <label
-      className={'grid grid-cols-[140px_1fr] items-center gap-2 ' + className}
-    >
-      <span className="text-slate-400 font-mono text-[11px]">{label}</span>
+    <label className={'grid grid-cols-[140px_1fr] items-center gap-2 ' + className}>
+      <span style={{ color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>{label}</span>
       <input
         type="text"
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className={
-          'px-2 py-1 rounded bg-slate-950 border text-xs focus:outline-none focus:border-cyan-500 ' +
-          (modified ? 'border-amber-600/70' : 'border-slate-700')
-        }
+        className="input input-mono"
+        style={{ borderColor: modified ? 'var(--warn)' : undefined }}
       />
     </label>
   )
@@ -491,26 +518,20 @@ function LabeledModelSelect({
   const opts = options.includes(value) ? options : [value, ...options]
   return (
     <label className="grid grid-cols-[140px_1fr] items-center gap-2">
-      <span className="text-slate-400 font-mono text-[11px]">{label}</span>
+      <span style={{ color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>{label}</span>
       <div className="flex items-center gap-1.5 min-w-0">
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
-          className={
-            'min-w-0 flex-1 px-2 py-1 rounded bg-slate-950 border text-xs focus:outline-none focus:border-cyan-500 ' +
-            (modified ? 'border-amber-600/70' : 'border-slate-700')
-          }
+          className="input input-mono min-w-0 flex-1"
+          style={{ borderColor: modified ? 'var(--warn)' : undefined }}
         >
-          {opts.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
+          {opts.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
         <Link
           to="/tools/settings"
-          className="text-[10px] text-slate-500 hover:text-cyan-400 shrink-0"
+          style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', flexShrink: 0 }}
           title="去设置编辑候选模型列表"
         >
           + 候选
@@ -521,5 +542,75 @@ function LabeledModelSelect({
 }
 
 function PanelDot() {
-  return <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" />
+  return <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
 }
+
+// ---------------------------------------------------------------------------
+// 右侧预览面板
+// ---------------------------------------------------------------------------
+
+function TagPreviewPanel({
+  tagger,
+  taggerStatus,
+  isLive,
+  taggerOk,
+}: {
+  tagger: string
+  taggerStatus: { ok: boolean; msg: string } | null
+  isLive: boolean
+  taggerOk: boolean
+}) {
+  return (
+    <div className="flex flex-col gap-3" style={{ minWidth: 0 }}>
+      {/* 状态卡片 */}
+      <div style={{
+        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)', padding: '10px 12px',
+      }}>
+        <div className="flex items-center gap-1.5" style={{ marginBottom: 8 }}>
+          <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: taggerOk ? 'var(--ok)' : 'var(--err)', flexShrink: 0 }} />
+          <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>状态</span>
+        </div>
+        <div style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-secondary)' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', color: taggerOk ? 'var(--ok)' : 'var(--err)', fontWeight: 500 }}>
+            {tagger} {taggerStatus ? (taggerOk ? '✓ 就绪' : '✗ 不可用') : '… 检查中'}
+          </div>
+          {!taggerOk && taggerStatus && (
+            <div style={{ marginTop: 4, color: 'var(--fg-tertiary)', wordBreak: 'break-all' }}>
+              {taggerStatus.msg}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 说明卡片 */}
+      <div style={{
+        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)', padding: '10px 12px',
+      }}>
+        <div className="flex items-center gap-1.5" style={{ marginBottom: 8 }}>
+          <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
+          <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>说明</span>
+        </div>
+        <div style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-secondary)', lineHeight: 1.6 }}>
+          {tagger === 'wd14'
+            ? 'WD14 ONNX 本地推理，无需网络'
+            : 'JoyCaption 远程 vLLM，自然语言描述'}
+        </div>
+      </div>
+
+      {/* 进度提示 */}
+      {isLive && (
+        <div style={{
+          borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+          background: 'var(--bg-surface)', padding: '10px 12px',
+          textAlign: 'center',
+        }}>
+          <div className="badge badge-warn">打标中</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+

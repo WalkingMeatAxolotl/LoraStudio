@@ -41,17 +41,17 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-serif: "EB Garamond", ui-serif, Georgia, serif;
 
-  /* sizes — bumped up vs current 12-13px baseline */
-  --t-xs: 11px;
-  --t-sm: 13px;
-  --t-base: 14px;
-  --t-md: 15px;
-  --t-lg: 17px;
-  --t-xl: 20px;
-  --t-2xl: 26px;
-  --t-3xl: 34px;
-  --t-4xl: 44px;
-  --t-display: 56px;
+  /* sizes — ~110% of original 12-13px baseline */
+  --t-xs: 12px;
+  --t-sm: 14px;
+  --t-base: 15px;
+  --t-md: 16px;
+  --t-lg: 18px;
+  --t-xl: 22px;
+  --t-2xl: 28px;
+  --t-3xl: 36px;
+  --t-4xl: 46px;
+  --t-display: 60px;
 
   /* spacing — comfortable */
   --s-1: 4px;
