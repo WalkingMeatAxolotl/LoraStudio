@@ -52,15 +52,66 @@ def find_python() -> str:
     return sys.executable
 
 
+_NPM_MIRROR = "https://registry.npmmirror.com"
+_PIP_MIRROR = "https://mirrors.aliyun.com/pypi/simple/"
+
+
+def _npm_call(npm: str, args: list[str], cwd: str, timeout: int = 180) -> int:
+    """运行 npm 命令；超时则 kill 并返回 1。"""
+    proc = subprocess.Popen([npm] + args, cwd=cwd)
+    try:
+        return proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        return 1
+
+
 def npm_install_if_missing(npm: str) -> int:
-    if NODE_MODULES.exists():
+    # 检查关键 bin 而不只是目录，避免安装不完整时跳过重装
+    _bin = "eslint.cmd" if os.name == "nt" else "eslint"
+    if NODE_MODULES.exists() and (NODE_MODULES / ".bin" / _bin).exists():
         return 0
     try:
         rel = NODE_MODULES.relative_to(REPO_ROOT)
     except ValueError:
         rel = NODE_MODULES
-    print(f"[studio] {rel} 不存在，运行 npm install...")
-    return subprocess.call([npm, "install"], cwd=str(WEB_DIR))
+    print(f"[studio] {rel} 不完整或不存在，运行 npm install（3 分钟超时）...")
+    rc = _npm_call(npm, ["install"], str(WEB_DIR), timeout=180)
+    if rc != 0:
+        print(f"[studio] npm install 失败或超时，切换国内源 ({_NPM_MIRROR}) 重试...")
+        rc = subprocess.call(
+            [npm, "install", "--registry", _NPM_MIRROR],
+            cwd=str(WEB_DIR),
+        )
+    return rc
+
+
+def _pip_install(args: list[str]) -> int:
+    """运行 pip install；失败时切换阿里云镜像重试。"""
+    rc = subprocess.call([find_python(), "-m", "pip", "install"] + args)
+    if rc != 0:
+        print(f"[studio] pip install 失败，切换国内源 ({_PIP_MIRROR}) 重试...")
+        rc = subprocess.call(
+            [find_python(), "-m", "pip", "install"] + args
+            + ["-i", _PIP_MIRROR],
+        )
+    return rc
+
+
+def _ensure_python_deps() -> int:
+    """检查关键包（fastapi）是否安装，缺失时自动补装 requirements.txt。"""
+    req = REPO_ROOT / "requirements.txt"
+    if not req.exists():
+        return 0
+    try:
+        import importlib.util
+        if importlib.util.find_spec("fastapi") is not None:
+            return 0
+    except Exception:
+        pass
+    print("[studio] 检测到 fastapi 缺失，重新安装 Python 依赖（requirements.txt）...")
+    return _pip_install(["-r", str(req)])
 
 
 def npm_build(npm: str) -> int:
@@ -189,6 +240,7 @@ def _bootstrap_onnxruntime() -> None:
     失败不致命（log + 让用户从 Settings 页手动装）。
     """
     try:
+        print("[studio] 检测 ONNX Runtime（首次运行需下载，可能需要几分钟）...")
         from studio.services import onnxruntime_setup
         state = onnxruntime_setup.bootstrap()
         if state.get("error"):
@@ -236,6 +288,9 @@ def _web_dist_is_stale() -> bool:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    rc = _ensure_python_deps()
+    if rc != 0:
+        return rc
     if not args.no_build:
         if not WEB_DIST.exists():
             print("[studio] studio/web/dist 不存在，先构建前端...")
@@ -258,6 +313,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_dev(args: argparse.Namespace) -> int:
+    rc = _ensure_python_deps()
+    if rc != 0:
+        return rc
     npm = find_npm()
     if not npm:
         print("[studio] 错误：找不到 npm", file=sys.stderr)
