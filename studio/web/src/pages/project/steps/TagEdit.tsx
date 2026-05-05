@@ -181,7 +181,7 @@ export default function TagEditPage() {
   )
 
   if (!activeVersion) {
-    return <p className="text-slate-500">请先选择 / 创建一个版本</p>
+    return <p style={{ color: 'var(--fg-tertiary)', padding: 24 }}>请先选择 / 创建一个版本</p>
   }
 
   // 普通点击 = 多选 toggle（含 shift 区间）；alt+click = 单图查看
@@ -293,17 +293,23 @@ export default function TagEditPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-2 flex-1 min-h-0">
         <div className="grid grid-rows-[3fr_2fr] gap-2 min-h-0 min-w-0">
           {/* 全部图片 */}
-          <section className="rounded-lg border border-slate-700 bg-slate-800/30 flex flex-col min-h-0 overflow-hidden">
-            <header className="px-2 py-1.5 border-b border-slate-700 flex flex-col gap-1.5 text-xs">
+          <section style={{
+            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
+            minHeight: 0, overflow: 'hidden',
+          }}>
+            <header style={{
+              padding: '6px 10px', borderBottom: '1px solid var(--border-subtle)',
+              display: 'flex', flexDirection: 'column', gap: 6,
+              fontSize: 'var(--t-sm)',
+            }}>
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-100">🖼 全部图片</span>
-                <span className="text-slate-500">
-                  {filterTag
-                    ? `${filteredKeys.length}/${keys.length}`
-                    : `${keys.length}`}
+                <span style={{ fontWeight: 600 }}>全部图片</span>
+                <span style={{ color: 'var(--fg-tertiary)' }}>
+                  {filterTag ? `${filteredKeys.length}/${keys.length}` : `${keys.length}`}
                 </span>
                 <span
-                  className="text-[10px] text-slate-500"
+                  style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}
                   title="普通点击 = 多选切换；alt+点击 = 单图查看"
                 >
                   alt+点击=查看
@@ -312,31 +318,30 @@ export default function TagEditPage() {
                 <button
                   onClick={() => setSel(new Set(filteredKeys))}
                   disabled={filteredKeys.length === 0}
-                  className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
+                  className="btn btn-ghost btn-sm"
                 >
                   全选
                 </button>
                 <button
                   onClick={() => setSel(new Set())}
                   disabled={sel.size === 0}
-                  className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
+                  className="btn btn-ghost btn-sm"
                 >
                   清空
                 </button>
               </div>
               <div className="flex items-center gap-1">
-                <span className="text-slate-500">🔍</span>
                 <TagAutocomplete
                   value={filterTag}
                   onChange={setFilterTag}
                   suggestions={tagSuggestions}
-                  placeholder="含 tag（精确）"
+                  placeholder="🔍 含 tag（精确）"
                   className="flex-1"
                 />
                 {filterTag && (
                   <button
                     onClick={() => setFilterTag('')}
-                    className="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-300"
+                    className="btn btn-ghost btn-sm"
                     aria-label="清除 filter"
                   >
                     ✕
@@ -369,67 +374,51 @@ export default function TagEditPage() {
           </div>
         </div>
 
-        {/* 右栏：单图编辑（图 + 切换 + 编辑） */}
-        <section className="rounded-lg border border-slate-700 bg-slate-800/40 p-3 min-h-0 min-w-0 flex flex-col">
-          <h3 className="text-sm font-semibold text-slate-100 mb-2 shrink-0 flex items-center gap-2 flex-wrap">
-            <span>📝 单图编辑</span>
+        {/* 右栏：单图编辑 */}
+        <section style={{
+          borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+          background: 'var(--bg-surface)', padding: 12,
+          minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+          <h3 style={{
+            margin: 0, fontSize: 'var(--t-sm)', fontWeight: 600, flexShrink: 0,
+            display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          }}>
+            <span>单图编辑</span>
             {activeName && (
-              <code className="text-xs font-mono text-slate-400 truncate">
+              <code style={{ fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)' }}>
                 {activeFolder}/{activeName}
               </code>
             )}
             {activeName && (
-              <span className="text-[10px] text-slate-500">.{activeFormat}</span>
+              <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>.{activeFormat}</span>
             )}
           </h3>
           {activeName ? (
             <div className="grid grid-rows-[3fr_auto_2fr] gap-2 flex-1 min-h-0">
-              <div className="bg-black/40 rounded flex items-center justify-center min-h-0">
+              <div style={{ background: 'var(--bg-sunken)', borderRadius: 'var(--r-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 }}>
                 <img
-                  src={api.versionThumbUrl(
-                    project.id,
-                    activeVersion.id,
-                    'train',
-                    activeName,
-                    activeFolder,
-                    768
-                  )}
+                  src={api.versionThumbUrl(project.id, activeVersion.id, 'train', activeName, activeFolder, 768)}
                   alt={activeName}
                   className="max-w-full max-h-full object-contain"
                 />
               </div>
-              <div className="flex items-center justify-center gap-2 text-xs shrink-0">
-                <button
-                  onClick={() => navActive(-1)}
-                  disabled={navKeys.length === 0}
-                  aria-label="上一张"
-                  className="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
-                >
-                  ◀
-                </button>
-                <span className="text-[11px] text-slate-400 tabular-nums w-32 text-center">
-                  {activeIndex >= 0
-                    ? `${activeIndex + 1} / ${navKeys.length}`
-                    : `– / ${navKeys.length}`}
-                  <span className="text-slate-600 ml-1">
+              <div className="flex items-center justify-center gap-2 shrink-0">
+                <button onClick={() => navActive(-1)} disabled={navKeys.length === 0} aria-label="上一张" className="btn btn-secondary btn-sm">◀</button>
+                <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', width: 96, textAlign: 'center', fontFamily: 'var(--font-mono)' }}>
+                  {activeIndex >= 0 ? `${activeIndex + 1} / ${navKeys.length}` : `– / ${navKeys.length}`}
+                  <span style={{ marginLeft: 4, color: 'var(--border-default)' }}>
                     {selectedKeys.length > 0 ? '(选中)' : '(全部)'}
                   </span>
                 </span>
-                <button
-                  onClick={() => navActive(1)}
-                  disabled={navKeys.length === 0}
-                  aria-label="下一张"
-                  className="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
-                >
-                  ▶
-                </button>
+                <button onClick={() => navActive(1)} disabled={navKeys.length === 0} aria-label="下一张" className="btn btn-secondary btn-sm">▶</button>
               </div>
               <div className="flex flex-col min-h-0">
                 <TagEditor tags={activeTags} onChange={updateActiveTags} />
               </div>
             </div>
           ) : (
-            <p className="text-xs text-slate-500">
+            <p style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-tertiary)', margin: 0 }}>
               alt + 点击左侧任一图查看 / 编辑标签（普通点击是多选）
             </p>
           )}

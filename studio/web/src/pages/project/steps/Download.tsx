@@ -32,11 +32,11 @@ interface Estimate {
 }
 
 const STATUS_COLOR: Record<Job['status'], string> = {
-  pending: 'bg-slate-700/60 text-slate-300',
-  running: 'bg-amber-700/40 text-amber-200',
-  done: 'bg-emerald-700/40 text-emerald-200',
-  failed: 'bg-red-800/50 text-red-200',
-  canceled: 'bg-slate-700/60 text-slate-300',
+  pending: 'badge badge-neutral',
+  running: 'badge badge-warn',
+  done: 'badge badge-ok',
+  failed: 'badge badge-err',
+  canceled: 'badge badge-neutral',
 }
 
 // 信息密度优先：每个 panel 紧凑成单/双 inline 行；已下载 grid 占主区域。
@@ -316,32 +316,39 @@ function DownloadedGrid({
     [files, project.id]
   )
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-800/30 overflow-hidden flex flex-col flex-1 min-h-0">
-      <header className="px-3 py-1.5 border-b border-slate-700 flex items-center gap-2 shrink-0 text-xs">
-        <h3 className="font-semibold text-slate-200">已下载</h3>
-        <span className="text-slate-500">{files.length} 张</span>
+    <section
+      className="flex flex-col flex-1 min-h-0"
+      style={{ borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)', overflow: 'hidden' }}
+    >
+      <header
+        className="flex items-center gap-2 shrink-0"
+        style={{ padding: '6px 10px', borderBottom: '1px solid var(--border-subtle)', fontSize: 'var(--t-sm)' }}
+      >
+        <h3 style={{ fontWeight: 600 }}>已下载</h3>
+        <span style={{ color: 'var(--fg-tertiary)' }}>{files.length} 张</span>
         {selected.size > 0 && (
-          <span className="text-cyan-300">· 已选 {selected.size}</span>
+          <span style={{ color: 'var(--accent)' }}>· 已选 {selected.size}</span>
         )}
         <span className="flex-1" />
         <button
           onClick={onSelectAll}
           disabled={files.length === 0 || deleting}
-          className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-50"
+          className="btn btn-ghost btn-sm"
         >
           全选
         </button>
         <button
           onClick={onClear}
           disabled={selected.size === 0 || deleting}
-          className="px-2 py-0.5 rounded text-slate-400 hover:text-slate-200 disabled:opacity-30"
+          className="btn btn-ghost btn-sm"
         >
           清空
         </button>
         <button
           onClick={() => void onDelete()}
           disabled={selected.size === 0 || deleting}
-          className="px-2 py-0.5 rounded bg-red-700/80 hover:bg-red-700 text-red-100 disabled:opacity-40"
+          className="btn btn-sm"
+          style={{ background: 'var(--err-soft)', color: 'var(--err)' }}
           title="删除选中的图片 + 同名 caption metadata"
         >
           {deleting ? '删除中...' : `🗑 删除 ${selected.size}`}
@@ -395,7 +402,10 @@ function BooruPanel({
 }: BooruPanelProps) {
   const disabled = busy || isLive
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 space-y-1.5">
+    <section
+      className="flex flex-col gap-1.5"
+      style={{ borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)', padding: '10px 12px' }}
+    >
       <PanelTitle accent="cyan">Booru 抓取</PanelTitle>
       <div className="flex items-center gap-1.5">
         <select
@@ -404,7 +414,8 @@ function BooruPanel({
             setApiSource(e.target.value as 'gelbooru' | 'danbooru')
           }
           disabled={disabled}
-          className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs w-24"
+          className="input"
+          style={{ width: 'auto', padding: '3px 8px', fontSize: 'var(--t-sm)' }}
         >
           <option value="gelbooru">Gelbooru</option>
           <option value="danbooru">Danbooru</option>
@@ -417,30 +428,31 @@ function BooruPanel({
           }}
           disabled={disabled}
           placeholder="tag (如 character_x rating:safe)"
-          className="flex-1 px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs focus:outline-none focus:border-cyan-500"
+          className="input flex-1"
+          style={{ padding: '3px 8px', fontSize: 'var(--t-sm)' }}
         />
         <button
           onClick={onEstimate}
           disabled={disabled || !tag.trim()}
-          className="text-xs px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
+          className="btn btn-secondary btn-sm"
         >
           {busy && !estimate ? '查询中...' : '查询'}
         </button>
       </div>
       {estimate && (
-        <div className="flex items-center gap-1.5 flex-wrap text-xs">
-          <span className="text-slate-300">
+        <div className="flex items-center gap-1.5 flex-wrap" style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)' }}>
+          <span>
             匹配{' '}
             {estimate.count >= 0 ? (
-              <strong className="text-cyan-300">{estimate.count}</strong>
+              <strong style={{ color: 'var(--accent)' }}>{estimate.count}</strong>
             ) : (
-              <strong className="text-amber-300">未知</strong>
+              <strong style={{ color: 'var(--warn)' }}>未知</strong>
             )}
           </span>
           {estimate.count !== 0 && (
             <>
-              <span className="text-slate-500">·</span>
-              <span className="text-slate-500">count</span>
+              <span style={{ color: 'var(--border-default)' }}>·</span>
+              <span style={{ color: 'var(--fg-tertiary)' }}>count</span>
               <input
                 type="number"
                 min={1}
@@ -450,13 +462,14 @@ function BooruPanel({
                   setCount(Math.min(Number(e.target.value) || 1, maxCount))
                 }
                 disabled={disabled}
-                className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-xs w-20 focus:outline-none focus:border-cyan-500"
+                className="input input-mono"
+                style={{ width: 80, padding: '2px 6px' }}
               />
               {estimate.count > 0 && (
                 <button
                   onClick={() => setCount(estimate.count)}
                   disabled={disabled}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
+                  className="btn btn-ghost btn-sm"
                 >
                   全部 {estimate.count}
                 </button>
@@ -464,14 +477,16 @@ function BooruPanel({
               <button
                 onClick={onStart}
                 disabled={disabled || count < 1}
-                className="ml-auto text-xs px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500"
+                className="btn btn-primary btn-sm"
+                style={{ marginLeft: 'auto' }}
               >
                 {isLive ? '下载中...' : `开始 ${count}`}
               </button>
             </>
           )}
           <span
-            className="basis-full text-[10px] text-slate-500 truncate"
+            className="basis-full truncate"
+            style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}
             title={estimate.effective_query}
           >
             query: <code>{estimate.effective_query}</code>
@@ -541,7 +556,10 @@ function UploadPanel({
   const fileNames = picked.map((f) => f.name).join(', ')
 
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 space-y-1.5">
+    <section
+      className="flex flex-col gap-1.5"
+      style={{ borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)', padding: '10px 12px' }}
+    >
       <PanelTitle accent="emerald">本地上传</PanelTitle>
       <label
         onDragOver={(e) => {
@@ -550,12 +568,15 @@ function UploadPanel({
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
-        className={
-          'flex items-center gap-2 cursor-pointer rounded border border-dashed px-2.5 py-1.5 text-xs transition-colors ' +
-          (dragging
-            ? 'border-emerald-500 bg-emerald-950/30 text-emerald-200'
-            : 'border-slate-600 hover:border-slate-400 text-slate-300')
-        }
+        className="flex items-center gap-2 cursor-pointer transition-colors"
+        style={{
+          borderRadius: 'var(--r-sm)',
+          border: `1px dashed ${dragging ? 'var(--accent)' : 'var(--border-default)'}`,
+          padding: '6px 10px',
+          fontSize: 'var(--t-sm)',
+          color: dragging ? 'var(--accent)' : 'var(--fg-secondary)',
+          background: dragging ? 'var(--accent-soft)' : 'transparent',
+        }}
       >
         <input
           ref={inputRef}
@@ -566,35 +587,36 @@ function UploadPanel({
           disabled={uploading}
           className="hidden"
         />
-        <span className="font-medium">点击选择 / 拖入</span>
-        <span className="text-slate-500">
+        <span style={{ fontWeight: 500 }}>点击选择 / 拖入</span>
+        <span style={{ color: 'var(--fg-tertiary)' }}>
           · png / jpg / webp / bmp / gif / .zip(自动解压)
         </span>
         <span className="flex-1" />
         {picked.length > 0 && (
-          <span className="text-emerald-300">
+          <span style={{ color: 'var(--ok)' }}>
             已选 {picked.length} · {(totalBytes / 1024 / 1024).toFixed(1)} MB
           </span>
         )}
       </label>
       {picked.length > 0 && (
-        <div className="flex items-center gap-1.5 text-xs">
+        <div className="flex items-center gap-1.5">
           <button
             onClick={submit}
             disabled={uploading}
-            className="text-xs px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500"
+            className="btn btn-primary btn-sm"
           >
             {uploading ? '上传中...' : `上传 ${picked.length}`}
           </button>
           <button
             onClick={reset}
             disabled={uploading}
-            className="text-[11px] px-2 py-1 rounded text-slate-400 hover:text-slate-200"
+            className="btn btn-ghost btn-sm"
           >
             清空
           </button>
           <span
-            className="ml-1 text-[10px] text-slate-500 truncate min-w-0 flex-1"
+            className="truncate min-w-0 flex-1"
+            style={{ marginLeft: 4, fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}
             title={fileNames}
           >
             {fileNames}
@@ -625,22 +647,26 @@ function JobStrip({
   return (
     <details
       open={isLive}
-      className="group rounded-lg border border-slate-700 bg-slate-800/40 overflow-hidden"
+      className="group"
+      style={{ borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)', overflow: 'hidden' }}
     >
-      <summary className="px-3 py-1.5 cursor-pointer flex items-center gap-2 text-xs select-none list-none">
-        <span className="text-slate-500 group-open:rotate-90 transition-transform inline-block w-3">
-          ▸
-        </span>
+      <summary
+        className="cursor-pointer flex items-center gap-2 select-none list-none"
+        style={{ padding: '6px 10px', fontSize: 'var(--t-sm)' }}
+      >
         <span
-          className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${STATUS_COLOR[job.status]}`}
-        >
-          {job.status}
-        </span>
-        <span className="text-slate-400 font-mono">job #{job.id}</span>
+          className="inline-block transition-transform group-open:rotate-90"
+          style={{ color: 'var(--fg-tertiary)', width: 12 }}
+        >▸</span>
+        <span className={STATUS_COLOR[job.status]}>{job.status}</span>
+        <span className="mono" style={{ color: 'var(--fg-secondary)' }}>job #{job.id}</span>
         {elapsed && elapsed > 0 && (
-          <span className="text-slate-500">· {Math.round(elapsed)}s</span>
+          <span style={{ color: 'var(--fg-tertiary)' }}>· {Math.round(elapsed)}s</span>
         )}
-        <span className="text-slate-300 truncate flex-1 min-w-0 font-mono text-[11px]">
+        <span
+          className="mono truncate flex-1 min-w-0"
+          style={{ color: 'var(--fg-secondary)', fontSize: 'var(--t-xs)' }}
+        >
           {lastLine}
         </span>
         {isLive && onCancel && (
@@ -649,13 +675,27 @@ function JobStrip({
               e.preventDefault()
               onCancel()
             }}
-            className="text-[11px] px-2 py-0.5 rounded text-red-300 hover:text-red-200 hover:bg-red-900/30"
+            className="btn btn-sm"
+            style={{ color: 'var(--err)', background: 'transparent' }}
           >
             取消
           </button>
         )}
       </summary>
-      <pre className="p-2.5 text-[11px] font-mono text-slate-300 bg-slate-950/40 max-h-56 overflow-y-auto whitespace-pre-wrap border-t border-slate-700">
+      <pre
+        style={{
+          padding: '8px 12px',
+          fontSize: 'var(--t-xs)',
+          fontFamily: 'var(--font-mono)',
+          color: 'var(--fg-secondary)',
+          background: 'var(--bg-sunken)',
+          maxHeight: 224,
+          overflow: 'auto',
+          whiteSpace: 'pre-wrap',
+          borderTop: '1px solid var(--border-subtle)',
+          margin: 0,
+        }}
+      >
         {logs.length === 0 ? '(等待日志...)' : logs.slice(-1000).join('\n')}
       </pre>
     </details>
@@ -672,19 +712,24 @@ function UploadResultStrip({
   const skipped = result.skipped.length
   const ok = result.added.length
   return (
-    <details className="group rounded-lg border border-slate-700 bg-slate-800/40 overflow-hidden">
-      <summary className="px-3 py-1.5 cursor-pointer flex items-center gap-2 text-xs select-none list-none">
-        <span className="text-slate-500 group-open:rotate-90 transition-transform inline-block w-3">
-          ▸
-        </span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-emerald-700/40 text-emerald-200">
-          upload
-        </span>
-        <span className="text-slate-300">
-          添加 <strong className="text-emerald-300">{ok}</strong>
+    <details
+      className="group"
+      style={{ borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)', overflow: 'hidden' }}
+    >
+      <summary
+        className="cursor-pointer flex items-center gap-2 select-none list-none"
+        style={{ padding: '6px 10px', fontSize: 'var(--t-sm)' }}
+      >
+        <span
+          className="inline-block transition-transform group-open:rotate-90"
+          style={{ color: 'var(--fg-tertiary)', width: 12 }}
+        >▸</span>
+        <span className="badge badge-ok">upload</span>
+        <span style={{ color: 'var(--fg-secondary)' }}>
+          添加 <strong style={{ color: 'var(--ok)' }}>{ok}</strong>
           {skipped > 0 && (
             <>
-              {' · '}跳过 <strong className="text-amber-300">{skipped}</strong>
+              {' · '}跳过 <strong style={{ color: 'var(--warn)' }}>{skipped}</strong>
             </>
           )}
         </span>
@@ -694,22 +739,43 @@ function UploadResultStrip({
             e.preventDefault()
             onDismiss()
           }}
-          className="text-[11px] px-1.5 py-0.5 rounded text-slate-400 hover:text-slate-200"
+          className="btn btn-ghost btn-sm"
           title="关闭"
         >
           ×
         </button>
       </summary>
       {skipped > 0 ? (
-        <ul className="p-2.5 text-[11px] font-mono text-amber-300/90 max-h-40 overflow-y-auto space-y-0.5 border-t border-slate-700">
+        <ul
+          style={{
+            padding: '8px 12px',
+            fontSize: 'var(--t-xs)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--warn)',
+            background: 'var(--bg-sunken)',
+            maxHeight: 160,
+            overflow: 'auto',
+            borderTop: '1px solid var(--border-subtle)',
+            margin: 0,
+            listStyle: 'none',
+          }}
+        >
           {result.skipped.map((s, i) => (
             <li key={`${s.name}-${i}`} className="truncate">
-              {s.name} <span className="text-slate-500">— {s.reason}</span>
+              {s.name} <span style={{ color: 'var(--fg-tertiary)' }}>— {s.reason}</span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="p-2.5 text-[11px] text-slate-500 border-t border-slate-700">
+        <p
+          style={{
+            padding: '8px 12px',
+            fontSize: 'var(--t-xs)',
+            color: 'var(--fg-tertiary)',
+            borderTop: '1px solid var(--border-subtle)',
+            margin: 0,
+          }}
+        >
           全部成功，无跳过。
         </p>
       )}
@@ -728,10 +794,10 @@ function PanelTitle({
   accent: 'cyan' | 'emerald'
   children: React.ReactNode
 }) {
-  const dot = accent === 'cyan' ? 'bg-cyan-400' : 'bg-emerald-400'
+  const dotBg = accent === 'cyan' ? 'var(--accent)' : 'var(--ok)'
   return (
-    <h3 className="text-[10px] font-semibold text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
-      <span className={`inline-block w-1.5 h-1.5 rounded-full ${dot}`} />
+    <h3 className="caption flex items-center gap-1.5">
+      <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: dotBg, flexShrink: 0 }} />
       {children}
     </h3>
   )
