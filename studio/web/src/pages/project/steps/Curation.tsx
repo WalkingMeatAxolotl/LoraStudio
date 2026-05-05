@@ -9,6 +9,7 @@ import {
 } from '../../../api/client'
 import ImageGrid, { applySelection } from '../../../components/ImageGrid'
 import ImagePreviewModal from '../../../components/ImagePreviewModal'
+import StepShell from '../../../components/StepShell'
 import { useToast } from '../../../components/Toast'
 import { useEventStream } from '../../../lib/useEventStream'
 
@@ -487,32 +488,28 @@ export default function CurationPage() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full gap-3">
-      {/* 标题压缩成单行 */}
-      <header className="flex items-baseline gap-2 flex-wrap shrink-0">
-        <h2 className="text-base font-semibold">② 筛选</h2>
-        <span className="text-xs text-slate-500">
-          download → train · download 永远保留 · 按住{' '}
-          <kbd className="px-1 rounded bg-slate-800 text-slate-300">Alt</kbd>{' '}
-          悬停缩略图查看大图
-        </span>
-        <span className="flex-1" />
-        <label className="flex items-center gap-1.5 text-xs text-slate-400">
+    <StepShell
+      idx={2}
+      title="筛选图片"
+      subtitle="download → train · download 目录永远保留原图 · 按住 Alt 悬停缩略图查看大图"
+      actions={
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)' }}>
           排序
           <select
             value={sortMode}
             onChange={(e) => setSortMode(e.target.value as SortMode)}
-            className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-xs text-slate-200"
+            className="input"
+            style={{ padding: '3px 8px', fontSize: 'var(--t-sm)' }}
             title="排序作用于左右两个网格"
           >
             {SORT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
+              <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
         </label>
-      </header>
+      }
+    >
+    <div className="flex flex-col h-full gap-3" style={{ padding: '16px 24px' }}>
 
       {/* Download + Train 两列平分整宽；预览改为 alt+hover 浮层，不占布局位置。 */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 items-stretch flex-1 min-h-0">
@@ -674,6 +671,7 @@ export default function CurationPage() {
         />
       )}
     </div>
+    </StepShell>
   )
 }
 

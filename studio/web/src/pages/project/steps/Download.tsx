@@ -9,6 +9,7 @@ import {
   type Version,
 } from '../../../api/client'
 import ImageGrid, { applySelection } from '../../../components/ImageGrid'
+import StepShell from '../../../components/StepShell'
 import { useToast } from '../../../components/Toast'
 import { useEventStream } from '../../../lib/useEventStream'
 
@@ -163,19 +164,17 @@ export default function DownloadPage() {
   const maxCount = estimate && estimate.count > 0 ? estimate.count : 5000
 
   return (
-    <div className="flex flex-col h-full gap-2 min-h-0">
-      {/* 单行标题 */}
-      <header className="flex items-baseline gap-2 flex-wrap shrink-0">
-        <h2 className="text-base font-semibold">① 下载</h2>
-        <span className="text-xs text-slate-500">
-          Booru 抓取 + 本地上传，共享{' '}
-          <code className="text-slate-400">{project.slug}/download/</code> ·{' '}
-          <Link to="/tools/settings" className="text-cyan-400 hover:underline">
-            设置
-          </Link>{' '}
-          配置 exclude / 凭据
-        </span>
-      </header>
+    <StepShell
+      idx={1}
+      title="下载图片"
+      subtitle={`Booru 抓取 + 本地上传，落到 ${project.slug}/download/。在「设置」配置 exclude / 凭据。`}
+      actions={
+        <Link to="/tools/settings" className="btn btn-ghost btn-sm">
+          设置
+        </Link>
+      }
+    >
+    <div className="flex flex-col h-full gap-2 min-h-0" style={{ padding: '16px 24px' }}>
 
       {/* 操作行：两个紧凑 panel 并排（窄屏堆叠） */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 shrink-0">
@@ -277,6 +276,7 @@ export default function DownloadPage() {
         }}
       />
     </div>
+    </StepShell>
   )
 }
 

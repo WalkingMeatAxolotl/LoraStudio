@@ -10,6 +10,7 @@ import {
   type WD14Config,
 } from '../../../api/client'
 import JobProgress from '../../../components/JobProgress'
+import StepShell from '../../../components/StepShell'
 import { useToast } from '../../../components/Toast'
 import { useEventStream } from '../../../lib/useEventStream'
 
@@ -164,13 +165,21 @@ export default function TaggingPage() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full gap-3">
-      <header className="flex items-baseline gap-2 flex-wrap shrink-0">
-        <h2 className="text-base font-semibold">③ 打标</h2>
-        <span className="text-xs text-slate-500">
-          自动给 train/ 下全部图片生成 caption · 完成后到「④ 标签编辑」校对
-        </span>
-      </header>
+    <StepShell
+      idx={3}
+      title="自动打标"
+      subtitle="WD14 ONNX 本地推理，或 JoyCaption 远程 vLLM。每张图生成 .txt caption。完成后到「标签编辑」校对。"
+      actions={
+        <button
+          onClick={startTagging}
+          disabled={isLive || !taggerStatus?.ok}
+          className="btn btn-primary"
+        >
+          {isLive ? '打标中…' : '开始打标全部'}
+        </button>
+      }
+    >
+    <div className="flex flex-col h-full gap-3" style={{ padding: '16px 24px' }}>
 
       {/* tagger / format / 启动 */}
       <section className="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 flex flex-wrap items-center gap-2 text-xs shrink-0">
@@ -213,13 +222,6 @@ export default function TaggingPage() {
         </select>
 
         <span className="flex-1" />
-        <button
-          onClick={startTagging}
-          disabled={isLive || !taggerStatus?.ok}
-          className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white disabled:bg-slate-700 disabled:text-slate-500"
-        >
-          {isLive ? '打标中...' : '开始打标全部'}
-        </button>
       </section>
 
       {/* WD14 本次参数；预填充全局 settings，不写回 */}
@@ -249,6 +251,7 @@ export default function TaggingPage() {
         />
       )}
     </div>
+    </StepShell>
   )
 }
 

@@ -12,6 +12,14 @@ import {
 import SchemaForm from '../../../components/SchemaForm'
 import { useToast } from '../../../components/Toast'
 
+// 全局模型字段来自全局设置，对版本维度只读
+const GLOBAL_MODEL_FIELDS = [
+  'transformer_path',
+  'vae_path',
+  'text_encoder_path',
+  't5_tokenizer_path',
+]
+
 interface Ctx {
   project: ProjectDetail
   activeVersion: Version | null
@@ -54,13 +62,7 @@ export default function TrainPage() {
   // 全局模型路径仍然灰显 readonly（值来自 Settings.models 配置；version 维度
   // 改了没意义）。PP10.4 起项目特定字段（data_dir 等）改成可编辑：fork preset
   // 时仍然预填项目路径，但用户后续可以自由改（接续训练填 resume_lora 之类）。
-  const GLOBAL_MODEL_FIELDS = [
-    'transformer_path',
-    'vae_path',
-    'text_encoder_path',
-    't5_tokenizer_path',
-  ]
-  const disabledFields = useMemo(() => GLOBAL_MODEL_FIELDS, [])
+  const disabledFields = GLOBAL_MODEL_FIELDS
   const disabledHints = useMemo(() => {
     const h: Record<string, string> = {}
     for (const f of GLOBAL_MODEL_FIELDS) h[f] = '自动 · 全局设置'

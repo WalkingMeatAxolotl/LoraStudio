@@ -9,6 +9,7 @@ import {
 import BulkActionBar from '../../../components/BulkActionBar'
 import ImageGrid, { applySelection } from '../../../components/ImageGrid'
 import SaveBar from '../../../components/SaveBar'
+import StepShell from '../../../components/StepShell'
 import TagAutocomplete from '../../../components/TagAutocomplete'
 import TagEditor from '../../../components/TagEditor'
 import TagStatsPanel from '../../../components/TagStatsPanel'
@@ -255,36 +256,30 @@ export default function TagEditPage() {
   const activeTags = activeKey ? cache.get(activeKey) ?? [] : []
 
   return (
-    <div className="flex flex-col h-full w-full gap-2">
-      {/* 顶栏 1：标题 + 进度 + 保存 */}
-      <header className="flex items-center gap-2 flex-wrap shrink-0">
-        <h2 className="text-base font-semibold">④ 标签编辑</h2>
-        {stats && (
-          <span
-            className={
-              'text-xs px-1.5 py-0.5 rounded ' +
-              (allTagged
-                ? 'bg-emerald-700/40 text-emerald-200'
-                : 'bg-slate-700/60 text-slate-300')
-            }
-          >
-            {taggedTotal}/{trainTotal} 已打标
-          </span>
-        )}
-        <span className="text-xs text-slate-500">
-          编辑只改本地缓存 · 「保存」一键写盘并自动生成还原点
-        </span>
-        <span className="flex-1" />
-        <SaveBar
-          pid={project.id}
-          vid={activeVersion.id}
-          dirtyCount={dirtyKeys.length}
-          onSave={onSave}
-          onAfterRestore={onAfterRestore}
-        />
-      </header>
+    <StepShell
+      idx={4}
+      title="标签编辑"
+      subtitle="批量替换 / 删除 / 添加标签；自动生成还原点。编辑只改本地缓存，「保存」一键写盘。"
+      actions={
+        <>
+          {stats && (
+            <span className={allTagged ? 'badge badge-ok' : 'badge badge-neutral'}>
+              {taggedTotal}/{trainTotal} 已打标
+            </span>
+          )}
+          <SaveBar
+            pid={project.id}
+            vid={activeVersion.id}
+            dirtyCount={dirtyKeys.length}
+            onSave={onSave}
+            onAfterRestore={onAfterRestore}
+          />
+        </>
+      }
+    >
+    <div className="flex flex-col h-full gap-2" style={{ padding: '12px 24px' }}>
 
-      {/* 顶栏 2：批量操作 */}
+      {/* 批量操作 */}
       <BulkActionBar
         cache={cache}
         selectedKeys={selectedKeys}
@@ -441,5 +436,6 @@ export default function TagEditPage() {
         </section>
       </div>
     </div>
+    </StepShell>
   )
 }
