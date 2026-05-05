@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import Topbar from './components/Topbar'
+import { ProjectContext, ProjectSetterContext, type ProjectCtxValue } from './context/ProjectContext'
 import ProjectsPage from './pages/Projects'
 import QueuePage from './pages/Queue'
 import QueueDetailPage from './pages/QueueDetail'
@@ -30,7 +32,11 @@ function QueueDetailRedirect({ tab }: { tab: 'log' | 'monitor' }) {
 }
 
 export default function App() {
+  const [projectCtx, setProjectCtx] = useState<ProjectCtxValue | null>(null)
+
   return (
+    <ProjectContext.Provider value={projectCtx}>
+      <ProjectSetterContext.Provider value={setProjectCtx}>
     <BrowserRouter basename="/studio">
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
         <Topbar />
@@ -84,5 +90,7 @@ export default function App() {
         </div>
       </div>
     </BrowserRouter>
+      </ProjectSetterContext.Provider>
+    </ProjectContext.Provider>
   )
 }

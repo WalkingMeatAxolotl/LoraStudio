@@ -14,3 +14,7 @@ export interface ProjectCtxValue {
 
 export const ProjectContext = createContext<ProjectCtxValue | null>(null)
 export const useProjectCtx = () => useContext(ProjectContext)
+
+// Setter lives at App level so Layout.tsx can push context up to Sidebar
+export const ProjectSetterContext = createContext<((v: ProjectCtxValue | null) => void) | null>(null)
+export const useProjectCtxSetter = () => useContext(ProjectSetterContext)

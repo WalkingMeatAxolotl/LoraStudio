@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useNavigate, useParams } from 'react-router-dom'
 import { api, downloadBlob, type ProjectDetail } from '../../api/client'
-import { ProjectContext } from '../../context/ProjectContext'
+import { useProjectCtxSetter } from '../../context/ProjectContext'
 import { useToast } from '../../components/Toast'
 import { useEventStream } from '../../lib/useEventStream'
 
@@ -10,6 +10,7 @@ export default function ProjectLayout() {
   const projectId = pid ? Number(pid) : NaN
   const navigate = useNavigate()
   const { toast } = useToast()
+  const setCtx = useProjectCtxSetter()
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -48,25 +49,58 @@ export default function ProjectLayout() {
     return project.versions.find((v) => v.id === aid) ?? project.versions[0] ?? null
   }, [project])
 
-  const handleSelectVersion = async (vid: number) => {
-    if (!project) return
-    if (project.active_version_id === vid) return
+  const handleSelectVersion = useCallback(async (vid: number) => {
+    if (!projectRef.current) return
+    if (projectRef.current.active_version_id === vid) return
     try {
-      const updated = await api.activateVersion(project.id, vid)
+      const updated = await api.activateVersion(projectRef.current.id, vid)
       setProject(updated)
     } catch (e) {
       toast(String(e), 'error')
     }
-  }
+  }, [toast])
 
-  const handleCreateVersion = async (label: string, forkFromVersionId: number | null) => {
-    if (!project || creatingBusy) return
+  const handleExportTrain = useCallback(async () => {
+    if (!projectRef.current || exporting) return
+    const av = projectRef.current.versions.find(
+      (v) => v.id === projectRef.current!.active_version_id
+    ) ?? projectRef.current.versions[0] ?? null
+    if (!av) return
+    setExporting(true)
+    try {
+      const filename = `${projectRef.current.slug}-${av.label}.train.zip`
+      await downloadBlob(api.versionTrainZipUrl(projectRef.current.id, av.id), filename)
+    } catch (e) {
+      toast(`导出失败: ${e}`, 'error')
+    } finally {
+      setExporting(false)
+    }
+  }, [exporting, toast])
+
+  const handleDeleteVersion = useCallback(async (vid: number) => {
+    if (!projectRef.current) return
+    const v = projectRef.current.versions.find((x) => x.id === vid)
+    if (!v) return
+    if (!confirm(`删除版本 ${v.label}？目录将移到回收站。`)) return
+    const pid = projectRef.current.id
+    try {
+      await api.deleteVersion(pid, vid)
+      await reload()
+      toast(`已删除版本 ${v.label}`, 'success')
+      navigate(`/projects/${pid}`)
+    } catch (e) {
+      toast(String(e), 'error')
+    }
+  }, [reload, toast, navigate])
+
+  const handleCreateVersion = useCallback(async (label: string, forkFromVersionId: number | null) => {
+    if (!projectRef.current || creatingBusy) return
     setCreatingBusy(true)
     try {
       const body: { label: string; fork_from_version_id?: number } = { label }
       if (forkFromVersionId !== null) body.fork_from_version_id = forkFromVersionId
-      const v = await api.createVersion(project.id, body)
-      await api.activateVersion(project.id, v.id)
+      const v = await api.createVersion(projectRef.current.id, body)
+      await api.activateVersion(projectRef.current.id, v.id)
       await reload()
       setCreating(false)
       toast(
@@ -80,35 +114,27 @@ export default function ProjectLayout() {
     } finally {
       setCreatingBusy(false)
     }
-  }
+  }, [creatingBusy, reload, toast])
 
-  const handleExportTrain = useCallback(async () => {
-    if (!project || !activeVersion || exporting) return
-    setExporting(true)
-    try {
-      const filename = `${project.slug}-${activeVersion.label}.train.zip`
-      await downloadBlob(api.versionTrainZipUrl(project.id, activeVersion.id), filename)
-    } catch (e) {
-      toast(`导出失败: ${e}`, 'error')
-    } finally {
-      setExporting(false)
-    }
-  }, [project, activeVersion, exporting, toast])
+  // Push context up to App-level so Sidebar (sibling of <main>) can read it
+  useEffect(() => {
+    if (!project || !setCtx) return
+    setCtx({
+      project,
+      activeVersion,
+      reload,
+      onSelectVersion: handleSelectVersion,
+      onCreateVersion: () => setCreating(true),
+      onExportTrain: handleExportTrain,
+      onDeleteVersion: handleDeleteVersion,
+      exporting,
+    })
+  }, [project, activeVersion, reload, handleSelectVersion, handleExportTrain, handleDeleteVersion, exporting, setCtx])
 
-  const handleDeleteVersion = async (vid: number) => {
-    if (!project) return
-    const v = project.versions.find((x) => x.id === vid)
-    if (!v) return
-    if (!confirm(`删除版本 ${v.label}？目录将移到回收站。`)) return
-    try {
-      await api.deleteVersion(project.id, vid)
-      await reload()
-      toast(`已删除版本 ${v.label}`, 'success')
-      navigate(`/projects/${project.id}`)
-    } catch (e) {
-      toast(String(e), 'error')
-    }
-  }
+  // Clear context when leaving project route
+  useEffect(() => {
+    return () => { setCtx?.(null) }
+  }, [setCtx])
 
   if (error) {
     return (
@@ -122,20 +148,8 @@ export default function ProjectLayout() {
   }
 
   return (
-    <ProjectContext.Provider value={{
-      project,
-      activeVersion,
-      reload,
-      onSelectVersion: handleSelectVersion,
-      onCreateVersion: () => setCreating(true),
-      onExportTrain: handleExportTrain,
-      onDeleteVersion: handleDeleteVersion,
-      exporting,
-    }}>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Outlet context={{ project, activeVersion, reload }} />
-      </div>
-
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Outlet context={{ project, activeVersion, reload }} />
       {creating && (
         <NewVersionDialog
           existingLabels={project.versions.map((v) => v.label)}
@@ -145,7 +159,7 @@ export default function ProjectLayout() {
           onSubmit={handleCreateVersion}
         />
       )}
-    </ProjectContext.Provider>
+    </div>
   )
 }
 
