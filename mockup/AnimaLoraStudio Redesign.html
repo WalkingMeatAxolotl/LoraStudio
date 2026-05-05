@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AnimaLoraStudio · 重设计</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=EB+Garamond:ital@0;1&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="tokens.css"/>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="chrome.jsx"></script>
+<script type="text/babel" src="pages-1.jsx"></script>
+<script type="text/babel" src="pages-2.jsx"></script>
+<script type="text/babel" src="pages-3.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+const { Sidebar, Topbar, I } = window.ALSChrome;
+const { ProjectsPage, ProjectOverview } = window.ALSPages1;
+const { DownloadPage, CurationPage, TaggingPage, TagEditPage } = window.ALSPages2;
+const { RegPage, TrainPage, QueuePage, MonitorPage, SettingsPage } = window.ALSPages3;
+const { TweaksPanel, useTweaks, TweakSection, TweakRadio, TweakSelect, TweakColor, TweakToggle } = window;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "theme": "light",
+  "density": "comfortable",
+  "accent": "#d8541d",
+  "radius": "default",
+  "fontPair": "inter+jb",
+  "navPosition": "sidebar",
+  "showTrainStatus": true
+}/*EDITMODE-END*/;
+
+const FONT_PAIRS = {
+  "inter+jb":   { sans: '"Inter", ui-sans-serif, system-ui, sans-serif',     mono: '"JetBrains Mono", ui-monospace, monospace' },
+  "system+jb":  { sans: 'ui-sans-serif, -apple-system, "PingFang SC", sans-serif', mono: '"JetBrains Mono", ui-monospace, monospace' },
+  "garamond+jb":{ sans: '"EB Garamond", ui-serif, Georgia, serif',           mono: '"JetBrains Mono", ui-monospace, monospace' },
+  "inter+ibm":  { sans: '"Inter", sans-serif',                                mono: 'ui-monospace, "IBM Plex Mono", Menlo, monospace' },
+};
+
+function App() {
+  const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [route, setRoute] = useState("projects");
+  const [collapsed, setCollapsed] = useState(false);
+  const [project] = useState({ title: "犬山玉藻 · v3 风格学习", slug: "inuyama-tamamo", version: "high-lr" });
+
+  // apply tweaks → root classes + custom props
+  useEffect(() => {
+    const root = document.documentElement;
+    root.className = "";
+    if (tweaks.theme === "dark") root.classList.add("theme-dark");
+    if (tweaks.density === "tight") root.classList.add("density-tight");
+    if (tweaks.density === "loose") root.classList.add("density-loose");
+    if (tweaks.radius === "sharp") root.classList.add("radius-sharp");
+    if (tweaks.radius === "soft")  root.classList.add("radius-soft");
+    root.style.setProperty("--accent", tweaks.accent);
+    // derive accent-soft & hover from accent
+    root.style.setProperty("--accent-hover", shade(tweaks.accent, -10));
+    root.style.setProperty("--accent-soft", tint(tweaks.accent, 0.85));
+    const fp = FONT_PAIRS[tweaks.fontPair] || FONT_PAIRS["inter+jb"];
+    root.style.setProperty("--font-sans", fp.sans);
+    root.style.setProperty("--font-mono", fp.mono);
+  }, [tweaks]);
+
+  // open project from list
+  const openProject = (p) => setRoute("project-overview");
+  const navTo = (k) => setRoute(k);
+
+  // breadcrumbs
+  const stepLabel = {
+    "step:download": "1 · 下载",
+    "step:curate":   "2 · 筛选",
+    "step:tag":      "3 · 打标",
+    "step:edit":     "4 · 标签编辑",
+    "step:reg":      "5 · 正则集",
+    "step:train":    "6 · 训练",
+  };
+  const isProject = route === "project-overview" || route.startsWith("step:");
+  const breadcrumbs = isProject
+    ? [{ label: "项目" }, { label: project.title }, { label: project.version, mono: true }, ...(route.startsWith("step:") ? [{ label: stepLabel[route] }] : [])]
+    : [{ label: route === "projects" ? "项目" : route === "queue" ? "队列" : route === "monitor" ? "监控" : route === "settings" ? "设置" : route === "presets" ? "预设" : route }];
+
+  const projectStatus = tweaks.showTrainStatus ? { task: "犬山玉藻 / high-lr", step: "step 4,200 / 10,000" } : null;
+
+  let view;
+  if (route === "projects") view = <ProjectsPage onOpen={openProject}/>;
+  else if (route === "project-overview") view = <ProjectOverview project={project} onStep={navTo}/>;
+  else if (route === "step:download") view = <DownloadPage/>;
+  else if (route === "step:curate")   view = <CurationPage/>;
+  else if (route === "step:tag")      view = <TaggingPage/>;
+  else if (route === "step:edit")     view = <TagEditPage/>;
+  else if (route === "step:reg")      view = <RegPage/>;
+  else if (route === "step:train")    view = <TrainPage onLaunch={() => setRoute("monitor")}/>;
+  else if (route === "queue")         view = <QueuePage onOpen={() => setRoute("monitor")}/>;
+  else if (route === "monitor")       view = <MonitorPage task={{ id: 412, name: "犬山玉藻 / high-lr" }}/>;
+  else if (route === "settings")      view = <SettingsPage/>;
+  else if (route === "presets")       view = <PresetsPage/>;
+
+  return (
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }} data-screen-label={routeLabel(route)}>
+      {tweaks.navPosition === "sidebar" && (
+        <Sidebar
+          active={route}
+          onNav={navTo}
+          collapsed={collapsed}
+          onToggle={() => setCollapsed(c => !c)}
+          project={project}
+        />
+      )}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        {tweaks.navPosition === "top" && <TopNav active={route} onNav={navTo} project={project}/>}
+        <Topbar breadcrumbs={breadcrumbs} projectStatus={projectStatus} onCommand={() => alert('⌘K palette (mock)')}/>
+        <main style={{ flex: 1, overflow: "auto", background: "var(--bg-canvas)" }}>
+          {view}
+        </main>
+      </div>
+
+      <TweaksPanel title="Tweaks" defaultPosition={{ right: 20, bottom: 20 }}>
+        <TweakSection title="主题">
+          <TweakRadio label="模式" value={tweaks.theme} onChange={v => setTweak("theme", v)}
+            options={[{value:"light", label:"浅色"}, {value:"dark", label:"深色"}]}/>
+          <TweakColor label="主色" value={tweaks.accent} onChange={v => setTweak("accent", v)}/>
+        </TweakSection>
+        <TweakSection title="布局">
+          <TweakRadio label="导航位置" value={tweaks.navPosition} onChange={v => setTweak("navPosition", v)}
+            options={[{value:"sidebar", label:"左侧栏"}, {value:"top", label:"顶栏"}]}/>
+          <TweakRadio label="信息密度" value={tweaks.density} onChange={v => setTweak("density", v)}
+            options={[{value:"tight", label:"紧凑"}, {value:"comfortable", label:"舒适"}, {value:"loose", label:"宽松"}]}/>
+          <TweakRadio label="圆角" value={tweaks.radius} onChange={v => setTweak("radius", v)}
+            options={[{value:"sharp", label:"硬朗"}, {value:"default", label:"默认"}, {value:"soft", label:"圆润"}]}/>
+        </TweakSection>
+        <TweakSection title="排版">
+          <TweakSelect label="字体组合" value={tweaks.fontPair} onChange={v => setTweak("fontPair", v)}
+            options={[
+              {value:"inter+jb",    label:"Inter + JetBrains Mono"},
+              {value:"system+jb",   label:"系统字 + JetBrains Mono"},
+              {value:"garamond+jb", label:"Garamond + JetBrains Mono (实验)"},
+              {value:"inter+ibm",   label:"Inter + IBM Plex Mono"},
+            ]}/>
+        </TweakSection>
+        <TweakSection title="状态">
+          <TweakToggle label="顶栏显示训练状态" value={tweaks.showTrainStatus} onChange={v => setTweak("showTrainStatus", v)}/>
+        </TweakSection>
+        <TweakSection title="跳转">
+          <RouteJumper onJump={setRoute}/>
+        </TweakSection>
+      </TweaksPanel>
+    </div>
+  );
+}
+
+function routeLabel(r) {
+  return ({
+    "projects": "01 项目列表",
+    "project-overview": "02 项目概览",
+    "step:download": "03 下载",
+    "step:curate": "04 筛选",
+    "step:tag": "05 打标",
+    "step:edit": "06 标签编辑",
+    "step:reg": "07 正则集",
+    "step:train": "08 训练",
+    "queue": "09 队列",
+    "monitor": "10 监控",
+    "settings": "11 设置",
+    "presets": "12 预设",
+  })[r] || r;
+}
+
+function RouteJumper({ onJump }) {
+  const groups = [
+    { label: "全局", items: [["projects", "项目列表"], ["queue", "队列"], ["monitor", "监控仪表盘"], ["settings", "设置"]] },
+    { label: "项目", items: [["project-overview", "项目概览"]] },
+    { label: "流水线", items: [
+      ["step:download", "1 · 下载"],
+      ["step:curate", "2 · 筛选"],
+      ["step:tag", "3 · 打标"],
+      ["step:edit", "4 · 标签编辑"],
+      ["step:reg", "5 · 正则集"],
+      ["step:train", "6 · 训练"],
+    ]},
+  ];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {groups.map(g => (
+        <div key={g.label}>
+          <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--fg-tertiary)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>{g.label}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {g.items.map(([k, n]) => (
+              <button key={k} onClick={() => onJump(k)} style={{ padding: "3px 8px", border: "1px solid var(--border-default)", background: "var(--bg-surface)", borderRadius: "var(--r-md)", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-secondary)", cursor: "pointer" }}>{n}</button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TopNav({ active, onNav, project }) {
+  const items = [
+    ["projects", "项目"], ["project-overview", project.title], ["queue", "队列"], ["monitor", "监控"], ["settings", "设置"],
+  ];
+  return (
+    <header style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 20px", height: 44, borderBottom: "1px solid var(--border-subtle)", background: "var(--bg-sunken)" }}>
+      <div style={{ marginRight: 16 }}>
+        <svg width="22" height="22" viewBox="0 0 26 26"><rect x="2" y="2" width="22" height="22" rx="5" fill="var(--accent)"/><path d="M8 18 L13 7 L18 18" stroke="var(--accent-fg)" strokeWidth="2" fill="none" strokeLinejoin="round"/><line x1="10.5" y1="14" x2="15.5" y2="14" stroke="var(--accent-fg)" strokeWidth="2"/></svg>
+      </div>
+      {items.map(([k, n]) => (
+        <button key={k} onClick={() => onNav(k)} style={{ padding: "6px 12px", border: "none", borderRadius: "var(--r-md)", background: active === k ? "var(--bg-surface)" : "transparent", color: active === k ? "var(--fg-primary)" : "var(--fg-secondary)", fontSize: "var(--t-sm)", fontWeight: active === k ? 600 : 500, cursor: "pointer", boxShadow: active === k ? "var(--sh-sm)" : "none" }}>{n}</button>
+      ))}
+    </header>
+  );
+}
+
+function PresetsPage() {
+  return <div className="fade-in" style={{ padding: 24 }}>
+    <h1>预设管理 (mock)</h1>
+    <p style={{ color: "var(--fg-secondary)" }}>训练预设、打标预设、Booru 查询模板。</p>
+  </div>;
+}
+
+// — color utilities for accent shading —
+function hexToRgb(h) { h = h.replace("#", ""); if (h.length === 3) h = h.split("").map(c => c+c).join(""); return [0,2,4].map(i => parseInt(h.slice(i, i+2), 16)); }
+function rgbToHex(r, g, b) { return "#" + [r,g,b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join(""); }
+function shade(hex, pct) { const [r,g,b] = hexToRgb(hex); const k = (100 + pct) / 100; return rgbToHex(r * k, g * k, b * k); }
+function tint(hex, mix) { const [r,g,b] = hexToRgb(hex); return rgbToHex(r + (255 - r) * mix, g + (255 - g) * mix, b + (255 - b) * mix); }
+
+ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
+</script>
+</body>
+</html>
