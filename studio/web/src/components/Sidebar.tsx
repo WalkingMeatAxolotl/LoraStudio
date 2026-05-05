@@ -1,47 +1,190 @@
-import { useEffect, useState } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 
-interface Link {
-  to: string
-  label: string
-  icon: string
+// ── icons ──────────────────────────────────────────────────────────────────
+const I = {
+  folder:  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>,
+  queue:   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 12h10M4 18h16"/><circle cx="18" cy="12" r="2" fill="currentColor"/></svg>,
+  preset:  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="4" x2="6" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="18" y1="4" x2="18" y2="20"/><circle cx="6" cy="9" r="2" fill="var(--bg-sunken)"/><circle cx="12" cy="15" r="2" fill="var(--bg-sunken)"/><circle cx="18" cy="7" r="2" fill="var(--bg-sunken)"/></svg>,
+  monitor: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l4-6 4 3 5-9 5 7"/></svg>,
+  cog:     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
+  check:   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m4 12 5 5 11-12"/></svg>,
+  chevL:   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  chevR:   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 6l6 6-6 6"/></svg>,
+  download:<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>,
+  filter:  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18l-7 9v6l-4-2v-4z"/></svg>,
+  tag:     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 12 12 20l-9-9V3h8z"/><circle cx="7" cy="7" r="1.5" fill="currentColor"/></svg>,
+  edit:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21h4l11-11-4-4L3 17z"/><path d="m14 5 4 4"/></svg>,
+  reg:     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><circle cx="17.5" cy="17.5" r="3.5"/></svg>,
+  train:   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 18 9 12l4 4 8-9"/><path d="M15 7h6v6"/></svg>,
 }
 
-const main: Link[] = [
-  { to: '/', label: '项目', icon: '📁' },
-  { to: '/queue', label: '队列', icon: '🚦' },
+// ── logo ───────────────────────────────────────────────────────────────────
+function Logo({ collapsed }: { collapsed: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden>
+        <rect x="2" y="2" width="22" height="22" rx="5" fill="var(--accent)" />
+        <path d="M8 18 L13 7 L18 18" stroke="var(--accent-fg)" strokeWidth="2" fill="none" strokeLinejoin="round" strokeLinecap="round" />
+        <line x1="10.5" y1="14" x2="15.5" y2="14" stroke="var(--accent-fg)" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+      {!collapsed && (
+        <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
+          <span style={{ fontWeight: 600, fontSize: 'var(--t-md)', letterSpacing: '-0.01em' }}>Anima</span>
+          <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>lora studio · 0.4</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── nav item ───────────────────────────────────────────────────────────────
+interface NavItemProps {
+  to: string
+  label: string
+  icon: React.ReactNode
+  active: boolean
+  collapsed: boolean
+  end?: boolean
+}
+
+function NavItem({ to, label, icon, active, collapsed }: NavItemProps) {
+  return (
+    <Link
+      to={to}
+      title={collapsed ? label : undefined}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: collapsed ? '9px 0' : '8px 12px',
+        justifyContent: collapsed ? 'center' : 'flex-start',
+        borderRadius: 'var(--r-md)',
+        background: active ? 'var(--bg-surface)' : 'transparent',
+        color: active ? 'var(--fg-primary)' : 'var(--fg-secondary)',
+        fontSize: 'var(--t-sm)',
+        fontWeight: active ? 600 : 500,
+        boxShadow: active ? 'var(--sh-sm)' : 'none',
+        position: 'relative',
+        textDecoration: 'none',
+        transition: 'background 100ms ease, color 100ms ease',
+      }}
+      onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
+      onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+    >
+      {active && !collapsed && (
+        <span style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, background: 'var(--accent)', borderRadius: 2 }} />
+      )}
+      {icon}
+      {!collapsed && <span style={{ flex: 1 }}>{label}</span>}
+    </Link>
+  )
+}
+
+// ── project stepper nav ────────────────────────────────────────────────────
+interface StepperProps {
+  pid: string
+  vid: string | null
+  currentStep: string | null
+  collapsed: boolean
+}
+
+const STEPS = [
+  { key: 'download', label: '下载',     idx: '1', icon: I.download },
+  { key: 'curate',   label: '筛选',     idx: '2', icon: I.filter },
+  { key: 'tag',      label: '打标',     idx: '3', icon: I.tag },
+  { key: 'edit',     label: '标签编辑', idx: '4', icon: I.edit },
+  { key: 'reg',      label: '正则集',   idx: '5', icon: I.reg },
+  { key: 'train',    label: '训练',     idx: '6', icon: I.train },
 ]
 
-const tools: Link[] = [
-  { to: '/tools/presets', label: '预设', icon: '🎚' },
-  { to: '/tools/monitor', label: '监控', icon: '📊' },
-  { to: '/tools/settings', label: '设置', icon: '⚙️' },
-]
+function ProjectStepperNav({ pid, vid, currentStep, collapsed }: StepperProps) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 4px' }}>
+      {STEPS.map((s) => {
+        const isActive = s.key === currentStep
+        // derive href — download has no vid
+        const href = s.key === 'download'
+          ? `/projects/${pid}/download`
+          : vid ? `/projects/${pid}/v/${vid}/${s.key}` : null
 
-const SIDEBAR_OVERRIDE_KEY = 'studio.globalSidebar.expanded'
+        const status: 'active' | 'pending' = isActive ? 'active' : 'pending'
+        const dotBg = status === 'active' ? 'var(--accent-soft)' : 'var(--bg-overlay)'
+        const dotColor = status === 'active' ? 'var(--accent)' : 'var(--fg-tertiary)'
+
+        const inner = (
+          <>
+            <span style={{
+              width: 20, height: 20, borderRadius: '50%',
+              background: dotBg, color: dotColor,
+              display: 'grid', placeItems: 'center',
+              fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-mono)',
+              flexShrink: 0,
+            }}>
+              {s.idx}
+            </span>
+            {!collapsed && <span style={{ flex: 1, textAlign: 'left' }}>{s.label}</span>}
+            {!collapsed && isActive && <span className="dot dot-running" />}
+          </>
+        )
+
+        const commonStyle: React.CSSProperties = {
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: collapsed ? '7px 0' : '7px 10px',
+          justifyContent: collapsed ? 'center' : 'flex-start',
+          borderRadius: 'var(--r-md)',
+          background: isActive ? 'var(--bg-surface)' : 'transparent',
+          color: isActive ? 'var(--fg-primary)' : 'var(--fg-secondary)',
+          fontSize: 'var(--t-sm)', fontWeight: isActive ? 600 : 400,
+          boxShadow: isActive ? 'var(--sh-sm)' : 'none',
+          transition: 'background 100ms ease',
+          textDecoration: 'none',
+        }
+
+        if (!href) {
+          return (
+            <span key={s.key} title={collapsed ? `${s.idx}. ${s.label}` : undefined} style={{ ...commonStyle, opacity: 0.4, cursor: 'default' }}>
+              {inner}
+            </span>
+          )
+        }
+
+        return (
+          <Link
+            key={s.key}
+            to={href}
+            title={collapsed ? `${s.idx}. ${s.label}` : undefined}
+            style={commonStyle}
+            onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
+            onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+          >
+            {inner}
+          </Link>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── sidebar ────────────────────────────────────────────────────────────────
+const SIDEBAR_KEY = 'studio.sidebar.expanded'
 
 export default function Sidebar() {
-  const loc = useLocation()
-  const inProject =
-    loc.pathname.startsWith('/projects/') && loc.pathname !== '/projects/'
+  const location = useLocation()
 
-  // 默认：进项目页自动折叠成图标条；其它页展开。
-  // 用户手动点切换会写一个 session 级 override，刷新就清。
-  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(
-    () => {
-      try {
-        const v = sessionStorage.getItem(SIDEBAR_OVERRIDE_KEY)
-        return v === '1' ? true : v === '0' ? false : null
-      } catch {
-        return null
-      }
-    }
-  )
+  const pid = location.pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null
+  const vid = location.pathname.match(/\/v\/([^/]+)/)?.[1] ?? null
+  const stepMatch = location.pathname.match(/\/v\/[^/]+\/([^/]+)$/)
+  const currentStep = stepMatch?.[1] ?? (location.pathname.endsWith('/download') ? 'download' : null)
 
-  // 路由切换且没有 override 时，默认行为接管
-  useEffect(() => {
-    // intentionally not resetting override on every nav — let user keep it
-  }, [inProject])
+  const inProject = pid !== null
+
+  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(() => {
+    try {
+      const v = sessionStorage.getItem(SIDEBAR_KEY)
+      return v === '1' ? true : v === '0' ? false : null
+    } catch { return null }
+  })
 
   const expanded = expandedOverride ?? !inProject
   const collapsed = !expanded
@@ -49,91 +192,83 @@ export default function Sidebar() {
   const toggle = () => {
     const next = !expanded
     setExpandedOverride(next)
-    try {
-      sessionStorage.setItem(SIDEBAR_OVERRIDE_KEY, next ? '1' : '0')
-    } catch {
-      /* ignore */
-    }
+    try { sessionStorage.setItem(SIDEBAR_KEY, next ? '1' : '0') } catch { /* ignore */ }
   }
 
-  const linkClass = ({ isActive }: { isActive: boolean }): string =>
-    (collapsed
-      ? 'flex items-center justify-center w-9 h-9 mx-auto my-1 rounded text-base transition-colors '
-      : 'flex items-center gap-2 px-3 py-2 rounded text-sm transition-colors ') +
-    (isActive
-      ? 'bg-cyan-600/20 text-cyan-300'
-      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60')
+  const isMain = (path: string) => {
+    if (path === '/') return location.pathname === '/'
+    return location.pathname.startsWith(path)
+  }
 
   return (
-    <aside
-      className={
-        'shrink-0 flex flex-col border-r border-slate-800 transition-[width] duration-150 ' +
-        (collapsed ? 'w-12 py-2 px-0' : 'w-44 py-4 px-2')
-      }
-    >
-      {!collapsed ? (
-        <div className="px-3 mb-4 flex items-start">
-          <div className="flex-1 min-w-0">
-            <div className="text-base font-bold bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text text-transparent truncate">
-              AnimaStudio
-            </div>
-            <div className="text-[10px] text-slate-500 mt-0.5">v0.2</div>
-          </div>
+    <aside style={{
+      width: collapsed ? 'var(--sidebar-collapsed-w)' : 'var(--sidebar-w)',
+      flexShrink: 0,
+      background: 'var(--bg-sunken)',
+      borderRight: '1px solid var(--border-subtle)',
+      display: 'flex', flexDirection: 'column',
+      transition: 'width 160ms ease',
+      overflow: 'hidden',
+    }}>
+      {/* header / logo */}
+      <div style={{
+        height: 'var(--topbar-h)', padding: '0 14px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        borderBottom: '1px solid var(--border-subtle)',
+        flexShrink: 0,
+      }}>
+        <Logo collapsed={collapsed} />
+        {!collapsed && (
           <button
             onClick={toggle}
-            title="折叠侧栏"
-            className="text-slate-500 hover:text-slate-200 text-xs px-1"
+            title="折叠"
+            style={{ padding: 4, color: 'var(--fg-tertiary)', background: 'transparent', border: 'none', borderRadius: 4, cursor: 'pointer', display: 'flex' }}
           >
-            ‹
+            {I.chevL}
           </button>
-        </div>
-      ) : (
-        <button
-          onClick={toggle}
-          title="展开侧栏"
-          className="text-slate-500 hover:text-slate-200 text-xs h-6 mb-2"
-        >
-          ›
-        </button>
-      )}
-
-      <nav className="flex-1" aria-label="primary">
-        {main.map((l) => (
-          <NavLink
-            key={l.to}
-            to={l.to}
-            end
-            className={linkClass}
-            title={collapsed ? l.label : undefined}
-          >
-            <span aria-hidden>{l.icon}</span>
-            {!collapsed && <span>{l.label}</span>}
-          </NavLink>
-        ))}
-
-        {!collapsed ? (
-          <>
-            <div className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-wider text-slate-600 font-semibold">
-              工具
-            </div>
-            <div className="border-t border-slate-800 mb-1" />
-          </>
-        ) : (
-          <div className="mx-2 my-2 border-t border-slate-800" />
         )}
-        {tools.map((l) => (
-          <NavLink
-            key={l.to}
-            to={l.to}
-            end
-            className={linkClass}
-            title={collapsed ? l.label : undefined}
-          >
-            <span aria-hidden>{l.icon}</span>
-            {!collapsed && <span>{l.label}</span>}
-          </NavLink>
-        ))}
+      </div>
+
+      {/* main nav */}
+      <nav style={{ flex: 1, padding: collapsed ? '10px 6px' : '14px 10px', display: 'flex', flexDirection: 'column', gap: 2, overflowY: 'auto' }}>
+        <NavItem to="/" label="项目" icon={I.folder} active={!inProject && location.pathname === '/'} collapsed={collapsed} />
+        <NavItem to="/queue" label="队列" icon={I.queue} active={isMain('/queue')} collapsed={collapsed} />
+
+        {inProject && pid && (
+          <div style={{ marginTop: 10 }}>
+            {!collapsed && (
+              <div style={{ padding: '8px 10px 6px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>项目</span>
+                <span style={{ flex: 1, height: 1, background: 'var(--border-subtle)' }} />
+              </div>
+            )}
+            {!collapsed && (
+              <div style={{ padding: '6px 10px 8px', margin: '0 4px 6px', borderRadius: 'var(--r-md)', background: 'var(--bg-overlay)', fontSize: 'var(--t-sm)' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>
+                  {pid}{vid ? ` · v${vid}` : ''}
+                </div>
+              </div>
+            )}
+            <ProjectStepperNav pid={pid} vid={vid} currentStep={currentStep} collapsed={collapsed} />
+          </div>
+        )}
       </nav>
+
+      {/* tools + collapse toggle */}
+      <div style={{ padding: collapsed ? '8px 6px' : '10px', borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+        <NavItem to="/tools/presets" label="预设" icon={I.preset} active={isMain('/tools/presets')} collapsed={collapsed} />
+        <NavItem to="/tools/monitor" label="监控" icon={I.monitor} active={isMain('/tools/monitor')} collapsed={collapsed} />
+        <NavItem to="/tools/settings" label="设置" icon={I.cog} active={isMain('/tools/settings')} collapsed={collapsed} />
+        {collapsed && (
+          <button
+            onClick={toggle}
+            title="展开"
+            style={{ padding: 8, marginTop: 4, color: 'var(--fg-tertiary)', background: 'transparent', border: 'none', borderRadius: 4, cursor: 'pointer', display: 'flex', justifyContent: 'center' }}
+          >
+            {I.chevR}
+          </button>
+        )}
+      </div>
     </aside>
   )
 }
