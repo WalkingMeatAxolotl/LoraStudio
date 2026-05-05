@@ -10,6 +10,7 @@ import {
   type VersionConfigResponse,
 } from '../../../api/client'
 import SchemaForm from '../../../components/SchemaForm'
+import StepShell from '../../../components/StepShell'
 import { useToast } from '../../../components/Toast'
 
 // 全局模型字段来自全局设置，对版本维度只读
@@ -174,55 +175,65 @@ export default function TrainPage() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full gap-3">
-      <header className="flex items-baseline gap-2 flex-wrap shrink-0">
-        <h2 className="text-base font-semibold">⑥ 训练</h2>
-        <span className="text-xs text-slate-500">
-          选预设 → 编辑 config（项目特定字段自动填）→ 入队
-        </span>
-      </header>
+    <StepShell
+      idx={6}
+      title="训练"
+      subtitle="选预设 → 编辑 config（项目特定字段自动填）→ 入队"
+      actions={
+        <>
+          <button
+            onClick={() => void onSaveConfig()}
+            disabled={busy || !dirty}
+            className="btn btn-secondary btn-sm"
+          >
+            {dirty ? '保存配置' : '已保存'}
+          </button>
+          <button
+            onClick={() => void onEnqueue()}
+            disabled={busy || !configResp?.has_config}
+            className="btn btn-primary"
+          >
+            开始训练
+          </button>
+        </>
+      }
+    >
+    <div className="flex flex-col h-full gap-3" style={{ padding: '16px 24px' }}>
 
-      <section className="rounded-lg border border-slate-700 bg-slate-800/40 p-3 flex flex-wrap items-center gap-3 text-xs shrink-0">
-        <span className="text-slate-400">当前预设来源</span>
-        <span className="font-mono text-cyan-300">
+      {/* 预设选择控制栏 */}
+      <section style={{
+        borderRadius: 'var(--r-md)',
+        border: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)',
+        padding: '10px 14px',
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10,
+        flexShrink: 0,
+        fontSize: 'var(--t-sm)',
+      }}>
+        <span style={{ color: 'var(--fg-tertiary)' }}>当前预设</span>
+        <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>
           {activeVersion.config_name ?? '(未选)'}
         </span>
-        <span className="text-slate-700">|</span>
-        <span className="text-slate-400">换一个预设</span>
+        <span style={{ color: 'var(--border-default)' }}>|</span>
+        <span style={{ color: 'var(--fg-tertiary)' }}>换预设</span>
         <select
           value=""
           onChange={(e) => void onForkPreset(e.target.value)}
           disabled={busy || presets.length === 0}
-          className="px-2 py-1 rounded bg-slate-950 border border-slate-700"
+          className="input"
+          style={{ padding: '3px 8px', fontSize: 'var(--t-sm)' }}
         >
           <option value="">— 选预设 —</option>
           {presets.map((p) => (
-            <option key={p.name} value={p.name}>
-              {p.name}
-            </option>
+            <option key={p.name} value={p.name}>{p.name}</option>
           ))}
         </select>
         <button
           onClick={() => void onSaveAsPreset()}
           disabled={busy || !configResp?.has_config}
-          className="px-2 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-40"
+          className="btn btn-ghost btn-sm"
         >
-          保存为新预设
-        </button>
-        <span className="flex-1" />
-        <button
-          onClick={() => void onSaveConfig()}
-          disabled={busy || !dirty}
-          className="px-3 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-40"
-        >
-          {dirty ? '保存配置' : '已保存'}
-        </button>
-        <button
-          onClick={() => void onEnqueue()}
-          disabled={busy || !configResp?.has_config}
-          className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white disabled:bg-slate-700 disabled:text-slate-500"
-        >
-          开始训练
+          另存为新预设
         </button>
       </section>
 
@@ -247,6 +258,7 @@ export default function TrainPage() {
         <ConfigSkeleton />
       )}
     </div>
+    </StepShell>
   )
 }
 

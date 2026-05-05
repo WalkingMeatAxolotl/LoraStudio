@@ -99,8 +99,41 @@ const STEPS = [
 ]
 
 function ProjectStepperNav({ pid, vid, currentStep, collapsed }: StepperProps) {
+  const overviewActive = currentStep === null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 4px' }}>
+      {/* 概览 — 始终可点；在步骤页是回到概览的唯一入口 */}
+      <Link
+        to={`/projects/${pid}`}
+        title={collapsed ? '概览' : undefined}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: collapsed ? '7px 0' : '7px 10px',
+          justifyContent: collapsed ? 'center' : 'flex-start',
+          borderRadius: 'var(--r-md)',
+          background: overviewActive ? 'var(--bg-surface)' : 'transparent',
+          color: overviewActive ? 'var(--fg-primary)' : 'var(--fg-secondary)',
+          fontSize: 'var(--t-sm)', fontWeight: overviewActive ? 600 : 400,
+          boxShadow: overviewActive ? 'var(--sh-sm)' : 'none',
+          textDecoration: 'none',
+          transition: 'background 100ms ease',
+          marginBottom: 4,
+        }}
+        onMouseEnter={(e) => { if (!overviewActive) (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
+        onMouseLeave={(e) => { if (!overviewActive) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+      >
+        <span style={{
+          width: 20, height: 20, borderRadius: '50%',
+          background: overviewActive ? 'var(--accent-soft)' : 'var(--bg-overlay)',
+          color: overviewActive ? 'var(--accent)' : 'var(--fg-tertiary)',
+          display: 'grid', placeItems: 'center',
+          fontSize: 12, flexShrink: 0,
+        }}>
+          ≡
+        </span>
+        {!collapsed && <span style={{ flex: 1 }}>概览</span>}
+      </Link>
+
       {STEPS.map((s) => {
         const isActive = s.key === currentStep
         // derive href — download has no vid

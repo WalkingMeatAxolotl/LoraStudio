@@ -12,6 +12,7 @@ import {
 import ImageGrid from '../../../components/ImageGrid'
 import ImagePreviewModal from '../../../components/ImagePreviewModal'
 import JobProgress from '../../../components/JobProgress'
+import StepShell from '../../../components/StepShell'
 import { useToast } from '../../../components/Toast'
 import { useEventStream } from '../../../lib/useEventStream'
 
@@ -186,13 +187,21 @@ export default function RegularizationPage() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full gap-3">
-      <header className="flex items-baseline gap-2 flex-wrap shrink-0">
-        <h2 className="text-base font-semibold">⑤ 正则集</h2>
-        <span className="text-xs text-slate-500">
-          基于 train tag 分布拉「相似但不同」的正则图 · 镜像 train 子文件夹到 reg/
-        </span>
-      </header>
+    <StepShell
+      idx={5}
+      title="正则集"
+      subtitle="基于 train tag 分布拉「相似但不同」的正则图，镜像 train 子文件夹到 reg/"
+      actions={
+        <button
+          onClick={() => void startBuild(false)}
+          disabled={isLive || trainImageCount <= 0}
+          className="btn btn-primary"
+        >
+          {isLive ? '生成中…' : '开始生成'}
+        </button>
+      }
+    >
+    <div className="flex flex-col h-full gap-3" style={{ padding: '16px 24px' }}>
 
       <RegStatusBar
         reg={reg}
@@ -234,13 +243,6 @@ export default function RegularizationPage() {
             {advancedOpen ? '⌃ 进阶' : '⌄ 进阶'}
           </button>
           <span className="flex-1" />
-          <button
-            onClick={() => void startBuild(false)}
-            disabled={isLive || trainImageCount <= 0}
-            className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white disabled:bg-slate-700 disabled:text-slate-500"
-          >
-            {isLive ? '生成中...' : '开始生成'}
-          </button>
         </div>
 
         {advancedOpen && (
@@ -296,6 +298,7 @@ export default function RegularizationPage() {
         />
       )}
     </div>
+    </StepShell>
   )
 }
 
