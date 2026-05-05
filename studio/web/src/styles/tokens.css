@@ -128,6 +128,12 @@
 
 * { box-sizing: border-box; }
 
+html {
+  /* UI 整体缩放 — 110% 让 14px 基础字号在常规屏幕下更易读
+   * 如需调整：zoom: 1.0 = 100%, zoom: 1.2 = 120% */
+  zoom: 1.1;
+}
+
 html, body, #app {
   margin: 0; padding: 0;
   height: 100%;
