@@ -149,6 +149,10 @@ def _download_with_client(
     failed = 0
     page = 1
     api_limit = 100 if opts.api_source == "gelbooru" else 200
+    # 跨 worker 线程共享的「已 emit」计数器，仅供 _fetch_one 实时打 [N/count] 用。
+    # 与主线程的 `saved` 在正常路径会一致；retry / 失败时 emitted 不增。
+    emit_lock = threading.Lock()
+    emit_state = {"n": 0}
 
     while saved < opts.count:
         if cancel_event and cancel_event.is_set():
@@ -202,13 +206,21 @@ def _download_with_client(
                 if cancel_event and cancel_event.is_set():
                     raise RuntimeError("canceled")
                 try:
-                    return client.download_image(
+                    final = client.download_image(
                         file_url,
                         target,
                         convert_to_png=opts.convert_to_png,
                         remove_alpha_channel=opts.remove_alpha_channel,
                         referer=referer,
                     )
+                    # 实时进度（worker 线程内）：每张拉完立即 emit，让 LogTailer
+                    # 把 SSE 推到前端。否则 parallel_download 会一直阻塞，整段
+                    # 下载阶段没有日志，前端看上去像「卡住」。
+                    with emit_lock:
+                        emit_state["n"] += 1
+                        n = emit_state["n"]
+                    on_progress(f"[{n}/{opts.count}] saved {final.name}")
+                    return final
                 except requests.RequestException as exc:
                     last_exc = exc
                     backoff = 2 ** (attempt - 1)
@@ -228,6 +240,10 @@ def _download_with_client(
                 on_progress("[cancel] user requested stop")
                 return saved
             if exc is not None:
+                # 取消引发的 RuntimeError("canceled") 在 _fetch_one 里抛出，
+                # 不当成「下载失败」report，否则用户取消会看到一堆 [err]。
+                if isinstance(exc, RuntimeError) and "canceled" in str(exc):
+                    continue
                 on_progress(f"[err] {target.name}: {exc}")
                 failed += 1
                 continue
@@ -239,7 +255,7 @@ def _download_with_client(
             if on_image_saved:
                 on_image_saved(final)
             saved += 1
-            on_progress(f"[{saved}/{opts.count}] saved {final.name}")
+            # 进度行已在 _fetch_one 内实时 emit，这里只做账面计数 / 提前 break。
             if saved >= opts.count:
                 break
 
