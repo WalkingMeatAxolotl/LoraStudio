@@ -25,11 +25,7 @@ function fmtSize(b: number): string {
 }
 
 export default function SaveBar({
-  pid,
-  vid,
-  dirtyCount,
-  onSave,
-  onAfterRestore,
+  pid, vid, dirtyCount, onSave, onAfterRestore,
 }: Props) {
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
@@ -39,16 +35,11 @@ export default function SaveBar({
   const ref = useRef<HTMLDivElement>(null)
 
   const refresh = useCallback(async () => {
-    try {
-      setItems(await api.listCaptionSnapshots(pid, vid))
-    } catch (e) {
-      toast(String(e), 'error')
-    }
+    try { setItems(await api.listCaptionSnapshots(pid, vid)) }
+    catch (e) { toast(String(e), 'error') }
   }, [pid, vid, toast])
 
-  useEffect(() => {
-    if (open) void refresh()
-  }, [open, refresh])
+  useEffect(() => { if (open) void refresh() }, [open, refresh])
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -60,63 +51,42 @@ export default function SaveBar({
 
   const save = async () => {
     setSaving(true)
-    try {
-      await onSave()
-    } finally {
-      setSaving(false)
-    }
+    try { await onSave() } finally { setSaving(false) }
   }
 
   const restore = async (sid: string) => {
-    if (
-      !confirm(
-        '还原会覆盖当前所有 caption（含未保存的本地改动）。确定？'
-      )
-    )
-      return
+    if (!confirm('还原会覆盖当前所有 caption（含未保存的本地改动）。确定？')) return
     setBusyId(sid)
     try {
       const r = await api.restoreCaptionSnapshot(pid, vid, sid)
       toast(`已还原（写入 ${r.written}，删旧 ${r.removed_old}）`, 'success')
       await onAfterRestore()
-    } catch (e) {
-      toast(String(e), 'error')
-    } finally {
-      setBusyId(null)
-    }
+    } catch (e) { toast(String(e), 'error') }
+    finally { setBusyId(null) }
   }
 
   const del = async (sid: string) => {
     if (!confirm(`删除还原点 ${sid}？此操作不可撤销。`)) return
     setBusyId(sid)
-    try {
-      await api.deleteCaptionSnapshot(pid, vid, sid)
-      await refresh()
-    } catch (e) {
-      toast(String(e), 'error')
-    } finally {
-      setBusyId(null)
-    }
+    try { await api.deleteCaptionSnapshot(pid, vid, sid); await refresh() }
+    catch (e) { toast(String(e), 'error') }
+    finally { setBusyId(null) }
   }
 
   return (
-    <div className="relative" ref={ref}>
-      <div className="flex items-center gap-1">
+    <div style={{ position: 'relative' }} ref={ref}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <button
           onClick={save}
           disabled={saving || dirtyCount === 0}
-          className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs"
+          className={dirtyCount > 0 ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
           title="把本地编辑写入磁盘；写之前自动生成还原点"
         >
-          {saving
-            ? '保存中...'
-            : dirtyCount > 0
-              ? `💾 保存（${dirtyCount}）`
-              : '💾 已保存'}
+          {saving ? '保存中…' : dirtyCount > 0 ? `💾 保存（${dirtyCount}）` : '💾 已保存'}
         </button>
         <button
           onClick={() => setOpen(!open)}
-          className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs"
+          className="btn btn-ghost btn-sm"
         >
           🕒 还原点
         </button>
@@ -124,39 +94,54 @@ export default function SaveBar({
 
       {open && (
         <div
-          className="absolute right-0 top-full mt-1 w-80 max-h-80 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 shadow-lg z-30"
           role="dialog"
           aria-label="snapshot-list"
+          style={{
+            position: 'absolute', right: 0, top: 'calc(100% + 4px)',
+            width: 320, maxHeight: 320, overflowY: 'auto',
+            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-elevated)', boxShadow: 'var(--sh-xl)',
+            zIndex: 30,
+          }}
         >
           {items.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-slate-500">
+            <p style={{ padding: '12px 14px', fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>
               还没有还原点。每次「保存」会自动生成一个。
             </p>
           ) : (
-            <ul className="divide-y divide-slate-800">
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {items.map((s) => (
                 <li
                   key={s.id}
-                  className="px-3 py-2 text-xs flex items-center gap-2"
+                  style={{
+                    padding: '8px 12px', fontSize: 'var(--t-xs)',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    borderBottom: '1px solid var(--border-subtle)',
+                  }}
                 >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-slate-200">{fmtTime(s.created_at)}</div>
-                    <div className="text-slate-500 text-[10px]">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: 'var(--fg-primary)', fontFamily: 'var(--font-mono)' }}>
+                      {fmtTime(s.created_at)}
+                    </div>
+                    <div style={{ color: 'var(--fg-tertiary)', fontSize: '10px', marginTop: 2 }}>
                       {s.file_count} 文件 · {fmtSize(s.size)}
                     </div>
                   </div>
                   <button
                     onClick={() => restore(s.id)}
                     disabled={busyId === s.id}
-                    className="px-2 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 text-white"
+                    className="btn btn-primary btn-sm"
                   >
                     还原
                   </button>
                   <button
                     onClick={() => del(s.id)}
                     disabled={busyId === s.id}
-                    className="px-1.5 py-0.5 rounded text-slate-500 hover:text-red-300"
+                    className="btn btn-ghost btn-sm"
                     aria-label="删除"
+                    style={{ color: 'var(--fg-tertiary)' }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--err)' }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--fg-tertiary)' }}
                   >
                     ✕
                   </button>

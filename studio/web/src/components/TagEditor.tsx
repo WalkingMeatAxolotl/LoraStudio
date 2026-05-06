@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 interface Props {
   tags: string[]
@@ -12,28 +12,27 @@ interface Props {
 type Mode = 'chip' | 'text'
 
 const parseLine = (raw: string): string[] =>
-  raw
-    .split(/[,，\n]/)
-    .map((t) => t.trim())
-    .filter(Boolean)
+  raw.split(/[,，\n]/).map((t) => t.trim()).filter(Boolean)
 
 export default function TagEditor({
-  tags,
-  natural,
-  onChange,
-  onSave,
-  saving,
-  dirty,
+  tags, natural, onChange, onSave, saving, dirty,
 }: Props) {
   const [draft, setDraft] = useState('')
   const tagsJoined = useMemo(() => tags.join(', '), [tags])
   const [mode, setMode] = useState<Mode>(natural ? 'text' : 'chip')
   const [textBuf, setTextBuf] = useState(() => tagsJoined)
 
+  // Reset draft when image switches
   useEffect(() => { setDraft('') }, [tags])
+
+  // Sync textBuf when tags change WHILE in text mode (image switch)
+  const prevTagsJoinedRef = useRef(tagsJoined)
   useEffect(() => {
-    if (mode === 'text') setTextBuf(tagsJoined)
-  }, [mode, tagsJoined])
+    if (mode === 'text' && tagsJoined !== prevTagsJoinedRef.current) {
+      setTextBuf(tagsJoined)
+    }
+    prevTagsJoinedRef.current = tagsJoined
+  }, [tagsJoined, mode])
 
   const addTag = (raw: string) => {
     const t = raw.trim().replace(/^[,，]+|[,，]+$/g, '')
@@ -57,6 +56,18 @@ export default function TagEditor({
     if (JSON.stringify(next) !== JSON.stringify(tags)) onChange(next)
   }
 
+  const switchToText = () => {
+    if (mode === 'text') return
+    setTextBuf(tagsJoined) // sync immediately, no double-render via effect
+    setMode('text')
+  }
+
+  const switchToChip = () => {
+    if (mode === 'chip') return
+    commitText()
+    setMode('chip')
+  }
+
   if (natural) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 }}>
@@ -65,7 +76,7 @@ export default function TagEditor({
           onChange={(e) => onChange([e.target.value])}
           placeholder="自然语言 caption..."
           className="input input-mono"
-          style={{ flex: 1, minHeight: 180, resize: 'none', fontSize: 'var(--t-sm)' }}
+          style={{ flex: 1, resize: 'none', fontSize: 'var(--t-sm)' }}
         />
         {onSave && (
           <button
@@ -82,26 +93,22 @@ export default function TagEditor({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0 }}>
       {/* mode switch */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-2xs)', flexShrink: 0 }}>
-        <span style={{ color: 'var(--fg-tertiary)' }}>编辑模式</span>
-        <ModeBtn active={mode === 'chip'} onClick={() => { if (mode === 'text') commitText(); setMode('chip') }}>
-          chip
-        </ModeBtn>
-        <ModeBtn active={mode === 'text'} onClick={() => setMode('text')}>
-          文本
-        </ModeBtn>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-xs)', flexShrink: 0 }}>
+        <ModeBtn active={mode === 'chip'} onClick={switchToChip}>chip</ModeBtn>
+        <ModeBtn active={mode === 'text'} onClick={switchToText}>文本</ModeBtn>
         <span style={{ flex: 1 }} />
         <span style={{ color: 'var(--fg-tertiary)' }}>{tags.length} tag</span>
       </div>
 
+      {/* content area — both modes use flex:1 so no height jitter */}
       {mode === 'chip' ? (
         <>
-          {/* chip list */}
           <div style={{
             display: 'flex', flexWrap: 'wrap', gap: 4,
             overflowY: 'auto', flex: 1, minHeight: 0, alignContent: 'flex-start',
+            padding: '4px 0',
           }}>
             {tags.length === 0 && (
               <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>还没有标签</span>
@@ -134,7 +141,6 @@ export default function TagEditor({
               </span>
             ))}
           </div>
-          {/* add input */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <input
               value={draft}
@@ -169,10 +175,10 @@ export default function TagEditor({
             onBlur={commitText}
             placeholder="逗号 / 换行分隔，失焦自动同步"
             className="input input-mono"
-            style={{ flex: 1, minHeight: 160, resize: 'none', fontSize: 'var(--t-xs)' }}
+            style={{ flex: 1, resize: 'none', fontSize: 'var(--t-xs)' }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <button onClick={commitText} className="btn btn-secondary btn-sm">同步</button>
+            <button onClick={commitText} className="btn btn-ghost btn-sm">同步</button>
             {onSave && (
               <button
                 disabled={saving || !dirty}
@@ -189,7 +195,9 @@ export default function TagEditor({
   )
 }
 
-function ModeBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function ModeBtn({ active, onClick, children }: {
+  active: boolean; onClick: () => void; children: React.ReactNode
+}) {
   return (
     <button
       onClick={onClick}
@@ -198,7 +206,7 @@ function ModeBtn({ active, onClick, children }: { active: boolean; onClick: () =
         background: active ? 'var(--accent)' : 'var(--bg-overlay)',
         border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
         color: active ? 'var(--accent-fg)' : 'var(--fg-secondary)',
-        fontSize: 'var(--t-2xs)', cursor: 'pointer',
+        fontSize: 'var(--t-xs)', cursor: 'pointer',
       }}
       onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)' }}
       onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}

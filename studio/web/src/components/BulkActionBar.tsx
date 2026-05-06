@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import TagAutocomplete from './TagAutocomplete'
 import { useToast } from './Toast'
 
 type ScopeKind = 'selected' | 'all'
@@ -11,15 +12,18 @@ interface Props {
   tagSuggestions?: string[]
   defaultScope?: ScopeKind
   onClearSelection?: () => void
+  // filter/select controls (moved from sidebar)
+  filterTag: string
+  onFilterTagChange: (v: string) => void
+  totalCount: number
+  filteredCount: number
+  onSelectAll: () => void
 }
 
 export default function BulkActionBar({
-  cache,
-  selectedKeys,
-  onApply,
-  tagSuggestions = [],
-  defaultScope = 'selected',
-  onClearSelection,
+  cache, selectedKeys, onApply,
+  tagSuggestions = [], defaultScope = 'selected', onClearSelection,
+  filterTag, onFilterTagChange, totalCount, filteredCount, onSelectAll,
 }: Props) {
   const { toast } = useToast()
   const [openOp, setOpenOp] = useState<Op | null>(null)
@@ -33,10 +37,8 @@ export default function BulkActionBar({
     setOpenOp(null); setTagsInput(''); setOldTag(''); setNewTag('')
   }
 
-  const targetKeys = (): string[] => {
-    if (scope === 'selected') return selectedKeys
-    return Array.from(cache.keys())
-  }
+  const targetKeys = (): string[] =>
+    scope === 'selected' ? selectedKeys : Array.from(cache.keys())
 
   const parseTags = (raw: string): string[] =>
     raw.split(/[,，\n]/).map((t) => t.trim()).filter(Boolean)
@@ -57,8 +59,7 @@ export default function BulkActionBar({
           const have = new Set(cur)
           const toAdd = ts.filter((t) => !have.has(t))
           if (toAdd.length === 0) continue
-          const next = position === 'front' ? [...toAdd, ...cur] : [...cur, ...toAdd]
-          updates.set(k, next)
+          updates.set(k, position === 'front' ? [...toAdd, ...cur] : [...cur, ...toAdd])
         } else {
           const drop = new Set(ts)
           const next = cur.filter((t) => !drop.has(t))
@@ -83,8 +84,7 @@ export default function BulkActionBar({
     } else if (op === 'dedupe') {
       for (const k of keys) {
         const cur = cache.get(k) ?? []
-        const seen = new Set<string>()
-        const next: string[] = []
+        const seen = new Set<string>(); const next: string[] = []
         for (const t of cur) { if (seen.has(t)) continue; seen.add(t); next.push(t) }
         if (next.length !== cur.length) updates.set(k, next)
       }
@@ -96,7 +96,6 @@ export default function BulkActionBar({
     closePopover()
   }
 
-  const scopeLabel = scope === 'selected' ? `选中 ${selectedKeys.length}` : `全部 ${cache.size}`
   const isSelected = scope === 'selected'
   const opDisabled = isSelected && selectedKeys.length === 0
 
@@ -107,8 +106,53 @@ export default function BulkActionBar({
       display: 'flex', flexDirection: 'column', gap: 6,
       fontSize: 'var(--t-xs)', flexShrink: 0,
     }}>
-      {/* top row: scope + buttons */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      {/* Main row: filter + select + bulk ops */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        {/* Filter section */}
+        <TagAutocomplete
+          value={filterTag}
+          onChange={onFilterTagChange}
+          suggestions={tagSuggestions}
+          placeholder="搜索 tag（精确）"
+          style={{ width: 180 }}
+        />
+        {filterTag && (
+          <button
+            onClick={() => onFilterTagChange('')}
+            className="btn btn-ghost btn-sm"
+            style={{ padding: '2px 6px' }}
+          >
+            ✕
+          </button>
+        )}
+        <span style={{
+          color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)',
+          fontSize: 'var(--t-xs)', minWidth: 40,
+        }}>
+          {filterTag ? `${filteredCount}/${totalCount}` : totalCount}
+        </span>
+
+        <span style={{ color: 'var(--border-default)' }}>|</span>
+
+        {/* Selection section */}
+        <button
+          onClick={onSelectAll}
+          disabled={filteredCount === 0}
+          className="btn btn-ghost btn-sm"
+        >
+          全选
+        </button>
+        <button
+          onClick={onClearSelection}
+          disabled={selectedKeys.length === 0}
+          className="btn btn-ghost btn-sm"
+        >
+          清空 ({selectedKeys.length})
+        </button>
+
+        <span style={{ color: 'var(--border-default)' }}>|</span>
+
+        {/* Scope + bulk ops section */}
         <span style={{ color: 'var(--fg-tertiary)' }}>范围</span>
         <select
           value={scope}
@@ -121,19 +165,30 @@ export default function BulkActionBar({
         </select>
 
         <span style={{ color: 'var(--border-default)' }}>|</span>
-        <OpBtn label="+ 加 tag" active={openOp === 'add'} disabled={opDisabled} onClick={() => setOpenOp(openOp === 'add' ? null : 'add')} />
-        <OpBtn label="- 删 tag" active={openOp === 'remove'} disabled={opDisabled} onClick={() => setOpenOp(openOp === 'remove' ? null : 'remove')} />
-        <OpBtn label="↔ replace" active={openOp === 'replace'} disabled={opDisabled} onClick={() => setOpenOp(openOp === 'replace' ? null : 'replace')} />
+
+        <OpBtn label="+ 加 tag" active={openOp === 'add'} disabled={opDisabled}
+          onClick={() => setOpenOp(openOp === 'add' ? null : 'add')} />
+        <OpBtn label="- 删 tag" active={openOp === 'remove'} disabled={opDisabled}
+          onClick={() => setOpenOp(openOp === 'remove' ? null : 'remove')} />
+        <OpBtn label="↔ replace" active={openOp === 'replace'} disabled={opDisabled}
+          onClick={() => setOpenOp(openOp === 'replace' ? null : 'replace')} />
         <OpBtn label="dedupe" disabled={opDisabled} onClick={() => apply('dedupe')} />
 
         <span style={{ flex: 1 }} />
-        <span style={{ color: 'var(--fg-tertiary)' }}>{scopeLabel}</span>
-        {onClearSelection && selectedKeys.length > 0 && (
-          <button onClick={onClearSelection} className="btn btn-ghost btn-sm">✕ 清空</button>
+
+        {selectedKeys.length > 0 && (
+          <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
+            已选 {selectedKeys.length} 张
+          </span>
         )}
       </div>
 
-      {/* popover row */}
+      {/* Hint row */}
+      <div style={{ color: 'var(--fg-tertiary)', fontSize: '11px' }}>
+        alt+点击 = 查看大图并编辑 · 普通点击 = 多选
+      </div>
+
+      {/* Popover row */}
       {openOp && openOp !== 'dedupe' && (
         <div
           style={{
@@ -145,7 +200,8 @@ export default function BulkActionBar({
           aria-label={`bulk-${openOp}`}
         >
           {(openOp === 'add' || openOp === 'remove') && (
-            <TagsField value={tagsInput} onChange={setTagsInput} placeholder="tag1, tag2 (逗号分隔)" suggestions={tagSuggestions} />
+            <TagsField value={tagsInput} onChange={setTagsInput}
+              placeholder="tag1, tag2 (逗号分隔)" suggestions={tagSuggestions} />
           )}
           {openOp === 'add' && (
             <select
@@ -173,7 +229,9 @@ export default function BulkActionBar({
   )
 }
 
-function OpBtn({ label, onClick, disabled, active }: { label: string; onClick: () => void; disabled?: boolean; active?: boolean }) {
+function OpBtn({ label, onClick, disabled, active }: {
+  label: string; onClick: () => void; disabled?: boolean; active?: boolean
+}) {
   return (
     <button
       onClick={onClick}
@@ -186,15 +244,27 @@ function OpBtn({ label, onClick, disabled, active }: { label: string; onClick: (
         fontSize: 'var(--t-xs)', cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.4 : 1,
       }}
-      onMouseEnter={(e) => { if (!disabled && !active) { (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'; (e.currentTarget as HTMLElement).style.color = 'var(--fg-primary)' } }}
-      onMouseLeave={(e) => { if (!disabled && !active) { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)'; (e.currentTarget as HTMLElement).style.color = 'var(--fg-secondary)' } }}
+      onMouseEnter={(e) => {
+        if (!disabled && !active) {
+          (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'
+          ;(e.currentTarget as HTMLElement).style.color = 'var(--fg-primary)'
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!disabled && !active) {
+          (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)'
+          ;(e.currentTarget as HTMLElement).style.color = 'var(--fg-secondary)'
+        }
+      }}
     >
       {label}
     </button>
   )
 }
 
-interface TagsFieldProps { value: string; onChange: (v: string) => void; placeholder: string; suggestions: string[] }
+interface TagsFieldProps {
+  value: string; onChange: (v: string) => void; placeholder: string; suggestions: string[]
+}
 
 function TagsField({ value, onChange, placeholder, suggestions }: TagsFieldProps) {
   const [open, setOpen] = useState(false)
@@ -234,7 +304,7 @@ function TagsField({ value, onChange, placeholder, suggestions }: TagsFieldProps
       {open && matches.length > 0 && (
         <ul
           style={{
-            position: 'absolute', left: 0, top: '100%', marginTop: 2, zIndex: 20,
+            position: 'absolute', left: 0, top: '100%', marginTop: 2, zIndex: 30,
             background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
             borderRadius: 'var(--r-sm)', boxShadow: 'var(--sh-lg)',
             maxHeight: 180, overflowY: 'auto', minWidth: 200,
