@@ -1,6 +1,6 @@
 # 样式统一计划：Tailwind + Token 系统
 
-> **最后更新：** 2026-05-06（每次提交后同步修改本文件）
+> **最后更新：** 2026-05-06 batch-2 全部完成（每次提交后同步修改本文件）
 >
 > **目标：** 消灭双轨制样式（Tailwind 原生色值 vs CSS 变量内联 style），统一为
 > **Tailwind 工具类 + token 变量映射**，为暗色模式和字号调整做准备。
@@ -198,27 +198,27 @@ darkMode: ['class', '.theme-dark'],
 
 ---
 
-### 批次 2：已重写组件（CSS 变量 → Tailwind 类）
+### 批次 2：已重写组件（CSS 变量 → Tailwind 类）✅ 完成
 
 这些组件已用 CSS 变量，迁移是将 `style={{ ... }}` 改成 `className="..."`，不改视觉效果：
 
 | 组件 | 当前状态 | 优先级 | 进度 |
 |------|---------|--------|------|
-| `SaveBar.tsx` | CSS 变量内联 | 中 | ⬜ |
-| `BulkActionBar.tsx` | CSS 变量内联 | 中 | ⬜ |
-| `TagEditor.tsx` | CSS 变量内联 | 中 | ⬜ |
-| `TagAutocomplete.tsx` | CSS 变量内联 | 中 | ⬜ |
-| `TagStatsPanel.tsx` | CSS 变量内联 | 低 | ⬜ |
-| `StepShell.tsx` | CSS 变量内联（少量） | 低 | ⬜ |
-| `ProjectStepper.tsx` | CSS 变量内联 | 低 | ⬜ |
-| `StageBadge.tsx` | CSS 变量内联 | 低 | ⬜ |
-| `Sidebar.tsx` | CSS 变量内联（复杂） | 低 | ⬜ |
-| `Topbar.tsx` | CSS 变量内联 | 低 | ⬜ |
-| `PageHeader.tsx` | CSS 变量内联 | 低 | ⬜ |
-| `MonitorDashboard.tsx` | CSS 变量内联 | 低 | ⬜ |
-| `SchemaForm.tsx` | CSS 变量内联 | 低 | ⬜ |
-| `PathPicker.tsx` | CSS 变量内联 | 低 | ⬜ |
-| `Field.tsx` | 混用（Tailwind flex + CSS 变量） | 中 | ⬜ |
+| `SaveBar.tsx` | CSS 变量内联 | 中 | ✅ |
+| `BulkActionBar.tsx` | CSS 变量内联 | 中 | ✅ |
+| `TagEditor.tsx` | CSS 变量内联 | 中 | ✅ |
+| `TagAutocomplete.tsx` | CSS 变量内联 | 中 | ✅ |
+| `TagStatsPanel.tsx` | CSS 变量内联 | 低 | ✅ |
+| `StepShell.tsx` | CSS 变量内联（少量） | 低 | ✅ |
+| `ProjectStepper.tsx` | CSS 变量内联 | 低 | ✅ |
+| `StageBadge.tsx` | CSS 变量内联 | 低 | ✅ |
+| `Sidebar.tsx` | CSS 变量内联（复杂） | 低 | ✅ |
+| `Topbar.tsx` | CSS 变量内联 | 低 | ✅ |
+| `PageHeader.tsx` | CSS 变量内联 | 低 | ✅ |
+| `MonitorDashboard.tsx` | CSS 变量内联 | 低 | ✅ |
+| `SchemaForm.tsx` | CSS 变量内联 | 低 | ✅ |
+| `PathPicker.tsx` | CSS 变量内联 | 低 | ✅ |
+| `Field.tsx` | 混用（Tailwind flex + CSS 变量） | 中 | ✅ |
 
 ---
 
@@ -338,16 +338,21 @@ className="badge badge-ok"
 | `7cfb32a` | TagEdit 布局重写、StepShell overflow 修复、BulkActionBar/TagAutocomplete/SaveBar/TagEditor 全部改用 CSS 变量（去掉 Tailwind 原生黑色系） |
 | `6527fde` | cli.py onnxruntime bootstrap 修复（进度可见 + 镜像回退）；Curation 排序二字竖排修复 |
 | `628fe17` | 添加样式统一计划文档（STYLE_UNIFICATION.md） |
-| *(下一条)* | 批次 0：tailwind.config.js token 映射；批次 1：ErrorBoundary/Toast/ImageGrid/FileList/JobProgress/VersionTabs 去除硬编码原生色 |
+| `1b3ba85` | 批次 0：tailwind.config.js token 映射；批次 1：ErrorBoundary/Toast/ImageGrid/FileList/JobProgress/VersionTabs/main.tsx 去除硬编码原生色 |
+| `f9aa0cf` | 批次 2-1：PageHeader/ProjectStepper/StageBadge/Topbar/Field 迁移（修复 --t-2xs bug） |
+| `6509464` | 批次 2-2：SaveBar/BulkActionBar/TagAutocomplete/TagEditor 迁移（JS hover → Tailwind hover:类） |
+| `b3e3042` | 批次 2-3：StepShell/TagStatsPanel/PathPicker 迁移 |
+| `d387e3a` | 批次 2-4：Sidebar（全面重写，保留 2 处必要 CSS 变量内联）/SchemaForm 迁移 |
+| `1c088ef` | 批次 2-5（完成）：MonitorDashboard 迁移，批次 2 全部完成 |
 
 ### 待开始
 
-- 批次 0：Tailwind 配置扩展（tailwind.config.js token 映射）
-- 批次 1：剩余 Tailwind 原生色组件迁移（ImageGrid、Toast、JobProgress 等）
-- 批次 2：CSS 变量内联 → className 替换
-- 批次 3：页面文件清理
-- 暗色模式 toggle
-- 字号调节
+- **批次 3：页面文件清理**（下一步重点）
+  - 优先：`project/steps/Download.tsx`、`Tagging.tsx`、`Train.tsx`（有硬编码原生色）
+  - 其次：`project/Overview.tsx`、`project/Layout.tsx`、`Curation.tsx`
+  - 最后：`tools/` 页面、`Queue.tsx`、`Projects.tsx`
+- 暗色模式 toggle（Settings 页面按钮 + localStorage）
+- 字号调节（density 选择器）
 
 ---
 
