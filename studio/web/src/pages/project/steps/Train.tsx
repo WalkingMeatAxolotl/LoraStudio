@@ -41,6 +41,12 @@ export default function TrainPage() {
   /** 已保存的 config JSON 快照，用于可靠判断是否 dirty */
   const savedJsonRef = useRef<string | null>(null)
 
+  // 预设 picker（dropdown 模式，与 Presets 页一致）
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerSearch, setPickerSearch] = useState('')
+  const pickerAnchorRef = useRef<HTMLButtonElement | null>(null)
+  const pickerPopRef = useRef<HTMLDivElement | null>(null)
+
   const vid = activeVersion?.id ?? null
 
   const refreshConfig = useCallback(async () => {
@@ -78,6 +84,28 @@ export default function TrainPage() {
     if (!config) return false
     return JSON.stringify(config) !== savedJsonRef.current
   }, [config])
+
+  const filteredPresets = useMemo(
+    () => presets.filter((p) => !pickerSearch || p.name.toLowerCase().includes(pickerSearch.toLowerCase())),
+    [presets, pickerSearch],
+  )
+
+  // popover 关闭：点外面 / Esc
+  useEffect(() => {
+    if (!pickerOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (pickerPopRef.current?.contains(t) || pickerAnchorRef.current?.contains(t)) return
+      setPickerOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPickerOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [pickerOpen])
 
   if (!activeVersion || !vid) {
     return <p style={{ color: 'var(--fg-tertiary)', padding: 24 }}>请先选择 / 创建一个版本</p>
@@ -211,77 +239,145 @@ export default function TrainPage() {
         {/* 左栏 */}
         <div className="flex flex-col gap-3 min-h-0 min-w-0" style={{ overflowY: 'auto' }}>
 
-          {/* 当前预设状态栏 */}
+          {/* 预设 picker：dropdown 取代「当前预设条 + 可用预设网格」两块。
+              点击展开 popover 含搜索 + 卡片网格，跟全局 Presets 页一致。 */}
           <section style={{
-            borderRadius: 'var(--r-md)',
-            border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-surface)',
-            padding: '8px 12px',
-            display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8,
-            flexShrink: 0,
-            fontSize: 'var(--t-sm)',
+            display: 'flex', alignItems: 'center', gap: 10,
+            flexShrink: 0, position: 'relative',
           }}>
-            <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: configResp?.has_config ? 'var(--ok)' : 'var(--fg-tertiary)', flexShrink: 0 }} />
-            <span style={{ color: 'var(--fg-tertiary)' }}>当前预设</span>
-            <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>
-              {activeVersion.config_name ?? '(未选)'}
-            </span>
-            <span className="flex-1" />
+            <button
+              ref={pickerAnchorRef}
+              onClick={() => { setPickerOpen((v) => !v); setPickerSearch('') }}
+              disabled={busy}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                minWidth: 300, padding: '10px 12px 10px 14px',
+                borderRadius: 'var(--r-md)',
+                border: `1px solid ${pickerOpen ? 'var(--accent)' : 'var(--border-default)'}`,
+                background: pickerOpen ? 'var(--accent-soft)' : 'var(--bg-surface)',
+                cursor: busy ? 'default' : 'pointer',
+                transition: 'border-color 100ms ease, background 100ms ease',
+                boxShadow: pickerOpen ? 'none' : 'var(--sh-sm)',
+              }}
+              onMouseEnter={(e) => { if (!pickerOpen) (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)' }}
+              onMouseLeave={(e) => { if (!pickerOpen) (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-default)' }}
+              title="切换预设"
+            >
+              <span style={{
+                fontSize: 'var(--t-2xs)', textTransform: 'uppercase', letterSpacing: '0.08em',
+                color: 'var(--fg-tertiary)', fontWeight: 600,
+              }}>
+                预设
+              </span>
+              <span style={{
+                fontFamily: 'var(--font-mono)', fontSize: 'var(--t-md)',
+                fontWeight: 600,
+                color: configResp?.has_config ? 'var(--fg-primary)' : 'var(--fg-tertiary)',
+                flex: 1, textAlign: 'left',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {activeVersion.config_name ?? '(未选)'}
+              </span>
+              <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-md)' }}>▾</span>
+            </button>
             <button
               onClick={() => void onSaveAsPreset()}
               disabled={busy || !configResp?.has_config}
               className="btn btn-ghost btn-sm"
+              title="把当前 version 配置另存为一个全局预设"
             >
               另存为新预设
             </button>
-          </section>
 
-          {/* 预设卡片网格 */}
-          {presets.length > 0 && (
-            <section style={{
-              borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-              background: 'var(--bg-surface)', padding: '10px 12px',
-              flexShrink: 0,
-            }}>
-              <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
-                <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
-                <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>可用预设</span>
-                <span style={{ fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)' }}>点击卡片套用</span>
+            {/* popover */}
+            {pickerOpen && (
+              <div
+                ref={pickerPopRef}
+                role="dialog"
+                aria-label="切换预设"
+                style={{
+                  position: 'absolute', top: 'calc(100% + 6px)', left: 0,
+                  width: 480, maxHeight: 480, overflow: 'hidden',
+                  borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+                  background: 'var(--bg-surface)', boxShadow: 'var(--sh-lg)',
+                  display: 'flex', flexDirection: 'column',
+                  zIndex: 50,
+                }}
+              >
+                {/* search */}
+                <div style={{
+                  padding: 10, borderBottom: '1px solid var(--border-subtle)',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                  <span style={{ position: 'relative', flex: 1, display: 'inline-flex', alignItems: 'center' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      strokeWidth="2" strokeLinecap="round"
+                      style={{ position: 'absolute', left: 8, color: 'var(--fg-tertiary)', pointerEvents: 'none' }}>
+                      <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+                    </svg>
+                    <input
+                      autoFocus
+                      className="input"
+                      placeholder="筛选预设…"
+                      value={pickerSearch}
+                      onChange={(e) => setPickerSearch(e.target.value)}
+                      style={{ width: '100%', paddingLeft: 28, fontSize: 'var(--t-sm)' }}
+                    />
+                  </span>
+                </div>
+
+                {/* grid */}
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 10 }}>
+                  {filteredPresets.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      {filteredPresets.map((p) => {
+                        const active = p.name === activeVersion.config_name
+                        return (
+                          <button
+                            key={p.name}
+                            onClick={() => { setPickerOpen(false); void onForkPreset(p.name) }}
+                            disabled={busy}
+                            style={{
+                              borderRadius: 'var(--r-sm)',
+                              border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
+                              background: active ? 'var(--accent-soft)' : 'var(--bg-sunken)',
+                              padding: '8px 10px',
+                              textAlign: 'left',
+                              cursor: busy ? 'default' : 'pointer',
+                            }}
+                            onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)' }}
+                            onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-subtle)' }}
+                          >
+                            <div style={{
+                              fontSize: 'var(--t-sm)', fontFamily: 'var(--font-mono)',
+                              color: active ? 'var(--accent)' : 'var(--fg-primary)',
+                              fontWeight: 600,
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>{p.name}</div>
+                            <div style={{
+                              fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)',
+                              marginTop: 2,
+                            }}>
+                              {active ? '当前使用' : '点击套用'}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{
+                      color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)',
+                      textAlign: 'center', padding: '16px 0',
+                    }}>
+                      {pickerSearch
+                        ? `没有匹配「${pickerSearch}」`
+                        : '尚无预设，去 /tools/presets 创建'}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                {presets.map((p) => {
-                  const isActive = p.name === activeVersion.config_name
-                  return (
-                    <button
-                      key={p.name}
-                      onClick={() => void onForkPreset(p.name)}
-                      disabled={busy}
-                      style={{
-                        borderRadius: 'var(--r-sm)',
-                        border: isActive ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
-                        background: isActive ? 'var(--accent-soft)' : 'var(--bg-sunken)',
-                        padding: '6px 8px',
-                        textAlign: 'left',
-                        cursor: busy ? 'default' : 'pointer',
-                        transition: 'border-color 0.15s, background 0.15s',
-                      }}
-                    >
-                      <div style={{
-                        fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
-                        color: isActive ? 'var(--accent)' : 'var(--fg-primary)',
-                        fontWeight: 600,
-                      }}>{p.name}</div>
-                      <div style={{
-                        fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)', marginTop: 2,
-                      }}>
-                        {isActive ? '当前使用' : '点击套用'}
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </section>
-          )}
+            )}
+          </section>
 
           {configResp === null || !schema ? (
             <ConfigSkeleton />

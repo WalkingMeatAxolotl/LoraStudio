@@ -59,6 +59,9 @@ export default function RegularizationPage() {
   const jobIdRef = useRef<number | null>(null)
   jobIdRef.current = job?.id ?? null
 
+  // Tab：设置&日志 / 图片预览。job done 时自动切到图片，让用户看成果。
+  const [activeTab, setActiveTab] = useState<'config' | 'images'>('config')
+
   // 预览 modal
   const [previewIdx, setPreviewIdx] = useState<number | null>(null)
   const [previewCaption, setPreviewCaption] = useState<string>('')
@@ -112,6 +115,8 @@ export default function RegularizationPage() {
       if (evt.status === 'done' || evt.status === 'failed' || evt.status === 'canceled') {
         void refreshReg()
         void reload()
+        // job 成功完成 → 自动切到图片 tab，让用户看成果
+        if (evt.status === 'done') setActiveTab('images')
       }
     }
   })
@@ -201,107 +206,132 @@ export default function RegularizationPage() {
         </button>
       }
     >
-    <div className="flex flex-col h-full gap-3">
+    <div className="flex flex-col h-full gap-3 min-h-0">
 
-      {/* 两栏布局：左（控制 + preview） / 右（AR bucket 统计面板） */}
-      <div className="grid gap-3 flex-1 min-h-0" style={{ gridTemplateColumns: '1.5fr 1fr' }}>
+      {/* 顶部常驻 StatusBar：reg 集快照（图片数 / target / 来源 / auto-tag /
+          时间 / 补足 / 清空）—— 不进 tab，一直可见 */}
+      <RegStatusBar
+        reg={reg}
+        onDelete={onDelete}
+        onTopUp={() => void startBuild(true)}
+        disabled={isLive}
+      />
 
-        {/* 左栏 */}
-        <div className="flex flex-col gap-3 min-h-0 min-w-0" style={{ overflowY: 'auto' }}>
-
-          <RegStatusBar
-            reg={reg}
-            onDelete={onDelete}
-            onTopUp={() => void startBuild(true)}
-            disabled={isLive}
-          />
-
-      <section style={{
-        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)', padding: '10px 14px',
-        display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0,
+      {/* tab 条 */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 4,
+        borderBottom: '1px solid var(--border-subtle)',
+        flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, fontSize: 'var(--t-xs)' }}>
-          <span style={{ color: 'var(--fg-tertiary)' }}>来源</span>
-          <select
-            value={apiSource}
-            onChange={(e) => setApiSource(e.target.value as 'gelbooru' | 'danbooru')}
-            className="input"
-            style={{ padding: '3px 8px', fontSize: 'var(--t-sm)' }}
-          >
-            <option value="gelbooru">Gelbooru</option>
-            <option value="danbooru">Danbooru</option>
-          </select>
-          <span style={{ color: 'var(--border-default)' }}>|</span>
-          <span style={{ color: 'var(--fg-tertiary)' }}>
-            目标数量{' '}
-            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)', fontWeight: 500 }}>{trainImageCount}</span>
-            <span style={{ color: 'var(--fg-tertiary)' }}>（镜像 train）</span>
-          </span>
-          <span style={{ color: 'var(--border-default)' }}>|</span>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={autoTag}
-              onChange={(e) => setAutoTag(e.target.checked)}
+        <TabButton
+          active={activeTab === 'config'}
+          onClick={() => setActiveTab('config')}
+          label="设置 & 日志"
+          badge={isLive ? 'live' : undefined}
+        />
+        <TabButton
+          active={activeTab === 'images'}
+          onClick={() => setActiveTab('images')}
+          label="图片"
+          badge={reg && reg.image_count > 0 ? String(reg.image_count) : undefined}
+        />
+      </div>
+
+      {/* tab 内容（占满剩余高度，全宽） */}
+      {activeTab === 'config' ? (
+        <div className="flex flex-col gap-3 min-h-0 flex-1" style={{ overflowY: 'auto' }}>
+          <section style={{
+            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-surface)', padding: '10px 14px',
+            display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0,
+          }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, fontSize: 'var(--t-xs)' }}>
+              <span style={{ color: 'var(--fg-tertiary)' }}>来源</span>
+              <select
+                value={apiSource}
+                onChange={(e) => setApiSource(e.target.value as 'gelbooru' | 'danbooru')}
+                className="input"
+                style={{ padding: '3px 8px', fontSize: 'var(--t-sm)' }}
+              >
+                <option value="gelbooru">Gelbooru</option>
+                <option value="danbooru">Danbooru</option>
+              </select>
+              <span style={{ color: 'var(--border-default)' }}>|</span>
+              <span style={{ color: 'var(--fg-tertiary)' }}>
+                目标数量{' '}
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)', fontWeight: 500 }}>{trainImageCount}</span>
+                <span style={{ color: 'var(--fg-tertiary)' }}>（镜像 train）</span>
+              </span>
+              <span style={{ color: 'var(--border-default)' }}>|</span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={autoTag}
+                  onChange={(e) => setAutoTag(e.target.checked)}
+                />
+                <span style={{ color: 'var(--fg-secondary)' }}>拉完后自动 WD14 打标</span>
+              </label>
+              <button
+                onClick={() => setAdvancedOpen((v) => !v)}
+                style={{ color: 'var(--fg-tertiary)', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 'var(--t-xs)' }}
+              >
+                {advancedOpen ? '⌃ 进阶' : '⌄ 进阶'}
+              </button>
+              <span className="flex-1" />
+            </div>
+
+            {advancedOpen && (
+              <AdvancedPanel value={advanced} onChange={setAdvanced} />
+            )}
+
+            <ExcludeTagsPicker
+              trainTags={trainTags}
+              excluded={excluded}
+              onToggle={toggleTag}
             />
-            <span style={{ color: 'var(--fg-secondary)' }}>拉完后自动 WD14 打标</span>
-          </label>
-          <button
-            onClick={() => setAdvancedOpen((v) => !v)}
-            style={{ color: 'var(--fg-tertiary)', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 'var(--t-xs)' }}
-          >
-            {advancedOpen ? '⌃ 进阶' : '⌄ 进阶'}
-          </button>
-          <span className="flex-1" />
-        </div>
+          </section>
 
-        {advancedOpen && (
-          <AdvancedPanel value={advanced} onChange={setAdvanced} />
-        )}
-
-        <ExcludeTagsPicker
-          trainTags={trainTags}
-          excluded={excluded}
-          onToggle={toggleTag}
-        />
-      </section>
-
-      {job && (
-        <JobProgress
-          job={job}
-          logs={logs}
-          onCancel={async () => {
-            try {
-              await api.cancelJob(job.id)
-              toast('已取消', 'success')
-            } catch (e) {
-              toast(String(e), 'error')
-            }
-          }}
-        />
-      )}
-
-          {reg && reg.image_count > 0 && (
-            <RegPreview
-              pid={project.id}
-              vid={vid}
-              reg={reg}
-              onPick={(idx) => void openPreview(idx)}
+          {job && (
+            <JobProgress
+              job={job}
+              logs={logs}
+              onCancel={async () => {
+                try {
+                  await api.cancelJob(job.id)
+                  toast('已取消', 'success')
+                } catch (e) {
+                  toast(String(e), 'error')
+                }
+              }}
             />
           )}
-
-        </div>{/* 关闭左栏 */}
-
-        {/* 右栏：AR bucket 分布统计 */}
-        <RegStatsPanel
-          reg={reg}
-          trainImageCount={trainImageCount}
-          apiSource={apiSource}
-          autoTag={autoTag}
-          isLive={isLive}
-        />
-      </div>{/* 关闭两栏 grid */}
+        </div>
+      ) : (
+        // 图片 tab：占满剩余高度
+        reg && reg.image_count > 0 ? (
+          <RegPreview
+            pid={project.id}
+            vid={vid}
+            reg={reg}
+            onPick={(idx) => void openPreview(idx)}
+          />
+        ) : (
+          <section style={{
+            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-surface)', flex: 1, display: 'flex',
+            flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            minHeight: 0, color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)',
+            textAlign: 'center', gap: 6,
+          }}>
+            <div style={{ fontSize: 'var(--t-md)', color: 'var(--fg-secondary)', fontWeight: 500 }}>
+              还没有 reg 集
+            </div>
+            <div style={{ fontSize: 'var(--t-xs)' }}>
+              在「设置 &amp; 日志」配置后点击右上角「开始生成」
+            </div>
+          </section>
+        )
+      )}
 
       {previewIdx !== null && reg && reg.files[previewIdx] && (
         <ImagePreviewModal
@@ -328,6 +358,51 @@ export default function RegularizationPage() {
 // ---------------------------------------------------------------------------
 // 子组件
 // ---------------------------------------------------------------------------
+
+function TabButton({
+  active, onClick, label, badge,
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+  badge?: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '8px 14px',
+        background: 'transparent',
+        border: 'none',
+        borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+        color: active ? 'var(--fg-primary)' : 'var(--fg-secondary)',
+        fontSize: 'var(--t-sm)',
+        fontWeight: active ? 600 : 500,
+        cursor: 'pointer',
+        marginBottom: -1,
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        transition: 'color 100ms ease, border-color 100ms ease',
+      }}
+      onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.color = 'var(--fg-primary)' }}
+      onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.color = 'var(--fg-secondary)' }}
+    >
+      {label}
+      {badge && (
+        <span style={{
+          fontSize: 'var(--t-2xs)',
+          padding: '1px 6px',
+          borderRadius: 'var(--r-sm)',
+          background: badge === 'live' ? 'var(--warn-soft)' : 'var(--bg-sunken)',
+          color: badge === 'live' ? 'var(--warn)' : 'var(--fg-tertiary)',
+          fontFamily: badge === 'live' ? 'var(--font-sans)' : 'var(--font-mono)',
+          fontWeight: 500,
+        }}>
+          {badge === 'live' ? 'live' : badge}
+        </span>
+      )}
+    </button>
+  )
+}
 
 function RegStatusBar({
   reg,
@@ -797,162 +872,6 @@ function regOrigUrl(pid: number, vid: number, rel: string): string {
   const name = idx >= 0 ? rel.slice(idx + 1) : rel
   // 768px 预览（与 PP3 alt-hover 同尺寸）
   return api.versionThumbUrl(pid, vid, 'reg', name, folder, 768)
-}
-
-// ---------------------------------------------------------------------------
-// AR bucket 分布统计面板（右侧）
-// ---------------------------------------------------------------------------
-
-function RegStatsPanel({
-  reg,
-  trainImageCount,
-  apiSource,
-  autoTag,
-  isLive,
-}: {
-  reg: RegStatus | null
-  trainImageCount: number
-  apiSource: string
-  autoTag: boolean
-  isLive: boolean
-}) {
-  const meta = reg?.meta ?? null
-  const exists = reg?.exists ?? false
-  const imageCount = reg?.image_count ?? 0
-
-  // 模拟 AR bucket 分布（如果后端提供实际数据可替换）
-  const arBuckets = useMemo(() => {
-    if (!exists || imageCount === 0) return []
-    // 基于 meta 的分辨率聚类信息生成模拟分布
-    const clusters = meta?.postprocess_clusters ?? null
-    if (clusters === null) {
-      return [
-        { label: '1:1', range: '0.9–1.1', pct: 40 },
-        { label: '3:4', range: '0.7–0.9', pct: 25 },
-        { label: '4:3', range: '1.1–1.4', pct: 20 },
-        { label: '2:3', range: '0.5–0.7', pct: 10 },
-        { label: '3:2', range: '1.4–2.0', pct: 5 },
-      ]
-    }
-    return []
-  }, [exists, imageCount, meta])
-
-  return (
-    <div className="flex flex-col gap-3" style={{ minWidth: 0 }}>
-      {/* 当前状态卡片 */}
-      <div style={{
-        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)', padding: '10px 12px',
-      }}>
-        <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
-          <span style={{
-            display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
-            background: exists ? 'var(--ok)' : 'var(--fg-tertiary)', flexShrink: 0,
-          }} />
-          <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>集状态</span>
-        </div>
-
-        {!exists ? (
-          <div style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>
-            当前版本 还未生成 reg 集。<br />
-            设置参数后点击「开始生成」
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 'var(--t-xs)' }}>
-            <StatLine label="图片数" value={imageCount} />
-            {meta && (
-              <>
-                <StatLine label="目标" value={`${meta.actual_count} / ${meta.target_count}`} />
-                <StatLine label="来源" value={meta.api_source} />
-                <StatLine label="自动打标" value={meta.auto_tagged ? '✓' : '×'} dim={!meta.auto_tagged} />
-                {meta.failed_tags.length > 0 && (
-                  <StatLine label="失败 tag" value={String(meta.failed_tags.length)} />
-                )}
-                {meta.incremental_runs > 0 && (
-                  <StatLine label="补足次数" value={`×${meta.incremental_runs}`} />
-                )}
-              </>
-            )}
-            {meta && meta.postprocess_clusters !== null && (
-              <StatLine label="聚类数" value={String(meta.postprocess_clusters)} />
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* AR bucket 分布 */}
-      {arBuckets.length > 0 && (
-        <div style={{
-          borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-          background: 'var(--bg-surface)', padding: '10px 12px',
-        }}>
-          <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
-            <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
-            <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>AR bucket</span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {arBuckets.map((b) => (
-              <div key={b.label}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--t-xs)', marginBottom: 2 }}>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)' }}>{b.label}</span>
-                  <span style={{ color: 'var(--fg-tertiary)' }}>{b.pct}%</span>
-                </div>
-                <div style={{ height: 6, borderRadius: 3, background: 'var(--bg-sunken)', overflow: 'hidden' }}>
-                  <div style={{
-                    height: '100%', background: 'var(--accent)', borderRadius: 3,
-                    width: `${b.pct}%`, transition: 'width 0.4s ease',
-                  }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 当前配置摘要 */}
-      <div style={{
-        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)', padding: '10px 12px',
-      }}>
-        <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
-          <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--info)', flexShrink: 0 }} />
-          <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>配置</span>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 'var(--t-xs)' }}>
-          <StatLine label="train 图数" value={trainImageCount} />
-          <StatLine label="API 来源" value={apiSource} />
-          <StatLine label="自动打标" value={autoTag ? '✓ 启用' : '× 关闭'} dim={!autoTag} />
-          {isLive && (
-            <div style={{ marginTop: 4, padding: '4px 6px', borderRadius: 'var(--r-sm)', background: 'var(--warn-soft)', color: 'var(--warn)', fontSize: 'var(--t-xs)' }}>
-              生成中 · 等待完成
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function StatLine({
-  label,
-  value,
-  dim,
-}: {
-  label: string
-  value: string | number
-  dim?: boolean
-}) {
-  const v = String(value)
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-      <span style={{ color: 'var(--fg-tertiary)' }}>{label}</span>
-      <span style={{
-        fontFamily: 'var(--font-mono)',
-        color: dim ? 'var(--fg-tertiary)' : 'var(--fg-primary)',
-        fontWeight: 500,
-      }}>{v}</span>
-    </div>
-  )
 }
 
 function formatAgo(unix: number): string {
