@@ -493,7 +493,7 @@ export default function CurationPage() {
       title="筛选图片"
       subtitle="download → train"
       actions={
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)', whiteSpace: 'nowrap', flexShrink: 0 }}>
           排序
           <select
             value={sortMode}
