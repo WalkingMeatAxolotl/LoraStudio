@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import type { VersionStage } from '../api/client'
+import { getStoredTheme, toggleTheme, type Theme } from '../lib/theme'
 
 /** Map version stage → 0-based index of the current active step */
 const STAGE_TO_STEP_IDX: Record<VersionStage, number> = {
@@ -31,6 +32,8 @@ const I = {
   train:   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 18 9 12l4 4 8-9"/><path d="M15 7h6v6"/></svg>,
   export:  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>,
   plus:    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>,
+  sun:     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>,
+  moon:    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>,
 }
 
 // ── version stage dot ──────────────────────────────────────────────────────
@@ -298,6 +301,31 @@ export default function Sidebar() {
     return location.pathname.startsWith(path)
   }
 
+// ── theme toggle ───────────────────────────────────────────────────────────
+function ThemeToggle({ collapsed }: { collapsed: boolean }) {
+  const [theme, setTheme] = useState<Theme>(() => getStoredTheme())
+
+  const handleToggle = () => {
+    setTheme(toggleTheme())
+  }
+
+  const isDark = theme === 'dark'
+  return (
+    <button
+      onClick={handleToggle}
+      title={isDark ? '切到日间模式' : '切到暗色模式'}
+      className={[
+        'flex items-center gap-2.5 rounded-md text-sm no-underline transition-colors bg-transparent border-none cursor-pointer w-full',
+        collapsed ? 'py-[9px] px-0 justify-center' : 'py-2 px-3 justify-start',
+        'text-fg-secondary font-medium hover:bg-overlay',
+      ].join(' ')}
+    >
+      {isDark ? I.sun : I.moon}
+      {!collapsed && <span>{isDark ? '日间模式' : '暗色模式'}</span>}
+    </button>
+  )
+}
+
   return (
     <aside
       className="shrink-0 bg-sunken border-r border-subtle flex flex-col overflow-hidden h-full transition-[width] duration-[160ms] ease-in-out"
@@ -340,6 +368,7 @@ export default function Sidebar() {
         <NavItem to="/tools/presets" label="预设" icon={I.preset} active={isMain('/tools/presets')} collapsed={collapsed} />
         <NavItem to="/tools/monitor" label="监控" icon={I.monitor} active={isMain('/tools/monitor')} collapsed={collapsed} />
         <NavItem to="/tools/settings" label="设置" icon={I.cog} active={isMain('/tools/settings')} collapsed={collapsed} />
+        <ThemeToggle collapsed={collapsed} />
         {collapsed && (
           <button
             onClick={toggle}

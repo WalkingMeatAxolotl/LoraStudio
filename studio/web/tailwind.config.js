@@ -55,6 +55,7 @@ export default {
       //   text-3xl  → var(--t-3xl, 36px)  (与 Tailwind 默认一致)
       // text-md 是我们扩展的，Tailwind 无此级别
       fontSize: {
+        '2xs':  ['var(--t-2xs)', { lineHeight: '1.4' }],
         'xs':   ['var(--t-xs)',   { lineHeight: '1.5' }],
         'sm':   ['var(--t-sm)',   { lineHeight: '1.5' }],
         'base': ['var(--t-base)', { lineHeight: '1.6' }],
