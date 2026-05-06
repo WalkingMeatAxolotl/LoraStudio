@@ -177,11 +177,11 @@ darkMode: ['class', '.theme-dark'],
 
 ## 三、迁移计划（按文件分批）
 
-### 批次 0：基础设施（Tailwind 配置）⬜ 未开始
+### 批次 0：基础设施（Tailwind 配置）✅ 完成
 
-- [ ] 修改 `tailwind.config.js`，注册所有 token 变量映射
-- [ ] `index.css` 加 `darkMode` 配置测试
-- [ ] 建立常量色值替换对照表（见附录 A）
+- [x] 修改 `tailwind.config.js`，注册所有 token 变量映射
+- [ ] `darkMode` class 策略接入（暗色模式 toggle 时再做）
+- [x] 建立常量色值替换对照表（见附录 A）
 
 ---
 
@@ -189,12 +189,12 @@ darkMode: ['class', '.theme-dark'],
 
 | 组件 | 当前状态 | 迁移内容 | 进度 |
 |------|---------|---------|------|
-| `ErrorBoundary.tsx` | Tailwind 原生色（bg-red-50, text-red-700） | 改用 `.err` token 类 | ⬜ |
-| `Toast.tsx` | Tailwind 原生色（bg-red-900/80, bg-green-900/80） | 改用 `.ok/.err/.info` token 类 | ⬜ |
-| `ImageGrid.tsx` | Tailwind 原生色（bg-slate-900, border-cyan-400） | 改用 `bg-sunken`, `border-accent` | ⬜ |
-| `FileList.tsx` | Tailwind 原生色（bg-slate-900, border-slate-800） | 改用 token 类 | ⬜ |
-| `JobProgress.tsx` | Tailwind 原生色（bg-slate-800/40, text-slate-300） | 改用 token 类 | ⬜ |
-| `VersionTabs.tsx` | Tailwind 原生色（bg-slate-800/80, text-cyan-300） | 改用 token 类 | ⬜ |
+| `ErrorBoundary.tsx` | Tailwind 原生色（bg-red-50, text-red-700） | 改用 `.err` token 类 | ✅ |
+| `Toast.tsx` | Tailwind 原生色（bg-red-900/80, bg-green-900/80） | 改用 `.ok/.err/.info` token 类 | ✅ |
+| `ImageGrid.tsx` | Tailwind 原生色（bg-slate-900, border-cyan-400） | 改用 `bg-sunken`, `border-accent` | ✅ |
+| `FileList.tsx` | Tailwind 原生色（bg-slate-900, border-slate-800） | 改用 token 类 | ✅ |
+| `JobProgress.tsx` | Tailwind 原生色（bg-slate-800/40, text-slate-300） | 改用 token 类 | ✅ |
+| `VersionTabs.tsx` | Tailwind 原生色（bg-slate-800/80, text-cyan-300） | 改用 token 类 | ✅ |
 
 ---
 
@@ -337,6 +337,8 @@ className="badge badge-ok"
 |------|------|
 | `7cfb32a` | TagEdit 布局重写、StepShell overflow 修复、BulkActionBar/TagAutocomplete/SaveBar/TagEditor 全部改用 CSS 变量（去掉 Tailwind 原生黑色系） |
 | `6527fde` | cli.py onnxruntime bootstrap 修复（进度可见 + 镜像回退）；Curation 排序二字竖排修复 |
+| `628fe17` | 添加样式统一计划文档（STYLE_UNIFICATION.md） |
+| *(下一条)* | 批次 0：tailwind.config.js token 映射；批次 1：ErrorBoundary/Toast/ImageGrid/FileList/JobProgress/VersionTabs 去除硬编码原生色 |
 
 ### 待开始
 
