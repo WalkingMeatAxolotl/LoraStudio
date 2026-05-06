@@ -5,7 +5,7 @@ interface Props {
   onChange: (v: string) => void
   suggestions: string[]
   placeholder?: string
-  className?: string
+  style?: React.CSSProperties
 }
 
 /** 单 tag 精确补全输入：用于 filter 栏「含 tag」。 */
@@ -14,7 +14,7 @@ export default function TagAutocomplete({
   onChange,
   suggestions,
   placeholder,
-  className,
+  style,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [hi, setHi] = useState(0)
@@ -28,9 +28,7 @@ export default function TagAutocomplete({
       .slice(0, 12)
   }, [value, suggestions])
 
-  useEffect(() => {
-    setHi(0)
-  }, [value])
+  useEffect(() => { setHi(0) }, [value])
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -58,21 +56,25 @@ export default function TagAutocomplete({
   }
 
   return (
-    <div className={'relative ' + (className ?? '')} ref={ref}>
+    <div style={{ position: 'relative', ...style }} ref={ref}>
       <input
         value={value}
-        onChange={(e) => {
-          onChange(e.target.value)
-          setOpen(true)
-        }}
+        onChange={(e) => { onChange(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKey}
         placeholder={placeholder}
-        className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs w-full"
+        className="input input-mono"
+        style={{ fontSize: 'var(--t-xs)', width: '100%' }}
       />
       {open && matches.length > 0 && (
         <ul
-          className="absolute left-0 top-full mt-0.5 z-20 bg-slate-900 border border-slate-700 rounded shadow-lg max-h-60 overflow-y-auto min-w-full"
+          style={{
+            position: 'absolute', left: 0, top: '100%', marginTop: 2, zIndex: 30,
+            background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--r-sm)', boxShadow: 'var(--sh-lg)',
+            maxHeight: 240, overflowY: 'auto', minWidth: '100%',
+            listStyle: 'none', padding: '4px 0', margin: 0,
+          }}
           role="listbox"
         >
           {matches.map((s, i) => (
@@ -80,15 +82,14 @@ export default function TagAutocomplete({
               key={s}
               role="option"
               aria-selected={i === hi}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                onChange(s)
-                setOpen(false)
+              onMouseDown={(e) => { e.preventDefault(); onChange(s); setOpen(false) }}
+              style={{
+                padding: '4px 10px', fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
+                color: 'var(--fg-primary)', cursor: 'pointer',
+                background: i === hi ? 'var(--bg-overlay)' : 'transparent',
               }}
-              className={
-                'px-2 py-1 text-xs font-mono cursor-pointer ' +
-                (i === hi ? 'bg-slate-700 text-white' : 'text-slate-200 hover:bg-slate-800')
-              }
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = i === hi ? 'var(--bg-overlay)' : 'transparent' }}
             >
               {s}
             </li>
