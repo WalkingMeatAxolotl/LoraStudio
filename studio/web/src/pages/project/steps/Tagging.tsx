@@ -175,7 +175,11 @@ export default function TaggingPage() {
           disabled={isLive || !taggerStatus?.ok}
           className="btn btn-primary"
         >
-          {isLive ? '打标中…' : '开始打标全部'}
+          {isLive
+            ? '打标中…'
+            : taggerStatus === null
+              ? '检查中…'
+              : '开始打标全部'}
         </button>
       }
     >
@@ -252,17 +256,6 @@ export default function TaggingPage() {
                 }
               }}
             />
-          )}
-
-          {/* 开始打标按钮（放到左栏底部） */}
-          {!isLive && taggerStatus?.ok && (
-            <button
-              onClick={startTagging}
-              disabled={isLive || !taggerStatus?.ok}
-              className="btn btn-primary self-start"
-            >
-              开始打标全部
-            </button>
           )}
         </div>
 
