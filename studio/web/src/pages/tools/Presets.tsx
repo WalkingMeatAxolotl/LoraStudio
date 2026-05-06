@@ -311,63 +311,43 @@ export default function PresetsPage() {
 
   // ── 渲染 ──
   return (
-    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="fade-in flex flex-col h-full">
 
       {/* ── 单行 header：picker + 状态 + 全部操作 ──
         Topbar 已经显示「预设」面包屑，这里不再重复 h1。把上一版的页面标题
         和底部操作栏并成一行，picker 当做"当前编辑上下文"的标识，状态 +
         所有动作（导入 / 复制 / 导出 / 删除 / 保存）右侧排齐。 */}
-      <div style={{
-        padding: '12px 24px',
-        borderBottom: '1px solid var(--border-subtle)',
-        background: 'var(--bg-canvas)',
-        flexShrink: 0,
-        display: 'flex', alignItems: 'center', gap: 14,
-        position: 'relative',
-      }}>
+      <div className="py-3 px-6 border-b border-subtle bg-canvas shrink-0 flex items-center gap-3.5 relative">
         <button
           ref={pickerAnchorRef}
           onClick={() => { setPickerOpen((v) => !v); setPickerSearch('') }}
           disabled={busy}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 12,
-            minWidth: 300, padding: '10px 12px 10px 14px',
-            borderRadius: 'var(--r-md)',
-            border: `1px solid ${pickerOpen ? 'var(--accent)' : 'var(--border-default)'}`,
-            background: pickerOpen ? 'var(--accent-soft)' : 'var(--bg-surface)',
-            cursor: busy ? 'default' : 'pointer',
-            transition: 'border-color 100ms ease, background 100ms ease',
-            boxShadow: pickerOpen ? 'none' : 'var(--sh-sm)',
-          }}
-          onMouseEnter={(e) => { if (!pickerOpen) (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)' }}
-          onMouseLeave={(e) => { if (!pickerOpen) (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-default)' }}
+          className={[
+            'flex items-center gap-3 min-w-[300px] pl-3.5 pr-3 py-2.5',
+            'rounded-md border transition-[border-color,background] duration-100',
+            pickerOpen
+              ? 'border-accent bg-accent-soft'
+              : 'border-dim bg-surface shadow-sm hover:border-bold',
+            busy ? 'cursor-default' : 'cursor-pointer',
+          ].join(' ')}
           title="切换 / 新建预设"
         >
-          <span style={{
-            fontSize: 'var(--t-2xs)', textTransform: 'uppercase', letterSpacing: '0.08em',
-            color: 'var(--fg-tertiary)', fontWeight: 600,
-          }}>
+          <span className="text-[10px] uppercase tracking-[0.08em] text-fg-tertiary font-semibold">
             预设
           </span>
-          <span style={{
-            fontFamily: 'var(--font-mono)', fontSize: 'var(--t-md)',
-            fontWeight: 600, color: 'var(--fg-primary)',
-            flex: 1, textAlign: 'left',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
+          <span className="font-mono text-md font-semibold text-fg-primary flex-1 text-left truncate">
             {selected ?? (newName.trim() || '新建中')}
           </span>
-          <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-md)' }}>▾</span>
+          <span className="text-fg-tertiary text-md">▾</span>
         </button>
 
         {/* 状态指示 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-          <span style={{
-            display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-            background: hasAnyChange ? 'var(--warn)' : isNew ? 'var(--accent)' : 'var(--ok)',
-            flexShrink: 0,
-          }} />
-          <span style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)', whiteSpace: 'nowrap' }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={[
+            'inline-block w-2 h-2 rounded-full shrink-0',
+            hasAnyChange ? 'bg-warn' : isNew ? 'bg-accent' : 'bg-ok',
+          ].join(' ')} />
+          <span className="text-sm text-fg-secondary whitespace-nowrap">
             {isNew ? '新建中' : hasAnyChange ? '未保存' : '已保存'}
           </span>
         </div>
@@ -527,43 +507,35 @@ export default function PresetsPage() {
       </div>
 
       {/* ── content（scroll） ── */}
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="flex-1 min-h-0 overflow-auto p-4">
+        <div className="flex flex-col gap-3">
 
           {/* 名称 / 描述 */}
-          <section style={{
-            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-surface)', padding: '10px 14px',
-          }}>
-            <div style={{ display: 'flex', gap: 10 }}>
+          <section className="rounded-md border border-subtle bg-surface px-3.5 py-2.5">
+            <div className="flex gap-2.5">
               {isNew ? (
-                <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span style={{ fontSize: 'var(--t-sm)', fontWeight: 500, color: 'var(--fg-secondary)' }}>预设名称</span>
+                <label className="flex-1 flex flex-col gap-1">
+                  <span className="text-sm font-medium text-fg-secondary">预设名称</span>
                   <input
                     ref={newNameInputRef}
-                    className="input input-mono"
+                    className="input input-mono font-mono"
                     placeholder="my-training-preset"
                     value={newName}
                     onChange={(e) => { setNewName(e.target.value); setNewNameError('') }}
                     disabled={busy}
-                    style={{ fontFamily: 'var(--font-mono)' }}
                   />
                   {newNameError && (
-                    <span style={{ fontSize: 'var(--t-xs)', color: 'var(--err)' }}>{newNameError}</span>
+                    <span className="text-xs text-err">{newNameError}</span>
                   )}
                 </label>
               ) : (
-                <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span style={{ fontSize: 'var(--t-sm)', fontWeight: 500, color: 'var(--fg-secondary)' }}>名称（只读）</span>
-                  <div style={{
-                    padding: '7px 12px', borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-                    background: 'var(--bg-sunken)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-sm)',
-                    color: 'var(--fg-primary)',
-                  }}>{selected}</div>
+                <label className="flex-1 flex flex-col gap-1">
+                  <span className="text-sm font-medium text-fg-secondary">名称（只读）</span>
+                  <div className="py-1.5 px-3 rounded-md border border-subtle bg-sunken font-mono text-sm text-fg-primary">{selected}</div>
                 </label>
               )}
-              <label style={{ flex: 1.5, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ fontSize: 'var(--t-sm)', fontWeight: 500, color: 'var(--fg-secondary)' }}>描述 / 副标题</span>
+              <label className="flex-[1.5] flex flex-col gap-1">
+                <span className="text-sm font-medium text-fg-secondary">描述 / 副标题</span>
                 <input
                   className="input"
                   placeholder="用途描述，显示在训练页预设卡片上…"
@@ -577,17 +549,14 @@ export default function PresetsPage() {
 
           {/* schema 表单 */}
           {!schema || !config ? (
-            <div style={{ height: 200, borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)', padding: 14 }}>
+            <div className="h-[200px] rounded-md border border-subtle bg-surface p-3.5">
               <SkeletonGroups />
             </div>
           ) : (
-            <section style={{
-              borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-              background: 'var(--bg-surface)', padding: '10px 14px',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--fg-tertiary)', flexShrink: 0 }} />
-                <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>训练参数</span>
+            <section className="rounded-md border border-subtle bg-surface px-3.5 py-2.5">
+              <div className="flex items-center gap-2 mb-2.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-fg-tertiary shrink-0" />
+                <span className="caption uppercase tracking-[0.06em] text-xs">训练参数</span>
               </div>
               <SchemaForm
                 schema={schema}
@@ -599,29 +568,21 @@ export default function PresetsPage() {
 
           {/* TOML 预览（默认折叠） */}
           {config && Object.keys(config).length > 0 && (
-            <section style={{
-              borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-              background: 'var(--bg-surface)', padding: tomlOpen ? '10px 14px' : '6px 14px',
-            }}>
+            <section className={`rounded-md border border-subtle bg-surface ${tomlOpen ? 'px-3.5 py-2.5' : 'px-3.5 py-1.5'}`}>
               <button
                 type="button"
                 onClick={() => setTomlOpen((v) => !v)}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                  background: 'transparent', border: 'none', padding: 0,
-                  cursor: 'pointer', textAlign: 'left',
-                }}
+                className="w-full flex items-center gap-2 bg-transparent border-none p-0 cursor-pointer text-left"
               >
-                <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--info)', flexShrink: 0 }} />
-                <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>TOML 预览</span>
-                <span style={{ fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)' }}>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-info shrink-0" />
+                <span className="caption uppercase tracking-[0.06em] text-xs">TOML 预览</span>
+                <span className="text-[10px] text-fg-tertiary">
                   {tomlOpen ? 'sd-scripts 可读的配置文件' : '展开查看 / 复制'}
                 </span>
-                <span style={{ flex: 1 }} />
+                <span className="flex-1" />
                 {tomlOpen && (
                   <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ fontSize: 'var(--t-xs)' }}
+                    className="btn btn-ghost btn-sm text-xs"
                     onClick={(e) => {
                       e.stopPropagation()
                       const toml = generateToml(config)
@@ -631,17 +592,10 @@ export default function PresetsPage() {
                     }}
                   >复制</button>
                 )}
-                <span style={{ color: 'var(--fg-tertiary)' }}>{tomlOpen ? '▾' : '▸'}</span>
+                <span className="text-fg-tertiary">{tomlOpen ? '▾' : '▸'}</span>
               </button>
               {tomlOpen && (
-                <pre style={{
-                  margin: '10px 0 0', padding: 12,
-                  background: 'var(--bg-sunken)', borderRadius: 'var(--r-sm)',
-                  fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)',
-                  color: 'var(--fg-secondary)', lineHeight: 1.7,
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                  maxHeight: 320, overflow: 'auto',
-                }}>
+                <pre className="m-0 mt-2.5 p-3 bg-sunken rounded-sm font-mono text-xs text-fg-secondary leading-[1.7] whitespace-pre-wrap break-words max-h-80 overflow-auto">
                   {generateToml(config)}
                 </pre>
               )}
@@ -657,15 +611,15 @@ export default function PresetsPage() {
 function SkeletonGroups() {
   const rows = [5, 6, 4, 5]
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div className="flex flex-col gap-3">
       {rows.map((r, gi) => (
-        <div key={gi} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ height: 12, width: 100, borderRadius: 'var(--r-sm)', background: 'var(--bg-sunken)', opacity: 0.6 }} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div key={gi} className="flex flex-col gap-2">
+          <div className="h-3 w-24 rounded-sm bg-sunken opacity-60" />
+          <div className="flex flex-col gap-1.5">
             {Array.from({ length: r }).map((_, ri) => (
-              <div key={ri} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <div style={{ height: 9, width: 80, borderRadius: 'var(--r-sm)', background: 'var(--bg-sunken)', opacity: 0.5 }} />
-                <div style={{ height: 26, borderRadius: 'var(--r-sm)', background: 'var(--bg-canvas)', border: '1px solid var(--border-subtle)' }} />
+              <div key={ri} className="flex flex-col gap-0.5">
+                <div className="h-2 w-20 rounded-sm bg-sunken opacity-50" />
+                <div className="h-[26px] rounded-sm border border-subtle bg-canvas" />
               </div>
             ))}
           </div>

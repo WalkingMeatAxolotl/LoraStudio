@@ -104,11 +104,11 @@ export default function ProjectStepper({
           'flex items-center gap-2 px-3 py-1.5 rounded text-sm transition'
         const stateCls =
           status === 'done'
-            ? 'text-emerald-300'
+            ? 'text-ok'
             : status === 'active'
-              ? 'text-cyan-300'
-              : 'text-slate-500'
-        const activeCls = isActiveRoute ? 'bg-slate-800/80' : 'hover:bg-slate-800/50'
+              ? 'text-accent'
+              : 'text-fg-tertiary'
+        const activeCls = isActiveRoute ? 'bg-surface' : 'hover:bg-overlay'
         if (path === null) {
           return (
             <li key={s.key}>

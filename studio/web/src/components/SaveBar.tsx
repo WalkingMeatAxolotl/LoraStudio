@@ -74,8 +74,8 @@ export default function SaveBar({
   }
 
   return (
-    <div style={{ position: 'relative' }} ref={ref}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+    <div className="relative" ref={ref}>
+      <div className="flex items-center gap-1">
         <button
           onClick={save}
           disabled={saving || dirtyCount === 0}
@@ -96,34 +96,24 @@ export default function SaveBar({
         <div
           role="dialog"
           aria-label="snapshot-list"
-          style={{
-            position: 'absolute', right: 0, top: 'calc(100% + 4px)',
-            width: 320, maxHeight: 320, overflowY: 'auto',
-            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-elevated)', boxShadow: 'var(--sh-xl)',
-            zIndex: 30,
-          }}
+          className="absolute right-0 top-[calc(100%+4px)] w-80 max-h-80 overflow-y-auto rounded-md border border-subtle bg-elevated shadow-xl z-30"
         >
           {items.length === 0 ? (
-            <p style={{ padding: '12px 14px', fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>
+            <p className="px-3.5 py-3 text-xs text-fg-tertiary m-0">
               还没有还原点。每次「保存」会自动生成一个。
             </p>
           ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            <ul className="list-none p-0 m-0">
               {items.map((s) => (
                 <li
                   key={s.id}
-                  style={{
-                    padding: '8px 12px', fontSize: 'var(--t-xs)',
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    borderBottom: '1px solid var(--border-subtle)',
-                  }}
+                  className="px-3 py-2 text-xs flex items-center gap-2 border-b border-subtle"
                 >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: 'var(--fg-primary)', fontFamily: 'var(--font-mono)' }}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-fg-primary font-mono">
                       {fmtTime(s.created_at)}
                     </div>
-                    <div style={{ color: 'var(--fg-tertiary)', fontSize: '10px', marginTop: 2 }}>
+                    <div className="text-fg-tertiary text-[10px] mt-0.5">
                       {s.file_count} 文件 · {fmtSize(s.size)}
                     </div>
                   </div>
@@ -137,11 +127,8 @@ export default function SaveBar({
                   <button
                     onClick={() => del(s.id)}
                     disabled={busyId === s.id}
-                    className="btn btn-ghost btn-sm"
+                    className="btn btn-ghost btn-sm text-fg-tertiary hover:text-err"
                     aria-label="删除"
-                    style={{ color: 'var(--fg-tertiary)' }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--err)' }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--fg-tertiary)' }}
                   >
                     ✕
                   </button>

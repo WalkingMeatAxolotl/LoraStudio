@@ -14,12 +14,7 @@ interface Props {
   disabledHint?: string
 }
 
-const labelStyle: React.CSSProperties = {
-  fontSize: 'var(--t-sm)', fontWeight: 500, color: 'var(--fg-secondary)', marginBottom: 4,
-}
-const helpStyle: React.CSSProperties = {
-  fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', marginTop: 4,
-}
+// input 覆盖 .input 默认值（更紧凑；背景用 canvas 而不是 surface）
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '5px 10px',
   background: 'var(--bg-canvas)', border: '1px solid var(--border-default)',
@@ -27,10 +22,8 @@ const inputStyle: React.CSSProperties = {
   color: 'var(--fg-primary)',
 }
 
-const renderHint = (text: string) => (
-  <span style={{ marginLeft: 8, fontSize: 'var(--t-2xs)', color: 'var(--warn)', verticalAlign: 'middle' }}>
-    {text}
-  </span>
+const FieldHint = ({ text }: { text: string }) => (
+  <span className="ml-2 text-[11px] text-warn align-middle">{text}</span>
 )
 
 /** 单个表单字段，按 control kind 分发渲染。 */
@@ -41,19 +34,14 @@ export default function Field({
   const label = fieldLabel(name)
   const help = prop.description
   const hintNode = disabled
-    ? renderHint(disabledHint ?? '自动 · 项目控制')
+    ? <FieldHint text={disabledHint ?? '自动 · 项目控制'} />
     : null
   void name
 
   // bool ----------------------------------------------------------------
   if (kind === 'bool') {
     return (
-      <label
-        className={
-          'flex items-start gap-3 py-1.5 ' +
-          (disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')
-        }
-      >
+      <label className={`flex items-start gap-3 py-1.5 ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
         <input
           type="checkbox"
           checked={Boolean(value)}
@@ -62,11 +50,11 @@ export default function Field({
           style={{ marginTop: 4, height: 16, width: 16, borderRadius: 'var(--r-sm)' }}
         />
         <span className="flex-1">
-          <div style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-primary)' }}>
+          <div className="text-sm text-fg-primary">
             {label}
             {hintNode}
           </div>
-          {help && <div style={helpStyle}>{help}</div>}
+          {help && <div className="text-xs text-fg-tertiary mt-1">{help}</div>}
         </span>
       </label>
     )
@@ -76,9 +64,8 @@ export default function Field({
   if (kind === 'select') {
     return (
       <div className="py-1.5">
-        <div style={labelStyle}>
-          {label}
-          {hintNode}
+        <div className="text-sm font-medium text-fg-secondary mb-1">
+          {label}{hintNode}
         </div>
         <select
           value={String(value ?? '')}
@@ -92,7 +79,7 @@ export default function Field({
             </option>
           ))}
         </select>
-        {help && <div style={helpStyle}>{help}</div>}
+        {help && <div className="text-xs text-fg-tertiary mt-1">{help}</div>}
       </div>
     )
   }
@@ -101,9 +88,8 @@ export default function Field({
   if (kind === 'textarea') {
     return (
       <div className="py-1.5">
-        <div style={labelStyle}>
-          {label}
-          {hintNode}
+        <div className="text-sm font-medium text-fg-secondary mb-1">
+          {label}{hintNode}
         </div>
         <textarea
           rows={3}
@@ -112,7 +98,7 @@ export default function Field({
           disabled={disabled}
           className="input input-mono" style={inputStyle}
         />
-        {help && <div style={helpStyle}>{help}</div>}
+        {help && <div className="text-xs text-fg-tertiary mt-1">{help}</div>}
       </div>
     )
   }
@@ -123,9 +109,8 @@ export default function Field({
     const text = list.join('\n')
     return (
       <div className="py-1.5">
-        <div style={labelStyle}>
-          {label}（每行一项）
-          {hintNode}
+        <div className="text-sm font-medium text-fg-secondary mb-1">
+          {label}（每行一项）{hintNode}
         </div>
         <textarea
           rows={Math.max(3, list.length + 1)}
@@ -140,7 +125,7 @@ export default function Field({
           disabled={disabled}
           className="input input-mono" style={inputStyle}
         />
-        {help && <div style={helpStyle}>{help}</div>}
+        {help && <div className="text-xs text-fg-tertiary mt-1">{help}</div>}
       </div>
     )
   }
@@ -190,18 +175,6 @@ interface NumberFieldProps {
   hintNode?: React.ReactNode
 }
 
-/**
- * 数字输入：内部维护 raw 字符串，blur / Enter 时才解析并提交父 onChange。
- *
- * 之前 onChange 立即 parseFloat → 父 setConfig 立即重渲染 → 受控 value 字符串
- * 化把「0.0」截成「0」，用户没法输 0.05。改用 raw 缓冲后输入中状态保留，
- * 仅在 blur 时把合法值上报；外部 value 变化只在 input 不 focus 时同步。
- *
- * min/max：blur 时若解析出的数超出 schema 声明的 minimum/maximum，
- * 回滚到上次合法 value（跟 NaN 同处理）。这是为了恢复 PP10.3 之前
- * `<input type="number" min max>` 自带的 HTML5 校验—— text 模式下浏览器
- * 不再阻止超界输入，要前端自己挡。
- */
 function NumberField({
   label, kind, help, value, defaultValue, minimum, maximum,
   onChange, disabled = false, hintNode,
@@ -211,8 +184,6 @@ function NumberField({
   const [raw, setRaw] = useState<string>(() => formatNum(value))
   const inputRef = useRef<HTMLInputElement | null>(null)
 
-  // 外部 value 变化（reset / fork preset）→ 只在用户没在输入时才覆盖 raw，
-  // 否则会把用户半截输入吞掉。
   useEffect(() => {
     if (document.activeElement !== inputRef.current) {
       setRaw(formatNum(value))
@@ -227,7 +198,6 @@ function NumberField({
     }
     const num = kind === 'int' ? parseInt(raw, 10) : parseFloat(raw)
     if (Number.isNaN(num)) {
-      // 输入非法 → 回滚到上次合法 value
       setRaw(formatNum(value))
       return
     }
@@ -235,20 +205,17 @@ function NumberField({
       (minimum !== undefined && num < minimum) ||
       (maximum !== undefined && num > maximum)
     ) {
-      // 超出 schema 范围 → 回滚（避免「先存进去再 PUT 时被 400」的滞后反馈）
       setRaw(formatNum(value))
       return
     }
     onChange(num)
-    // 规范化显示：用户输 "0.050" / "+1" → 提交后显示 "0.05" / "1"
     setRaw(formatNum(num))
   }
 
   return (
     <div className="py-1.5">
-      <div style={labelStyle}>
-        {label}
-        {hintNode}
+      <div className="text-sm font-medium text-fg-secondary mb-1">
+        {label}{hintNode}
       </div>
       <input
         ref={inputRef}
@@ -266,7 +233,7 @@ function NumberField({
         disabled={disabled}
         className="input input-mono" style={inputStyle}
       />
-      {help && <div style={helpStyle}>{help}</div>}
+      {help && <div className="text-xs text-fg-tertiary mt-1">{help}</div>}
     </div>
   )
 }
@@ -288,10 +255,10 @@ function PathStringField({
   const text = value === null || value === undefined ? '' : String(value)
   return (
     <div className="py-1.5">
-      <div style={labelStyle}>
+      <div className="text-sm font-medium text-fg-secondary mb-1">
         {label}
         {kind === 'path' && (
-          <span style={{ marginLeft: 8, fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>(path)</span>
+          <span className="ml-2 text-xs text-fg-tertiary">(path)</span>
         )}
         {hintNode}
       </div>
@@ -308,13 +275,13 @@ function PathStringField({
             type="button"
             onClick={() => setPicking(true)}
             disabled={disabled}
-            className="btn btn-secondary btn-sm" style={{ flexShrink: 0, fontSize: 'var(--t-xs)' }}
+            className="btn btn-secondary btn-sm shrink-0"
           >
             浏览
           </button>
         )}
       </div>
-      {help && <div style={helpStyle}>{help}</div>}
+      {help && <div className="text-xs text-fg-tertiary mt-1">{help}</div>}
       {picking && !disabled && (
         <PathPicker
           initialPath={text || undefined}

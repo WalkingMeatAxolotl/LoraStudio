@@ -42,6 +42,7 @@
   --font-serif: "EB Garamond", ui-serif, Georgia, serif;
 
   /* sizes — ~110% of original 12-13px baseline */
+  --t-2xs: 10px;
   --t-xs: 12px;
   --t-sm: 14px;
   --t-base: 15px;
@@ -119,8 +120,16 @@
 }
 
 /* — density modifiers — */
-.density-tight { --s-3: 8px; --s-4: 12px; --s-5: 14px; --s-6: 18px; --s-8: 24px; --t-base: 13px; --t-md: 14px; --t-lg: 16px; }
-.density-loose { --s-3: 16px; --s-4: 22px; --s-5: 28px; --s-6: 32px; --s-8: 44px; --t-base: 15px; --t-md: 16px; --t-lg: 18px; }
+.density-tight {
+  --s-3: 8px; --s-4: 12px; --s-5: 14px; --s-6: 18px; --s-8: 24px;
+  --t-2xs: 9px; --t-xs: 10px; --t-sm: 12px; --t-base: 13px;
+  --t-md: 14px; --t-lg: 16px; --t-xl: 20px; --t-2xl: 24px; --t-3xl: 32px;
+}
+.density-loose {
+  --s-3: 16px; --s-4: 22px; --s-5: 28px; --s-6: 32px; --s-8: 44px;
+  --t-2xs: 12px; --t-xs: 14px; --t-sm: 16px; --t-base: 17px;
+  --t-md: 18px; --t-lg: 20px; --t-xl: 26px; --t-2xl: 34px; --t-3xl: 42px;
+}
 
 /* — radius modifiers — */
 .radius-sharp { --r-sm: 0; --r-md: 2px; --r-lg: 4px; --r-xl: 6px; }

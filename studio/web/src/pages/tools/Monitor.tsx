@@ -30,52 +30,31 @@ export default function MonitorPage() {
   const selectedTask = tasks.find((t) => t.id === taskId)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+    <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* 顶部状态栏 */}
-      <section style={{
-        borderRadius: 'var(--r-md)',
-        border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)',
-        padding: '10px 16px',
-        display: 'flex', alignItems: 'center', gap: 12,
-        fontSize: 'var(--t-xs)', flexShrink: 0, flexWrap: 'wrap',
-        margin: '0 0 12px 0',
-      }}>
+      <section className="rounded-md border border-subtle bg-surface text-xs flex items-center gap-3 shrink-0 flex-wrap"
+        style={{ padding: '10px 16px', margin: '0 0 12px 0' }}>
         {/* 健康指示 */}
-        <span style={{
-          display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-          background: ok ? 'var(--ok)' : 'var(--err)',
-          boxShadow: ok ? '0 0 6px var(--ok)' : '0 0 6px var(--err)',
-        }} />
-        <span style={{
-          fontWeight: 600,
-          color: ok ? 'var(--ok)' : 'var(--err)',
-          fontFamily: 'var(--font-mono)',
-        }}>
+        <span className={`inline-block w-2 h-2 rounded-full ${ok ? 'bg-ok' : 'bg-err'}`}
+          style={{ boxShadow: ok ? '0 0 6px var(--ok)' : '0 0 6px var(--err)' }} />
+        <span className={`font-semibold font-mono ${ok ? 'text-ok' : 'text-err'}`}>
           {error ? 'offline' : health?.status ?? '...'}
         </span>
         {health && (
-          <span style={{ color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>
+          <span className="text-fg-tertiary font-mono">
             v{health.version}
           </span>
         )}
 
-        <span style={{ color: 'var(--border-subtle)' }}>|</span>
+        <span className="text-fg-tertiary">|</span>
 
         {/* 任务选择 */}
-        <span style={{ color: 'var(--fg-tertiary)' }}>任务</span>
+        <span className="text-fg-tertiary">任务</span>
         <select
           value={taskId ?? ''}
           onChange={(e) => setTaskId(e.target.value === '' ? null : Number(e.target.value))}
-          style={{
-            padding: '4px 10px',
-            borderRadius: 'var(--r-sm)',
-            background: 'var(--bg-sunken)',
-            border: '1px solid var(--border-subtle)',
-            fontSize: 'var(--t-xs)',
-            color: 'var(--fg-primary)',
-            outline: 'none',
-          }}
+          className="rounded-sm bg-sunken border border-subtle text-xs text-fg-primary"
+          style={{ padding: '4px 10px', outline: 'none' }}
         >
           <option value="">（最新 running，没有则显示空）</option>
           {tasks.map((t) => (
@@ -87,7 +66,7 @@ export default function MonitorPage() {
 
         {selectedTask && (
           <>
-            <span style={{ color: 'var(--border-subtle)' }}>|</span>
+            <span className="text-fg-tertiary">|</span>
             <span className={statusBadge(selectedTask.status)}>
               {statusLabel(selectedTask.status)}
             </span>
@@ -98,18 +77,14 @@ export default function MonitorPage() {
       </section>
 
       {/* 监控主体 */}
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <div className="flex-1 min-h-0 overflow-hidden">
         {taskId !== null ? (
           <MonitorDashboard taskId={taskId} />
         ) : (
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            height: '100%', color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)',
-            flexDirection: 'column', gap: 8,
-          }}>
-            <span style={{ fontSize: 'var(--t-xl)' }}>📊</span>
+          <div className="flex items-center justify-center h-full text-fg-tertiary text-sm flex-col gap-2">
+            <span className="text-xl">📊</span>
             <span>暂无训练任务</span>
-            <span style={{ fontSize: 'var(--t-xs)' }}>启动训练后将自动显示监控数据</span>
+            <span className="text-xs">启动训练后将自动显示监控数据</span>
           </div>
         )}
       </div>

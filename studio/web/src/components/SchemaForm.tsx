@@ -52,28 +52,17 @@ export default function SchemaForm({
         return (
           <section
             key={key}
-            style={{
-              borderRadius: 'var(--r-md)',
-              border: '1px solid var(--border-subtle)',
-              background: 'var(--bg-surface)',
-            }}
+            className="rounded-md border border-subtle bg-surface"
           >
             <button
               type="button"
               onClick={() =>
                 setCollapsed({ ...collapsed, [key]: !isCollapsed })
               }
-              className="w-full flex items-center justify-between
-                px-4 py-3 text-sm font-semibold"
-              style={{
-                color: 'var(--fg-primary)',
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-              }}
+              className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-fg-primary bg-transparent border-none cursor-pointer"
             >
               <span>{label}</span>
-              <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-xs)' }}>
+              <span className="text-fg-tertiary text-xs">
                 {fields.length} 项 {isCollapsed ? '▸' : '▾'}
               </span>
             </button>

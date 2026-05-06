@@ -21,7 +21,7 @@ const STAGE_MAP: Record<string, { badge: string; label: string; dot?: true }> = 
 export default function StageBadge({ stage }: { stage: AnyStage }) {
   const s = STAGE_MAP[stage] ?? { badge: 'badge-neutral', label: stage }
   return (
-    <span className={`badge ${s.badge}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+    <span className={`badge ${s.badge}`}>
       {s.dot && DOT_RUNNING}
       {s.label}
     </span>

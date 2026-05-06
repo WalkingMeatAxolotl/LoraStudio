@@ -130,7 +130,7 @@ export default function TrainPage() {
   }, [pickerOpen])
 
   if (!activeVersion || !vid) {
-    return <p style={{ color: 'var(--fg-tertiary)', padding: 24 }}>请先选择 / 创建一个版本</p>
+    return <p className="text-fg-tertiary p-6">请先选择 / 创建一个版本</p>
   }
 
   const onForkPreset = async (name: string) => {
@@ -240,54 +240,41 @@ export default function TrainPage() {
         </button>
       }
     >
-    <div className="flex flex-col h-full gap-3">
+      <div className="flex flex-col h-full gap-3">
 
-      {/* 两栏布局：左（预设 + config 编辑） / 右（估算面板） */}
-      <div className="grid gap-3 flex-1 min-h-0" style={{ gridTemplateColumns: '1.5fr 1fr' }}>
+        {/* 两栏布局：左（预设 + config 编辑） / 右（估算面板） */}
+        <div className="grid grid-cols-[1.5fr_1fr] gap-3 flex-1 min-h-0">
 
-        {/* 左栏 */}
-        <div className="flex flex-col gap-3 min-h-0 min-w-0" style={{ overflowY: 'auto' }}>
+          {/* 左栏 */}
+          <div className="flex flex-col gap-3 min-h-0 min-w-0 overflow-y-auto">
 
           {/* 预设 picker：dropdown 取代「当前预设条 + 可用预设网格」两块。
               点击展开 popover 含搜索 + 卡片网格，跟全局 Presets 页一致。 */}
-          <section style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            flexShrink: 0, position: 'relative',
-          }}>
+          <section className="flex items-center gap-2.5 shrink-0 relative">
             <button
               ref={pickerAnchorRef}
               onClick={() => { setPickerOpen((v) => !v); setPickerSearch('') }}
               disabled={busy}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                minWidth: 300, padding: '10px 12px 10px 14px',
-                borderRadius: 'var(--r-md)',
-                border: `1px solid ${pickerOpen ? 'var(--accent)' : 'var(--border-default)'}`,
-                background: pickerOpen ? 'var(--accent-soft)' : 'var(--bg-surface)',
-                cursor: busy ? 'default' : 'pointer',
-                transition: 'border-color 100ms ease, background 100ms ease',
-                boxShadow: pickerOpen ? 'none' : 'var(--sh-sm)',
-              }}
-              onMouseEnter={(e) => { if (!pickerOpen) (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)' }}
-              onMouseLeave={(e) => { if (!pickerOpen) (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-default)' }}
+              className={[
+                'flex items-center gap-3 min-w-[300px] pl-3.5 pr-3 py-2.5',
+                'rounded-md border transition-[border-color,background] duration-100',
+                pickerOpen
+                  ? 'border-accent bg-accent-soft'
+                  : 'border-dim bg-surface shadow-sm hover:border-bold',
+                busy ? 'cursor-default' : 'cursor-pointer',
+              ].join(' ')}
               title="切换预设"
             >
-              <span style={{
-                fontSize: 'var(--t-2xs)', textTransform: 'uppercase', letterSpacing: '0.08em',
-                color: 'var(--fg-tertiary)', fontWeight: 600,
-              }}>
+              <span className="text-[10px] uppercase tracking-[0.08em] text-fg-tertiary font-semibold">
                 预设
               </span>
-              <span style={{
-                fontFamily: 'var(--font-mono)', fontSize: 'var(--t-md)',
-                fontWeight: 600,
-                color: configResp?.has_config ? 'var(--fg-primary)' : 'var(--fg-tertiary)',
-                flex: 1, textAlign: 'left',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
+              <span className={[
+                'font-mono text-md font-semibold flex-1 text-left truncate',
+                configResp?.has_config ? 'text-fg-primary' : 'text-fg-tertiary',
+              ].join(' ')}>
                 {activeVersion.config_name ?? '(未选)'}
               </span>
-              <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-md)' }}>▾</span>
+              <span className="text-fg-tertiary text-md">▾</span>
             </button>
             <button
               onClick={() => void onSaveAsPreset()}
@@ -299,18 +286,10 @@ export default function TrainPage() {
             </button>
             {dirty && (
               <span
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '4px 10px',
-                  borderRadius: 'var(--r-sm)',
-                  background: 'var(--warn-soft)',
-                  color: 'var(--warn)',
-                  fontSize: 'var(--t-xs)',
-                  fontWeight: 500,
-                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-warn-soft text-warn text-xs font-medium"
                 title="开始训练时会自动落盘"
               >
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)' }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-warn" />
                 未保存（开始训练自动落盘）
               </span>
             )}
@@ -321,39 +300,28 @@ export default function TrainPage() {
                 ref={pickerPopRef}
                 role="dialog"
                 aria-label="切换预设"
-                style={{
-                  position: 'absolute', top: 'calc(100% + 6px)', left: 0,
-                  width: 480, maxHeight: 480, overflow: 'hidden',
-                  borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-                  background: 'var(--bg-surface)', boxShadow: 'var(--sh-lg)',
-                  display: 'flex', flexDirection: 'column',
-                  zIndex: 50,
-                }}
+                className="absolute top-[calc(100%+6px)] left-0 w-[480px] max-h-[480px] overflow-hidden rounded-md border border-subtle bg-surface shadow-lg flex flex-col z-50"
               >
                 {/* search */}
-                <div style={{
-                  padding: 10, borderBottom: '1px solid var(--border-subtle)',
-                  display: 'flex', alignItems: 'center', gap: 8,
-                }}>
-                  <span style={{ position: 'relative', flex: 1, display: 'inline-flex', alignItems: 'center' }}>
+                <div className="p-2.5 border-b border-subtle flex items-center gap-2">
+                  <span className="relative flex-1 inline-flex items-center">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                       strokeWidth="2" strokeLinecap="round"
-                      style={{ position: 'absolute', left: 8, color: 'var(--fg-tertiary)', pointerEvents: 'none' }}>
+                      className="absolute left-2 text-fg-tertiary pointer-events-none">
                       <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
                     </svg>
                     <input
                       autoFocus
-                      className="input"
+                      className="input w-full pl-7 text-sm"
                       placeholder="筛选预设…"
                       value={pickerSearch}
                       onChange={(e) => setPickerSearch(e.target.value)}
-                      style={{ width: '100%', paddingLeft: 28, fontSize: 'var(--t-sm)' }}
                     />
                   </span>
                 </div>
 
                 {/* grid */}
-                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 10 }}>
+                <div className="flex-1 min-h-0 overflow-y-auto p-2.5">
                   {filteredPresets.length > 0 ? (
                     <div className="grid grid-cols-2 gap-2">
                       {filteredPresets.map((p) => {
@@ -363,27 +331,19 @@ export default function TrainPage() {
                             key={p.name}
                             onClick={() => { setPickerOpen(false); void onForkPreset(p.name) }}
                             disabled={busy}
-                            style={{
-                              borderRadius: 'var(--r-sm)',
-                              border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
-                              background: active ? 'var(--accent-soft)' : 'var(--bg-sunken)',
-                              padding: '8px 10px',
-                              textAlign: 'left',
-                              cursor: busy ? 'default' : 'pointer',
-                            }}
-                            onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)' }}
-                            onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-subtle)' }}
+                            className={[
+                              'rounded-sm px-2.5 py-2 text-left border transition-colors',
+                              active
+                                ? 'border-accent bg-accent-soft'
+                                : 'border-subtle bg-sunken hover:border-bold',
+                              busy ? 'cursor-default' : 'cursor-pointer',
+                            ].join(' ')}
                           >
-                            <div style={{
-                              fontSize: 'var(--t-sm)', fontFamily: 'var(--font-mono)',
-                              color: active ? 'var(--accent)' : 'var(--fg-primary)',
-                              fontWeight: 600,
-                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                            }}>{p.name}</div>
-                            <div style={{
-                              fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)',
-                              marginTop: 2,
-                            }}>
+                            <div className={[
+                              'text-sm font-mono font-semibold truncate',
+                              active ? 'text-accent' : 'text-fg-primary',
+                            ].join(' ')}>{p.name}</div>
+                            <div className="text-xs text-fg-tertiary mt-0.5">
                               {active ? '当前使用' : '点击套用'}
                             </div>
                           </button>
@@ -391,10 +351,7 @@ export default function TrainPage() {
                       })}
                     </div>
                   ) : (
-                    <div style={{
-                      color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)',
-                      textAlign: 'center', padding: '16px 0',
-                    }}>
+                    <div className="text-fg-tertiary text-sm text-center py-4">
                       {pickerSearch
                         ? `没有匹配「${pickerSearch}」`
                         : '尚无预设，去 /tools/presets 创建'}
@@ -405,30 +362,26 @@ export default function TrainPage() {
             )}
           </section>
 
-          {configResp === null || !schema ? (
-            <ConfigSkeleton />
-          ) : !configResp.has_config ? (
-            <div style={{
-              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)',
-              borderRadius: 'var(--r-md)', border: '1px dashed var(--border-default)',
-            }}>
-              请从上方预设卡片选择一个，复制进当前 version 后即可编辑配置。
-            </div>
-          ) : config ? (
-            <section className="flex-1 min-h-0 overflow-y-auto pr-1">
-              <SchemaForm
-                schema={schema}
-                values={config}
-                onChange={setConfig}
-                disabledFields={disabledFields}
-                disabledHints={disabledHints}
-              />
-            </section>
-          ) : (
-            <ConfigSkeleton />
-          )}
-        </div>
+            {configResp === null || !schema ? (
+              <ConfigSkeleton />
+            ) : !configResp.has_config ? (
+              <div className="flex-1 flex items-center justify-center text-fg-tertiary text-sm rounded-md border border-dashed border-dim">
+                请从上方预设卡片选择一个，复制进当前 version 后即可编辑配置。
+              </div>
+            ) : config ? (
+              <section className="flex-1 min-h-0 overflow-y-auto pr-1">
+                <SchemaForm
+                  schema={schema}
+                  values={config}
+                  onChange={setConfig}
+                  disabledFields={disabledFields}
+                  disabledHints={disabledHints}
+                />
+              </section>
+            ) : (
+              <ConfigSkeleton />
+            )}
+          </div>
 
         {/* 右栏：训练集 + 正则集分布 */}
         <DatasetStatsPanel
@@ -513,14 +466,11 @@ function DatasetStatsPanel({
     maxSteps > 0 && naturalTotal !== null && maxSteps < naturalTotal
 
   return (
-    <div className="flex flex-col gap-3" style={{ minWidth: 0 }}>
-      <div style={{
-        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)', padding: '10px 12px',
-      }}>
-        <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
-          <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
-          <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>训练集参数</span>
+    <div className="flex flex-col gap-3 min-w-0">
+      <div className="rounded-md border border-subtle bg-surface px-3 py-2.5">
+        <div className="flex items-center gap-1.5 mb-2.5">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
+          <span className="caption uppercase tracking-[0.06em] text-xs">训练集参数</span>
         </div>
 
         <FolderSection
@@ -530,7 +480,7 @@ function DatasetStatsPanel({
           empty="无训练图"
         />
 
-        <div style={{ height: 8 }} />
+        <div className="h-2" />
 
         <FolderSection
           title="reg/"
@@ -540,11 +490,7 @@ function DatasetStatsPanel({
         />
 
         {/* 总计 + 步数估算（不含 AR bucketing 误差） */}
-        <div style={{
-          marginTop: 10, paddingTop: 8,
-          borderTop: '1px solid var(--border-subtle)',
-          display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--t-xs)',
-        }}>
+        <div className="mt-2.5 pt-2 border-t border-subtle flex flex-col gap-1 text-xs">
           <Row label="有效样本/epoch" value={String(totalEffective)} bold />
           {stepsPerEpoch !== null && (
             <Row
@@ -586,47 +532,33 @@ function FolderSection({
 }) {
   return (
     <div>
-      <div style={{
-        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-        fontSize: 'var(--t-xs)', marginBottom: 4,
-      }}>
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-secondary)', fontWeight: 500 }}>
-          {title}
-        </span>
+      <div className="flex items-baseline justify-between text-xs mb-1">
+        <span className="font-mono text-fg-secondary font-medium">{title}</span>
         {folders.length > 0 && (
-          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)' }}>
-            ∑ {effective}
-          </span>
+          <span className="font-mono text-fg-tertiary">∑ {effective}</span>
         )}
       </div>
       {folders.length === 0 ? (
-        <div style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', paddingLeft: 4 }}>
-          {empty}
-        </div>
+        <div className="text-xs text-fg-tertiary pl-1">{empty}</div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div className="flex flex-col gap-0.5">
           {folders.map((f) => {
             const { repeat, label } = parseFolderRepeat(f.name)
             const eff = repeat * f.image_count
             return (
               <div
                 key={f.name}
-                style={{
-                  display: 'flex', alignItems: 'baseline', gap: 6,
-                  fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
-                  color: 'var(--fg-secondary)',
-                  paddingLeft: 4,
-                }}
+                className="flex items-baseline gap-1.5 text-xs font-mono text-fg-secondary pl-1"
                 title={`${f.name}：${repeat} repeat × ${f.image_count} 图 = ${eff}`}
               >
-                <span style={{ color: 'var(--fg-tertiary)' }}>{label}</span>
-                <span style={{ flex: 1, borderBottom: '1px dotted var(--border-subtle)', alignSelf: 'end', marginBottom: 4 }} />
+                <span className="text-fg-tertiary">{label}</span>
+                <span className="flex-1 border-b border-dotted border-subtle self-end mb-1" />
                 <span>
-                  <span style={{ color: 'var(--accent)' }}>{repeat}</span>
-                  <span style={{ color: 'var(--fg-tertiary)' }}> × </span>
-                  <span style={{ color: 'var(--fg-primary)' }}>{f.image_count}</span>
-                  <span style={{ color: 'var(--fg-tertiary)' }}> = </span>
-                  <span style={{ color: 'var(--fg-primary)', fontWeight: 600 }}>{eff}</span>
+                  <span className="text-accent">{repeat}</span>
+                  <span className="text-fg-tertiary"> × </span>
+                  <span className="text-fg-primary">{f.image_count}</span>
+                  <span className="text-fg-tertiary"> = </span>
+                  <span className="text-fg-primary font-semibold">{eff}</span>
                 </span>
               </div>
             )
@@ -673,18 +605,14 @@ function ConfigSkeleton() {
       {groups.map((rows, gi) => (
         <div
           key={gi}
-          className="animate-pulse"
-          style={{
-            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-surface)', padding: 14,
-          }}
+          className="animate-pulse rounded-md border border-subtle bg-surface p-3.5"
         >
-          <div style={{ height: 14, width: 128, borderRadius: 'var(--r-sm)', background: 'var(--bg-sunken)', marginBottom: 10 }} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="h-3.5 w-32 rounded-sm bg-sunken mb-2.5" />
+          <div className="flex flex-col gap-2">
             {Array.from({ length: rows }).map((_, ri) => (
-              <div key={ri} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div style={{ height: 10, width: 96, borderRadius: 'var(--r-sm)', background: 'var(--bg-sunken)', opacity: 0.7 }} />
-                <div style={{ height: 28, borderRadius: 'var(--r-sm)', background: 'var(--bg-canvas)', border: '1px solid var(--border-subtle)' }} />
+              <div key={ri} className="flex flex-col gap-1">
+                <div className="h-2.5 w-24 rounded-sm bg-sunken opacity-70" />
+                <div className="h-7 rounded-sm bg-canvas border border-subtle" />
               </div>
             ))}
           </div>
@@ -694,4 +622,3 @@ function ConfigSkeleton() {
     </section>
   )
 }
-

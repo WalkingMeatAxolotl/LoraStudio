@@ -51,7 +51,7 @@ export default function ImageGrid({
   activeName,
 }: Props) {
   if (items.length === 0) {
-    return <p className="text-slate-500 text-sm py-2">{emptyHint}</p>
+    return <p className="text-fg-tertiary text-sm py-2">{emptyHint}</p>
   }
   const shown = items.slice(0, limit)
   const overflow = items.length - shown.length
@@ -81,7 +81,7 @@ export default function ImageGrid({
         )
       })}
       {overflow > 0 && (
-        <p className="col-span-full text-xs text-slate-500 mt-1">
+        <p className="col-span-full text-xs text-fg-tertiary mt-1">
           仅显示前 {limit} 张（共 {items.length} 张）
         </p>
       )}
@@ -93,7 +93,7 @@ export default function ImageGrid({
  * cell 的 selected / onSelect / item 引用都没变，能跳过重渲，避免 N 张缩略图
  * 全部重新创建 DOM。
  *
- * `borderHighlight` 控制 cyan border + ring（"高亮"视觉），跟 `selected`
+ * `borderHighlight` 控制 accent border + ring（"高亮"视觉），跟 `selected`
  * （checkbox 状态）解耦：旧路径上两者一致，TagEdit 解耦模式下 border 跟
  * activeName 走，checkbox 跟多选走。 */
 const Cell = memo(function Cell({
@@ -121,9 +121,9 @@ const Cell = memo(function Cell({
       className={
         'group relative aspect-square overflow-hidden rounded border cursor-pointer select-none ' +
         (borderHighlight
-          ? 'border-cyan-400 ring-2 ring-cyan-400/40'
-          : 'border-slate-800 hover:border-slate-600') +
-        ' bg-slate-900'
+          ? 'border-accent ring-2 ring-accent-soft'
+          : 'border-subtle hover:border-dim') +
+        ' bg-sunken'
       }
     >
       <img
@@ -134,14 +134,14 @@ const Cell = memo(function Cell({
         draggable={false}
         className="w-full h-full object-cover pointer-events-none"
       />
-      {/* checkbox 视觉指示：选中显示蓝色实心 ✓，未选中悬停时显示白色空框 */}
+      {/* checkbox 视觉指示：选中显示实心 ✓，未选中悬停时显示空框 */}
       <span
         aria-hidden
         className={
           'absolute top-1 left-1 w-5 h-5 rounded-sm flex items-center justify-center text-[12px] font-bold transition-opacity ' +
           (selected
-            ? 'bg-cyan-500 text-white opacity-100'
-            : 'bg-black/50 border border-slate-300 text-transparent opacity-0 group-hover:opacity-100')
+            ? 'bg-accent text-accent-fg opacity-100'
+            : 'bg-black/50 border border-subtle text-transparent opacity-0 group-hover:opacity-100')
         }
       >
         ✓

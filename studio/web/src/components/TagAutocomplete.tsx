@@ -56,25 +56,18 @@ export default function TagAutocomplete({
   }
 
   return (
-    <div style={{ position: 'relative', ...style }} ref={ref}>
+    <div className="relative" style={style} ref={ref}>
       <input
         value={value}
         onChange={(e) => { onChange(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKey}
         placeholder={placeholder}
-        className="input input-mono"
-        style={{ fontSize: 'var(--t-xs)', width: '100%' }}
+        className="input input-mono text-xs w-full"
       />
       {open && matches.length > 0 && (
         <ul
-          style={{
-            position: 'absolute', left: 0, top: '100%', marginTop: 2, zIndex: 30,
-            background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--r-sm)', boxShadow: 'var(--sh-lg)',
-            maxHeight: 240, overflowY: 'auto', minWidth: '100%',
-            listStyle: 'none', padding: '4px 0', margin: 0,
-          }}
+          className="absolute left-0 top-full mt-0.5 z-30 bg-elevated border border-subtle rounded-sm shadow-lg max-h-60 overflow-y-auto min-w-full list-none p-1 m-0"
           role="listbox"
         >
           {matches.map((s, i) => (
@@ -83,13 +76,7 @@ export default function TagAutocomplete({
               role="option"
               aria-selected={i === hi}
               onMouseDown={(e) => { e.preventDefault(); onChange(s); setOpen(false) }}
-              style={{
-                padding: '4px 10px', fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
-                color: 'var(--fg-primary)', cursor: 'pointer',
-                background: i === hi ? 'var(--bg-overlay)' : 'transparent',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = i === hi ? 'var(--bg-overlay)' : 'transparent' }}
+              className={`px-2.5 py-1 text-xs font-mono text-fg-primary cursor-pointer rounded-sm ${i === hi ? 'bg-overlay' : 'hover:bg-overlay'}`}
             >
               {s}
             </li>
