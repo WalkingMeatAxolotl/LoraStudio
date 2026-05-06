@@ -10,8 +10,11 @@ huggingface_hub + Pillow + numpy。
 """
 from __future__ import annotations
 
+import contextlib
 import csv
 import logging
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterator, Optional
@@ -29,6 +32,30 @@ logger = logging.getLogger(__name__)
 
 def _safe_dir_name(model_id: str) -> str:
     return model_id.replace("/", "_").replace("\\", "_")
+
+
+@contextlib.contextmanager
+def _silenced_fd_stderr():
+    """临时把 fd 2 重定向到 devnull，吞掉 C++ 库直写到 fd 2 的输出。
+
+    onnxruntime 在 CUDA dlopen 失败（缺 cublasLt64_12.dll / libcurand 等）时，
+    会把彩色 ANSI + Windows 下额外的 NUL 字节直接吐到 fd 2，绕过 Python
+    sys.stderr —— 我们已经接住 InferenceSession 的 Python 异常并回填到
+    Settings UI 的 cuda_load_error，这些原始字节只会污染 worker 日志。
+    """
+    try:
+        sys.stderr.flush()
+    except Exception:  # noqa: BLE001
+        pass
+    saved = os.dup(2)
+    devnull = open(os.devnull, "wb")
+    try:
+        os.dup2(devnull.fileno(), 2)
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
+        devnull.close()
 
 
 class WD14Tagger:
@@ -117,11 +144,17 @@ class WD14Tagger:
         # onnxruntime-gpu 在创 session 时才真去 dlopen libcurand/libcublas/...，
         # 缺系统 CUDA runtime 会挂在这里。捕异常降 CPU 重试，把原因 stash 给
         # Settings UI 显示，避免「打标全挂」的硬错误。
+        # CUDA 尝试套 fd-level stderr 静默：onnx 在 dlopen 挂时会把彩色 ANSI +
+        # NUL-padded 报错直接打到 fd 2 污染 worker 日志，Python 异常已经能完整
+        # 拿到原因。CPU fallback 不静默——真挂了得让用户看到。
         model_path = str(model_dir / "model.onnx")
+        cuda_attempt = "CUDAExecutionProvider" in providers
+        ctx = _silenced_fd_stderr() if cuda_attempt else contextlib.nullcontext()
         try:
-            self._session = ort.InferenceSession(model_path, providers=providers)
+            with ctx:
+                self._session = ort.InferenceSession(model_path, providers=providers)
         except Exception as exc:  # noqa: BLE001
-            if "CUDAExecutionProvider" not in providers:
+            if not cuda_attempt:
                 raise
             err = str(exc)
             logger.warning(
