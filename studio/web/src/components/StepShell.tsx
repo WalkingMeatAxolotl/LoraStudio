@@ -21,8 +21,8 @@ export default function StepShell({ idx, title, subtitle, actions, children, eye
         actions={actions}
         sticky
       />
-      {/* flex: 1 + minHeight: 0 lets fixed-height children (dual-pane grids) fill remaining space */}
-      <div style={{ flex: 1, minHeight: 0, padding: 24 }}>
+      {/* flex column container: overflow:hidden stops page scroll; children use flex:1 to fill */}
+      <div style={{ flex: 1, minHeight: 0, padding: 24, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {children}
       </div>
     </div>

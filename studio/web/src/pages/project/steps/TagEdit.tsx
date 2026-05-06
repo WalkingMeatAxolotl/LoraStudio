@@ -233,24 +233,24 @@ export default function TagEditPage() {
         </>
       }
     >
-      {isEditing ? (
-        // ── EDIT MODE ─────────────────────────────────────────────────────────
-        // flex row: [image - full height] [grid - full height] [right panel]
-        // right panel = flex column: [BulkActionBar] [tag editor]
-        // BulkActionBar 与 tag editor 左右边界完全对齐（同一列内）
-        //
-        //   [  image  ] [      grid      ] [ BulkActionBar ]
-        //   [  image  ] [      grid      ] [  tag editor   ]
-        //
-        <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 10 }}>
+      {/*
+       * 统一布局：右侧面板宽度在两种模式下恒定（flex: 0 0 32%），
+       * BulkActionBar 始终在右侧面板内，切换模式时不改变宽度 → 无抖动。
+       *
+       * 普通模式:   [图片网格 flex:1] [右侧面板 32%]
+       * 编辑模式:   [大图预览 flex:1] [图片网格 flex:1.5] [右侧面板 32%]
+       */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 10 }}>
 
-          {/* LEFT: large image — full height, flex:3 */}
+        {/* ── 大图预览（仅编辑模式）── */}
+        {isEditing && (
           <section style={{
-            flex: 3,
+            flex: 1,
             borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
             background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
-            minHeight: 0, minWidth: 0, overflow: 'hidden',
+            minWidth: 0, overflow: 'hidden',
           }}>
+            {/* 文件名 header */}
             <div style={{
               padding: '8px 12px', borderBottom: '1px solid var(--border-subtle)',
               flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
@@ -263,56 +263,64 @@ export default function TagEditPage() {
                 {activeFolder}/{activeName}
               </code>
             </div>
+            {/* 图片区：position:relative + absolute img 保证可靠填充 */}
             <div style={{
-              flex: 1, minHeight: 0, display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-              padding: 8, background: 'var(--bg-sunken)', overflow: 'hidden',
+              flex: 1, position: 'relative', background: 'var(--bg-sunken)',
             }}>
               <img
                 key={activeKey}
                 src={api.versionThumbUrl(project.id, activeVersion.id, 'train', activeName, activeFolder, 800)}
                 alt={activeName}
-                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 'var(--r-sm)', display: 'block' }}
+                style={{
+                  position: 'absolute', inset: 8,
+                  width: 'calc(100% - 16px)', height: 'calc(100% - 16px)',
+                  objectFit: 'contain', borderRadius: 'var(--r-sm)',
+                }}
               />
             </div>
           </section>
+        )}
 
-          {/* CENTER: image grid — full height, flex:5 */}
-          <section style={{
-            flex: 5,
-            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
-            minHeight: 0, minWidth: 0, overflow: 'hidden',
-          }}>
-            <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-              <ImageGrid
-                items={captionItems}
-                selected={sel}
-                onSelect={handleClick}
-                ariaLabel="tag-edit-grid"
-                emptyHint={filterTag ? `没有图含「${filterTag}」` : '还没有图。请先在筛选和打标步骤完成操作。'}
-              />
-            </div>
-          </section>
-
-          {/* RIGHT PANEL: BulkActionBar + tag editor，flex:4，二者对齐 */}
-          <div style={{
-            flex: 4, display: 'flex', flexDirection: 'column', gap: 10,
-            minHeight: 0, minWidth: 0,
-          }}>
-            <BulkActionBar
-              cache={cache}
-              selectedKeys={selectedKeys}
-              onApply={applyBulkUpdates}
-              tagSuggestions={tagSuggestions}
-              defaultScope="selected"
-              onClearSelection={() => setSel(new Set())}
-              filterTag={filterTag}
-              onFilterTagChange={setFilterTag}
-              totalCount={keys.length}
-              filteredCount={filteredKeys.length}
-              onSelectAll={() => setSel(new Set(filteredKeys))}
+        {/* ── 图片网格（始终显示）── */}
+        <section style={{
+          flex: isEditing ? 1.5 : 1,
+          borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+          background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
+          minWidth: 0, overflow: 'hidden',
+        }}>
+          {/* 只有 inner div 可滚动，外层 section overflow:hidden 防整页滚 */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+            <ImageGrid
+              items={captionItems}
+              selected={sel}
+              onSelect={handleClick}
+              ariaLabel="tag-edit-grid"
+              emptyHint={filterTag ? `没有图含「${filterTag}」` : '还没有图。请先在筛选和打标步骤完成操作。'}
             />
+          </div>
+        </section>
+
+        {/* ── 右侧面板：宽度恒定，BulkActionBar 永远在这里 ── */}
+        <div style={{
+          flex: '0 0 32%', display: 'flex', flexDirection: 'column', gap: 10,
+          minWidth: 0,
+        }}>
+          <BulkActionBar
+            cache={cache}
+            selectedKeys={selectedKeys}
+            onApply={applyBulkUpdates}
+            tagSuggestions={tagSuggestions}
+            defaultScope="selected"
+            onClearSelection={() => setSel(new Set())}
+            filterTag={filterTag}
+            onFilterTagChange={setFilterTag}
+            totalCount={keys.length}
+            filteredCount={filteredKeys.length}
+            onSelectAll={() => setSel(new Set(filteredKeys))}
+          />
+
+          {isEditing ? (
+            /* 标签编辑器 */
             <section style={{
               flex: 1,
               borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
@@ -330,54 +338,16 @@ export default function TagEditPage() {
               </div>
               <TagEditor tags={activeTags} onChange={updateActiveTags} />
             </section>
-          </div>
+          ) : (
+            /* 标签统计面板 */
+            <TagStatsPanel
+              cache={cache}
+              selectedKeys={selectedKeys}
+              onPickTag={handlePickTag}
+            />
+          )}
         </div>
-      ) : (
-        // ── NORMAL MODE ───────────────────────────────────────────────────────
-        // flex column: [BulkActionBar] [row: grid | stats]
-        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10 }}>
-          <BulkActionBar
-            cache={cache}
-            selectedKeys={selectedKeys}
-            onApply={applyBulkUpdates}
-            tagSuggestions={tagSuggestions}
-            defaultScope="selected"
-            onClearSelection={() => setSel(new Set())}
-            filterTag={filterTag}
-            onFilterTagChange={setFilterTag}
-            totalCount={keys.length}
-            filteredCount={filteredKeys.length}
-            onSelectAll={() => setSel(new Set(filteredKeys))}
-          />
-          <div style={{ flex: 1, display: 'flex', gap: 10, minHeight: 0 }}>
-
-          <section style={{
-            flex: 1,
-            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
-            minHeight: 0, overflow: 'hidden',
-          }}>
-            <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-              <ImageGrid
-                items={captionItems}
-                selected={sel}
-                onSelect={handleClick}
-                ariaLabel="tag-edit-grid"
-                emptyHint={filterTag ? `没有图含「${filterTag}」` : '还没有图。请先在筛选和打标步骤完成操作。'}
-              />
-            </div>
-          </section>
-
-            <div style={{ flex: '0 0 25%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-              <TagStatsPanel
-                cache={cache}
-                selectedKeys={selectedKeys}
-                onPickTag={handlePickTag}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
     </StepShell>
   )
 }
