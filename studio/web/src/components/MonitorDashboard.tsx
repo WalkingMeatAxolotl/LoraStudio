@@ -361,7 +361,13 @@ export default function MonitorDashboard({ taskId }: { taskId: number }) {
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <span>elapsed {elapsed}</span>
+            <span>已用 {elapsed}</span>
+            {eta !== '--' && (
+              <>
+                <span className="text-dim">·</span>
+                <span>剩余 {eta}</span>
+              </>
+            )}
           </>
         )}
         <span className="flex-1" />
