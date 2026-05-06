@@ -238,11 +238,34 @@ export default function TagEditPage() {
        * BulkActionBar 始终在右侧面板内，切换模式时不改变宽度 → 无抖动。
        *
        * 普通模式:   [图片网格 flex:1] [右侧面板 32%]
-       * 编辑模式:   [大图预览 flex:1] [图片网格 flex:1.5] [右侧面板 32%]
+       * 编辑模式:   [图片网格 flex:1.5] [大图预览 flex:1] [右侧面板 32%]
+       *
+       * 视觉解耦：grid 把 activeKey 作为 activeName 传给 ImageGrid，cyan 边框 +
+       * ring 现在跟「正在编辑的那张」走；多选只剩 checkbox ✓ 不再画边框。
        */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 10 }}>
 
-        {/* ── 大图预览（仅编辑模式）── */}
+        {/* ── 图片网格（始终显示）── */}
+        <section style={{
+          flex: isEditing ? 1.5 : 1,
+          borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+          background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
+          minWidth: 0, overflow: 'hidden',
+        }}>
+          {/* 只有 inner div 可滚动，外层 section overflow:hidden 防整页滚 */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+            <ImageGrid
+              items={captionItems}
+              selected={sel}
+              activeName={activeKey || undefined}
+              onSelect={handleClick}
+              ariaLabel="tag-edit-grid"
+              emptyHint={filterTag ? `没有图含「${filterTag}」` : '还没有图。请先在筛选和打标步骤完成操作。'}
+            />
+          </div>
+        </section>
+
+        {/* ── 大图预览（仅编辑模式，放在 grid 右侧）── */}
         {isEditing && (
           <section style={{
             flex: 1,
@@ -280,25 +303,6 @@ export default function TagEditPage() {
             </div>
           </section>
         )}
-
-        {/* ── 图片网格（始终显示）── */}
-        <section style={{
-          flex: isEditing ? 1.5 : 1,
-          borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-          background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
-          minWidth: 0, overflow: 'hidden',
-        }}>
-          {/* 只有 inner div 可滚动，外层 section overflow:hidden 防整页滚 */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-            <ImageGrid
-              items={captionItems}
-              selected={sel}
-              onSelect={handleClick}
-              ariaLabel="tag-edit-grid"
-              emptyHint={filterTag ? `没有图含「${filterTag}」` : '还没有图。请先在筛选和打标步骤完成操作。'}
-            />
-          </div>
-        </section>
 
         {/* ── 右侧面板：宽度恒定，BulkActionBar 永远在这里 ── */}
         <div style={{

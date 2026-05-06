@@ -23,6 +23,15 @@ interface Props {
   ariaLabel?: string
   /** 列数（默认按宽度自适应）。FolderColumn 这种窄列会传 2-3。 */
   columnsClass?: string
+  /** 当前「活跃」项（如 TagEdit 正在编辑的那张），名字精确匹配 item.name。
+   *
+   * **传了**这个 prop 就启用「解耦视觉」模式：
+   * - border / ring 只跟 activeName 走（标识活跃项）
+   * - checkbox 只跟 selected 走（标识多选）
+   *
+   * **不传**沿用旧行为：selected 同时驱动 border 和 checkbox（其他用 ImageGrid
+   * 的页面，如 Curation / Download / Reg 未引入「活跃项」概念，行为不变）。 */
+  activeName?: string
 }
 
 // 默认按容器宽度自动塞满：每格最小 120px，剩余宽度均分给最后一列；
@@ -39,12 +48,14 @@ export default function ImageGrid({
   emptyHint = '没有图片',
   ariaLabel,
   columnsClass = DEFAULT_COLUMNS,
+  activeName,
 }: Props) {
   if (items.length === 0) {
     return <p className="text-slate-500 text-sm py-2">{emptyHint}</p>
   }
   const shown = items.slice(0, limit)
   const overflow = items.length - shown.length
+  const decoupled = activeName !== undefined
 
   return (
     <div
@@ -54,11 +65,15 @@ export default function ImageGrid({
     >
       {shown.map((it) => {
         const isSel = selected.has(it.name)
+        const isActive = decoupled && it.name === activeName
+        // border = 旧行为时跟 selected 走；解耦时跟 activeName 走
+        const borderHighlight = decoupled ? isActive : isSel
         return (
           <Cell
             key={it.name}
             item={it}
             selected={isSel}
+            borderHighlight={borderHighlight}
             onSelect={onSelect}
             onHover={onHover}
             onPreview={onPreview}
@@ -76,16 +91,22 @@ export default function ImageGrid({
 
 /** Cell 用 memo 包起来：父组件每次因为 hover 改 focus 都会重渲，但绝大多数
  * cell 的 selected / onSelect / item 引用都没变，能跳过重渲，避免 N 张缩略图
- * 全部重新创建 DOM。 */
+ * 全部重新创建 DOM。
+ *
+ * `borderHighlight` 控制 cyan border + ring（"高亮"视觉），跟 `selected`
+ * （checkbox 状态）解耦：旧路径上两者一致，TagEdit 解耦模式下 border 跟
+ * activeName 走，checkbox 跟多选走。 */
 const Cell = memo(function Cell({
   item,
   selected,
+  borderHighlight,
   onSelect,
   onHover,
   onPreview,
 }: {
   item: ImageGridItem
   selected: boolean
+  borderHighlight: boolean
   onSelect: (name: string, e: React.MouseEvent) => void
   onHover?: (name: string) => void
   onPreview?: (name: string) => void
@@ -99,7 +120,7 @@ const Cell = memo(function Cell({
       title={item.meta ? `${item.name}\n${item.meta}` : item.name}
       className={
         'group relative aspect-square overflow-hidden rounded border cursor-pointer select-none ' +
-        (selected
+        (borderHighlight
           ? 'border-cyan-400 ring-2 ring-cyan-400/40'
           : 'border-slate-800 hover:border-slate-600') +
         ' bg-slate-900'
