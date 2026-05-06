@@ -160,36 +160,27 @@ export default function ProjectsPage() {
         }
       />
 
-      <div style={{ padding: 24 }}>
+      <div className="p-6">
         {error && (
-          <div style={{
-            marginBottom: 16,
-            padding: '10px 14px',
-            borderRadius: 'var(--r-md)',
-            background: 'var(--err-soft)',
-            border: '1px solid var(--err)',
-            color: 'var(--err)',
-            fontSize: 'var(--t-sm)',
-            fontFamily: 'var(--font-mono)',
-          }}>{error}</div>
+          <div className="mb-4 px-3.5 py-2.5 rounded-md bg-err-soft border border-err text-err text-sm font-mono">{error}</div>
         )}
 
         {loading ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
             {[1, 2, 3].map(i => (
-              <div key={i} className="card" style={{ padding: 18, height: 140 }}>
-                <div style={{ width: '60%', height: 16, borderRadius: 4, background: 'var(--bg-overlay)', marginBottom: 10 }} />
-                <div style={{ width: '40%', height: 11, borderRadius: 3, background: 'var(--bg-overlay)' }} />
+              <div key={i} className="card p-[18px]" style={{ height: 140 }}>
+                <div className="w-3/5 h-4 rounded bg-overlay mb-2.5" />
+                <div className="w-2/5 h-[11px] rounded-sm bg-overlay" />
               </div>
             ))}
           </div>
         ) : items.length === 0 ? (
-          <div style={{ marginTop: 80, textAlign: 'center', color: 'var(--fg-tertiary)' }}>
-            <div style={{ fontSize: 'var(--t-lg)', marginBottom: 8 }}>还没有项目</div>
-            <div style={{ fontSize: 'var(--t-sm)' }}>点右上角「新建项目」开始一个新的 LoRA 训练</div>
+          <div className="mt-20 text-center text-fg-tertiary">
+            <div className="text-lg mb-2">还没有项目</div>
+            <div className="text-sm">点右上角「新建项目」开始一个新的 LoRA 训练</div>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
             {items.map((p) => (
               <ProjectCard
                 key={p.id}
@@ -231,29 +222,16 @@ function ProjectCard({
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{
-        padding: 18,
-        textAlign: 'left',
-        border: `1px solid ${hovered ? 'var(--border-default)' : 'var(--border-subtle)'}`,
-        borderRadius: 'var(--r-lg)',
-        background: hovered ? 'var(--bg-surface-hover, var(--bg-surface))' : 'var(--bg-surface)',
-        boxShadow: hovered ? 'var(--shadow-sm)' : 'none',
-        cursor: 'pointer',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 14,
-        position: 'relative',
-        transition: 'border-color 0.15s, box-shadow 0.15s',
-        width: '100%',
-      }}
+      className={`p-[18px] text-left rounded-lg cursor-pointer flex flex-col gap-3.5 relative w-full ${hovered ? 'border-dim shadow-sm bg-surface' : 'border border-subtle bg-surface'}`}
+      style={{ transition: 'border-color 0.15s, box-shadow 0.15s' }}
     >
       {/* header row */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 'var(--t-md)', fontWeight: 600, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div className="flex justify-between items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="text-md font-semibold overflow-hidden text-ellipsis whitespace-nowrap" style={{ letterSpacing: '-0.01em' }}>
             {p.title}
           </div>
-          <div className="mono" style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', marginTop: 2 }}>
+          <div className="mono text-xs text-fg-tertiary mt-0.5">
             {p.slug}
           </div>
         </div>
@@ -262,34 +240,26 @@ function ProjectCard({
 
       {/* note */}
       {p.note && (
-        <p style={{ margin: 0, fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+        <p className="m-0 text-sm text-fg-secondary overflow-hidden line-clamp-2">
           {p.note}
         </p>
       )}
 
       {/* footer row */}
-      <div style={{ display: 'flex', gap: 16, fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)', marginTop: 'auto', alignItems: 'center' }}>
+      <div className="flex gap-4 text-sm text-fg-secondary mt-auto items-center">
         <StatPair label="下载" value={p.download_image_count ?? 0} />
-        <span style={{ flex: 1 }} />
+        <span className="flex-1" />
         {stepPath && (
-          <span style={{ fontSize: 'var(--t-xs)', color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
+          <span className="text-xs text-accent font-mono">
             继续 →
           </span>
         )}
-        <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-xs)' }}>
+        <span className="text-fg-tertiary text-xs">
           {relativeTime(p.updated_at)}
         </span>
         <button
           onClick={onDelete}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            padding: '2px 6px',
-            borderRadius: 'var(--r-sm)',
-            color: 'var(--fg-tertiary)',
-            fontSize: 'var(--t-xs)',
-            cursor: 'pointer',
-          }}
+          className="bg-transparent border-none px-1.5 py-0.5 rounded-sm text-fg-tertiary text-xs cursor-pointer"
           title="移到回收站"
         >
           ×
@@ -301,9 +271,9 @@ function ProjectCard({
 
 function StatPair({ label, value }: { label: string; value: number }) {
   return (
-    <span style={{ display: 'inline-flex', gap: 5, alignItems: 'baseline' }}>
-      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--fg-primary)' }}>{value}</span>
-      <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
+    <span className="inline-flex gap-1.5 items-baseline">
+      <span className="font-mono font-semibold text-fg-primary">{value}</span>
+      <span className="text-xs text-fg-tertiary uppercase tracking-wider">{label}</span>
     </span>
   )
 }
@@ -339,30 +309,16 @@ function NewProjectDialog({
 
   return (
     <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 40,
-        background: 'rgba(0,0,0,0.45)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/45"
       onClick={onCancel}
     >
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        style={{
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 'var(--r-xl)',
-          padding: 28,
-          width: '90%',
-          maxWidth: 440,
-          boxShadow: 'var(--shadow-lg)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 18,
-        }}
+        className="bg-surface border border-dim rounded-xl p-7 flex flex-col gap-[18px] shadow-lg"
+        style={{ width: '90%', maxWidth: 440 }}
       >
-        <h2 style={{ margin: 0, fontSize: 'var(--t-xl)', fontWeight: 600 }}>新建项目</h2>
+        <h2 className="m-0 text-xl font-semibold">新建项目</h2>
 
         <FieldLabel label="项目名称" hint="title">
           <input
@@ -394,7 +350,7 @@ function NewProjectDialog({
           />
         </FieldLabel>
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div className="flex gap-2 justify-end">
           <button type="button" className="btn btn-secondary" onClick={onCancel}>取消</button>
           <button
             type="submit"
@@ -411,10 +367,10 @@ function NewProjectDialog({
 
 function FieldLabel({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 'var(--t-sm)', fontWeight: 500 }}>
+    <label className="flex flex-col gap-1.5">
+      <span className="text-sm font-medium">
         {label}
-        {hint && <span style={{ marginLeft: 8, fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>{hint}</span>}
+        {hint && <span className="ml-2 text-xs text-fg-tertiary font-mono">{hint}</span>}
       </span>
       {children}
     </label>

@@ -41,7 +41,7 @@ export default function ImageGrid({
   columnsClass = DEFAULT_COLUMNS,
 }: Props) {
   if (items.length === 0) {
-    return <p className="text-slate-500 text-sm py-2">{emptyHint}</p>
+    return <p className="text-fg-tertiary text-sm py-2">{emptyHint}</p>
   }
   const shown = items.slice(0, limit)
   const overflow = items.length - shown.length
@@ -66,7 +66,7 @@ export default function ImageGrid({
         )
       })}
       {overflow > 0 && (
-        <p className="col-span-full text-xs text-slate-500 mt-1">
+        <p className="col-span-full text-xs text-fg-tertiary mt-1">
           仅显示前 {limit} 张（共 {items.length} 张）
         </p>
       )}
@@ -100,9 +100,9 @@ const Cell = memo(function Cell({
       className={
         'group relative aspect-square overflow-hidden rounded border cursor-pointer select-none ' +
         (selected
-          ? 'border-cyan-400 ring-2 ring-cyan-400/40'
-          : 'border-slate-800 hover:border-slate-600') +
-        ' bg-slate-900'
+          ? 'border-accent ring-2 ring-accent-soft'
+          : 'border-subtle hover:border-dim') +
+        ' bg-sunken'
       }
     >
       <img
@@ -119,8 +119,8 @@ const Cell = memo(function Cell({
         className={
           'absolute top-1 left-1 w-5 h-5 rounded-sm flex items-center justify-center text-[12px] font-bold transition-opacity ' +
           (selected
-            ? 'bg-cyan-500 text-white opacity-100'
-            : 'bg-black/50 border border-slate-300 text-transparent opacity-0 group-hover:opacity-100')
+            ? 'bg-accent text-accent-fg opacity-100'
+            : 'bg-black/50 border border-subtle text-transparent opacity-0 group-hover:opacity-100')
         }
       >
         ✓

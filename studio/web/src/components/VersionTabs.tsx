@@ -1,12 +1,12 @@
 import type { Version, VersionStage } from '../api/client'
 
 const STAGE_DOT: Record<VersionStage, string> = {
-  curating: 'bg-amber-400',
-  tagging: 'bg-amber-400',
-  regularizing: 'bg-amber-400',
-  ready: 'bg-cyan-400',
-  training: 'bg-violet-400',
-  done: 'bg-emerald-400',
+  curating:     'bg-warn',
+  tagging:      'bg-warn',
+  regularizing: 'bg-warn',
+  ready:        'bg-accent',
+  training:     'bg-info',
+  done:         'bg-ok',
 }
 
 interface Props {
@@ -26,7 +26,7 @@ export default function VersionTabs({
 }: Props) {
   return (
     <div
-      className="flex flex-wrap items-center gap-1 border-b border-slate-800 pb-2"
+      className="flex flex-wrap items-center gap-1 border-b border-subtle pb-2"
       role="tablist"
       aria-label="versions"
     >
@@ -37,7 +37,7 @@ export default function VersionTabs({
             key={v.id}
             className={
               'flex items-center gap-1 rounded px-1 ' +
-              (active ? 'bg-slate-800/80' : '')
+              (active ? 'bg-surface' : '')
             }
           >
             <button
@@ -47,8 +47,8 @@ export default function VersionTabs({
               className={
                 'flex items-center gap-1.5 px-2 py-1 text-xs ' +
                 (active
-                  ? 'text-cyan-300'
-                  : 'text-slate-400 hover:text-slate-200')
+                  ? 'text-accent'
+                  : 'text-fg-tertiary hover:text-fg-primary')
               }
             >
               <span
@@ -60,7 +60,7 @@ export default function VersionTabs({
             {active && versions.length > 1 && (
               <button
                 onClick={() => onDelete(v.id)}
-                className="text-[10px] text-slate-500 hover:text-red-400 px-1"
+                className="text-[10px] text-fg-tertiary hover:text-err px-1"
                 aria-label={`删除版本 ${v.label}`}
                 title="删除该版本（移到回收站）"
               >
@@ -72,7 +72,7 @@ export default function VersionTabs({
       })}
       <button
         onClick={onCreate}
-        className="text-xs px-2 py-1 rounded text-slate-400 hover:text-cyan-300 hover:bg-slate-800/60 ml-1"
+        className="text-xs px-2 py-1 rounded text-fg-tertiary hover:text-accent hover:bg-surface ml-1"
         title="新建版本"
       >
         + 新版本

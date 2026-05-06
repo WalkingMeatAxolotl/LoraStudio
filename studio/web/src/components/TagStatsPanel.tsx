@@ -46,28 +46,15 @@ export default function TagStatsPanel({
   const maxCount = filtered.length > 0 ? filtered[0][1] : 1
 
   return (
-    <section style={{
-      borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-      background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
-      minHeight: 0, flex: 1, minWidth: 0, overflow: 'hidden',
-    }}>
+    <section className="rounded-md border border-subtle bg-surface flex flex-col min-h-0 flex-1 min-w-0 overflow-hidden">
       {/* header */}
-      <div style={{
-        padding: '6px 10px', borderBottom: '1px solid var(--border-subtle)',
-        display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-xs)',
-        flexShrink: 0, flexWrap: 'wrap',
-      }}>
-        <span style={{ fontWeight: 600, color: 'var(--fg-primary)' }}>标签分布</span>
-        <span style={{
-          padding: '1px 6px', borderRadius: 'var(--r-sm)',
-          background: usingSelection ? 'var(--accent-soft)' : 'var(--bg-sunken)',
-          color: usingSelection ? 'var(--accent)' : 'var(--fg-tertiary)',
-          fontSize: 'var(--t-2xs)',
-        }}>
+      <div className="px-2.5 py-1.5 border-b border-subtle flex items-center gap-2 text-xs shrink-0 flex-wrap">
+        <span className="font-semibold text-fg-primary">标签分布</span>
+        <span className={`px-1.5 py-px rounded-sm text-[10px] ${usingSelection ? 'bg-accent-soft text-accent' : 'bg-sunken text-fg-tertiary'}`}>
           {usingSelection ? `选中 ${selectedKeys.length}` : '全部'}
         </span>
-        <span style={{ color: 'var(--fg-tertiary)' }}>{items.length} tag</span>
-        <span style={{ color: 'var(--border-default)' }}>|</span>
+        <span className="text-fg-tertiary">{items.length} tag</span>
+        <span className="text-dim">|</span>
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as Sort)}
@@ -79,7 +66,7 @@ export default function TagStatsPanel({
           <option value="name_asc">名称 A→Z</option>
           <option value="name_desc">名称 Z→A</option>
         </select>
-        <span style={{ flex: 1 }} />
+        <span className="flex-1" />
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -90,13 +77,13 @@ export default function TagStatsPanel({
       </div>
 
       {/* body */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {filtered.length === 0 ? (
-          <p style={{ padding: '8px 10px', fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>
+          <p className="px-2.5 py-2 text-xs text-fg-tertiary m-0">
             {usingSelection ? '选中的图还没有 tag' : '还没有 tag'}
           </p>
         ) : (
-          <div style={{ padding: '4px 6px', display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <div className="p-1.5 flex flex-col gap-px">
             {filtered.map(([t, c]) => {
               const pct = Math.max((c / maxCount) * 100, 3)
               return (
@@ -104,34 +91,18 @@ export default function TagStatsPanel({
                   key={t}
                   onClick={() => onPickTag(t)}
                   title={`选中所有含「${t}」的图`}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '3px 8px', borderRadius: 'var(--r-sm)',
-                    background: 'transparent', border: 'none',
-                    cursor: 'pointer', textAlign: 'left' as const,
-                    fontSize: 'var(--t-xs)', minWidth: 0,
-                    position: 'relative',
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                  className="flex items-center gap-1.5 px-2 py-0.5 rounded-sm bg-transparent border-none cursor-pointer text-left text-xs min-w-0 relative hover:bg-overlay transition-colors"
                 >
-                  {/* bar */}
+                  {/* bar — dynamic opacity requires inline style */}
                   <span style={{
                     position: 'absolute', inset: 0, borderRadius: 'var(--r-sm)',
                     background: 'var(--accent-soft)', opacity: pct / 100 * 0.35,
                     width: `${pct}%`, zIndex: 0,
                   }} />
-                  <span style={{
-                    fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)',
-                    flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    position: 'relative', zIndex: 1,
-                  }}>
+                  <span className="font-mono text-fg-primary flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap relative z-[1]">
                     {t}
                   </span>
-                  <span style={{
-                    color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)',
-                    fontSize: 'var(--t-2xs)', position: 'relative', zIndex: 1,
-                  }}>
+                  <span className="text-fg-tertiary font-mono text-[10px] relative z-[1]">
                     {c}
                   </span>
                 </button>

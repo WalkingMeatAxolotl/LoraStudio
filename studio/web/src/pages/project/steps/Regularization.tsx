@@ -183,7 +183,7 @@ export default function RegularizationPage() {
   )
 
   if (!activeVersion || !vid) {
-    return <p style={{ color: 'var(--fg-tertiary)', padding: 24 }}>请先选择 / 创建一个版本</p>
+    return <p className="text-fg-tertiary p-6">请先选择 / 创建一个版本</p>
   }
 
   return (
@@ -204,10 +204,10 @@ export default function RegularizationPage() {
     <div className="flex flex-col h-full gap-3">
 
       {/* 两栏布局：左（控制 + preview） / 右（AR bucket 统计面板） */}
-      <div className="grid gap-3 flex-1 min-h-0" style={{ gridTemplateColumns: '1.5fr 1fr' }}>
+      <div className="grid grid-cols-[1.5fr_1fr] gap-3 flex-1 min-h-0">
 
         {/* 左栏 */}
-        <div className="flex flex-col gap-3 min-h-0 min-w-0" style={{ overflowY: 'auto' }}>
+        <div className="flex flex-col gap-3 min-h-0 min-w-0 overflow-y-auto">
 
           <RegStatusBar
             reg={reg}
@@ -216,40 +216,35 @@ export default function RegularizationPage() {
             disabled={isLive}
           />
 
-      <section style={{
-        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)', padding: '10px 14px',
-        display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0,
-      }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, fontSize: 'var(--t-xs)' }}>
-          <span style={{ color: 'var(--fg-tertiary)' }}>来源</span>
+      <section className="rounded-md border border-subtle bg-surface px-3.5 py-2.5 flex flex-col gap-2.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5 text-xs">
+          <span className="text-fg-tertiary">来源</span>
           <select
             value={apiSource}
             onChange={(e) => setApiSource(e.target.value as 'gelbooru' | 'danbooru')}
-            className="input"
-            style={{ padding: '3px 8px', fontSize: 'var(--t-sm)' }}
+            className="input px-2 py-0.5 text-sm"
           >
             <option value="gelbooru">Gelbooru</option>
             <option value="danbooru">Danbooru</option>
           </select>
-          <span style={{ color: 'var(--border-default)' }}>|</span>
-          <span style={{ color: 'var(--fg-tertiary)' }}>
+          <span className="text-fg-tertiary">|</span>
+          <span className="text-fg-tertiary">
             目标数量{' '}
-            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)', fontWeight: 500 }}>{trainImageCount}</span>
-            <span style={{ color: 'var(--fg-tertiary)' }}>（镜像 train）</span>
+            <span className="font-mono text-fg-primary font-medium">{trainImageCount}</span>
+             （镜像 train）
           </span>
-          <span style={{ color: 'var(--border-default)' }}>|</span>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+          <span className="text-fg-tertiary">|</span>
+          <label className="flex items-center gap-1 cursor-pointer">
             <input
               type="checkbox"
               checked={autoTag}
               onChange={(e) => setAutoTag(e.target.checked)}
             />
-            <span style={{ color: 'var(--fg-secondary)' }}>拉完后自动 WD14 打标</span>
+            <span className="text-fg-secondary">拉完后自动 WD14 打标</span>
           </label>
           <button
             onClick={() => setAdvancedOpen((v) => !v)}
-            style={{ color: 'var(--fg-tertiary)', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 'var(--t-xs)' }}
+            className="text-fg-tertiary bg-transparent border-none cursor-pointer text-xs"
           >
             {advancedOpen ? '⌃ 进阶' : '⌄ 进阶'}
           </button>
@@ -342,23 +337,15 @@ function RegStatusBar({
 }) {
   if (!reg) {
     return (
-      <section style={{
-        borderRadius: 'var(--r-sm)', border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)', padding: '6px 10px',
-        fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', flexShrink: 0,
-      }}>
+      <section className="rounded-sm border border-subtle bg-surface px-2.5 py-1.5 text-xs text-fg-tertiary shrink-0">
         加载中...
       </section>
     )
   }
   if (!reg.exists) {
     return (
-      <section style={{
-        borderRadius: 'var(--r-sm)', border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)', padding: '6px 10px',
-        fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', flexShrink: 0,
-      }}>
-        当前版本 reg 集：<span style={{ color: 'var(--fg-tertiary)' }}>不存在</span>
+      <section className="rounded-sm border border-subtle bg-surface px-2.5 py-1.5 text-xs text-fg-tertiary shrink-0">
+        当前版本 reg 集：<span className="text-fg-tertiary">不存在</span>
       </section>
     )
   }
@@ -367,43 +354,39 @@ function RegStatusBar({
   const shortfall = m ? m.target_count - m.actual_count : 0
   const canTopUp = m !== null && shortfall > 0
   return (
-    <section style={{
-      borderRadius: 'var(--r-sm)', border: '1px solid var(--border-subtle)',
-      background: 'var(--bg-surface)', padding: '8px 12px',
-      display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0,
-    }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 'var(--t-xs)' }}>
-        <span style={{ color: 'var(--fg-secondary)' }}>
+    <section className="rounded-sm border border-subtle bg-surface px-3 py-2 flex flex-col gap-1 shrink-0">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-fg-secondary">
           reg 集存在：
-          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--ok)', fontWeight: 500 }}>{reg.image_count} 张</span>
+          <span className="font-mono text-ok font-medium">{reg.image_count} 张</span>
         </span>
         {m && (
           <>
-            <span style={{ color: 'var(--border-default)' }}>·</span>
-            <span style={{ color: 'var(--fg-tertiary)' }}>
+            <span className="text-fg-tertiary">·</span>
+            <span className="text-fg-tertiary">
               target {m.actual_count}/{m.target_count}
             </span>
-            <span style={{ color: 'var(--border-default)' }}>·</span>
-            <span style={{ color: 'var(--fg-tertiary)' }}>{m.api_source}</span>
-            <span style={{ color: 'var(--border-default)' }}>·</span>
-            <span style={{ color: 'var(--fg-tertiary)' }}>
+            <span className="text-fg-tertiary">·</span>
+            <span className="text-fg-tertiary">{m.api_source}</span>
+            <span className="text-fg-tertiary">·</span>
+            <span className="text-fg-tertiary">
               auto-tag:{' '}
-              <span style={{ color: m.auto_tagged ? 'var(--ok)' : 'var(--fg-tertiary)' }}>
+              <span className={m.auto_tagged ? 'text-ok' : 'text-fg-tertiary'}>
                 {m.auto_tagged ? '✓' : '×'}
               </span>
             </span>
-            <span style={{ color: 'var(--border-default)' }}>·</span>
-            <span style={{ color: 'var(--fg-tertiary)' }}>{ago}</span>
+            <span className="text-fg-tertiary">·</span>
+            <span className="text-fg-tertiary">{ago}</span>
             {m.failed_tags.length > 0 && (
               <span
-                style={{ color: 'var(--warn)' }}
+                className="text-warn"
                 title={`搜索失败的 tag: ${m.failed_tags.join(', ')}`}
               >
                 · {m.failed_tags.length} 失败 tag
               </span>
             )}
             {m.incremental_runs > 0 && (
-              <span style={{ color: 'var(--fg-tertiary)' }} title="补足跑过的次数">
+              <span className="text-fg-tertiary" title="补足跑过的次数">
                 · 补足 ×{m.incremental_runs}
               </span>
             )}
@@ -414,8 +397,7 @@ function RegStatusBar({
           <button
             onClick={onTopUp}
             disabled={disabled}
-            className="btn btn-sm"
-            style={{ color: 'var(--accent)', background: 'var(--accent-soft)', border: '1px solid var(--accent)' }}
+            className="btn btn-sm text-accent bg-accent-soft border-accent"
             title={`保留已下 ${m!.actual_count} 张，补足 ${shortfall} 张`}
           >
             补足 +{shortfall}
@@ -424,19 +406,18 @@ function RegStatusBar({
         <button
           onClick={onDelete}
           disabled={disabled}
-          className="btn btn-sm"
-          style={{ background: 'var(--err-soft)', color: 'var(--err)' }}
+          className="btn btn-sm bg-err-soft text-err border-err"
         >
           清空
         </button>
       </div>
 
       {m && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)' }}>
+        <div className="flex flex-wrap items-center gap-2 text-2xs text-fg-tertiary">
           <span>分辨率聚类：</span>
           {m.postprocess_clusters !== null ? (
             <span
-              style={{ color: 'var(--fg-secondary)' }}
+              className="text-fg-secondary"
               title={`方法 ${m.postprocess_method}，max_crop ${m.postprocess_max_crop_ratio}`}
             >
               {m.postprocess_clusters} 类（{m.postprocess_method},{' '}
@@ -444,7 +425,7 @@ function RegStatusBar({
             </span>
           ) : (
             <span
-              style={{ color: 'var(--fg-tertiary)' }}
+              className="text-fg-tertiary"
               title="分辨率差异过大或未启用 — 训练靠 bucketing 处理"
             >
               未聚类
@@ -466,25 +447,21 @@ function AdvancedPanel({
   const set = <K extends keyof AdvancedParams>(k: K, v: AdvancedParams[K]) =>
     onChange({ ...value, [k]: v })
   return (
-    <div style={{
-      borderRadius: 'var(--r-sm)', border: '1px solid var(--border-subtle)',
-      background: 'var(--bg-sunken)', padding: '10px 14px',
-      display: 'flex', flexDirection: 'column', gap: 10, fontSize: 'var(--t-xs)',
-    }}>
-      <p style={{ fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)', margin: 0 }}>
+    <div className="rounded-sm border border-subtle bg-sunken px-3.5 py-2.5 flex flex-col gap-2.5 text-xs">
+      <p className="text-2xs text-fg-tertiary m-0">
         保持默认即可
       </p>
 
       {/* 选图 */}
       <Group label="选图">
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+        <label className="flex items-center gap-1 cursor-pointer">
           <input
             type="checkbox"
             checked={value.skip_similar}
             onChange={(e) => set('skip_similar', e.target.checked)}
           />
           <span
-            style={{ color: 'var(--fg-secondary)' }}
+            className="text-fg-secondary"
             title="候选只取偶数索引，避免相邻相似图（默认 ✓）"
           >
             skip_similar
@@ -494,18 +471,18 @@ function AdvancedPanel({
 
       {/* 长宽比过滤 */}
       <Group label="长宽比过滤">
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+        <label className="flex items-center gap-1 cursor-pointer">
           <input
             type="checkbox"
             checked={value.aspect_ratio_filter_enabled}
             onChange={(e) => set('aspect_ratio_filter_enabled', e.target.checked)}
           />
-          <span style={{ color: 'var(--fg-secondary)' }}>启用</span>
+          <span className="text-fg-secondary">启用</span>
         </label>
         {value.aspect_ratio_filter_enabled && (
           <>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ color: 'var(--fg-tertiary)' }}>min</span>
+            <label className="flex items-center gap-1">
+              <span className="text-fg-tertiary">min</span>
               <input
                 type="number"
                 min={0.1}
@@ -518,12 +495,12 @@ function AdvancedPanel({
                     Math.max(0.1, Math.min(1, Number(e.target.value) || 0.5))
                   )
                 }
-                className="input input-mono"
-                style={{ width: 64, padding: '2px 4px' }}
+                className="input input-mono px-1 py-px"
+                style={{ width: 64 }}
               />
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ color: 'var(--fg-tertiary)' }}>max</span>
+            <label className="flex items-center gap-1">
+              <span className="text-fg-tertiary">max</span>
               <input
                 type="number"
                 min={1}
@@ -536,11 +513,11 @@ function AdvancedPanel({
                     Math.max(1, Math.min(10, Number(e.target.value) || 2))
                   )
                 }
-                className="input input-mono"
-                style={{ width: 64, padding: '2px 4px' }}
+                className="input input-mono px-1 py-px"
+                style={{ width: 64 }}
               />
             </label>
-            <span style={{ fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)' }}>
+            <span className="text-2xs text-fg-tertiary">
               过滤极端长宽比图（例：0.5–2.0 = 1:2 到 2:1）
             </span>
           </>
@@ -549,21 +526,20 @@ function AdvancedPanel({
 
       {/* 后处理 */}
       <Group label="后处理">
-        <span style={{ color: 'var(--fg-tertiary)' }}>方法</span>
+        <span className="text-fg-tertiary">方法</span>
         <select
           value={value.postprocess_method}
           onChange={(e) =>
             set('postprocess_method', e.target.value as 'smart' | 'stretch' | 'crop')
           }
-          className="input"
-          style={{ padding: '2px 6px', fontSize: 'var(--t-xs)' }}
+          className="input px-1.5 py-px text-xs"
         >
           <option value="smart">smart（缩放+居中裁，推荐）</option>
           <option value="stretch">stretch（拉伸，可能变形）</option>
           <option value="crop">crop（先裁后缩）</option>
         </select>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ color: 'var(--fg-tertiary)' }}>max_crop</span>
+        <label className="flex items-center gap-1">
+          <span className="text-fg-tertiary">max_crop</span>
           <input
             type="number"
             min={0.05}
@@ -594,15 +570,11 @@ function Group({
   children: React.ReactNode
 }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-      <span style={{
-        fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)',
-        width: 72, flexShrink: 0, textTransform: 'uppercase',
-        letterSpacing: '0.05em',
-      }}>
+    <div className="flex items-baseline gap-2.5">
+      <span className="text-2xs text-fg-tertiary w-[72px] shrink-0 uppercase tracking-wider">
         {label}
       </span>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, flex: 1 }}>{children}</div>
+      <div className="flex flex-wrap items-center gap-2.5 flex-1">{children}</div>
     </div>
   )
 }
@@ -650,44 +622,39 @@ function ExcludeTagsPicker({
     <div className="space-y-2">
       {showTrainList ? (
         <div>
-          <p style={{ fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)', margin: '0 0 4px' }}>
+          <p className="text-2xs text-fg-tertiary m-0 mb-1">
             排除 train top tag：
           </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          <div className="flex flex-wrap gap-1">
             {trainTags.map((t) => {
               const on = excluded.has(t.tag)
               return (
                 <button
                   key={t.tag}
                   onClick={() => onToggle(t.tag)}
-                  style={{
-                    padding: '2px 8px', borderRadius: 'var(--r-sm)', border: '1px solid',
-                    fontSize: 'var(--t-2xs)', fontFamily: 'var(--font-mono)',
-                    borderColor: on ? 'var(--warn)' : 'var(--border-default)',
-                    background: on ? 'var(--warn-soft)' : 'var(--bg-sunken)',
-                    color: on ? 'var(--warn)' : 'var(--fg-secondary)',
-                    cursor: 'pointer', transition: 'border-color 0.15s',
-                  }}
+                  className={`px-2 py-0.5 rounded-sm border text-2xs font-mono cursor-pointer transition-colors duration-150 ${
+                    on ? 'border-warn bg-warn-soft text-warn' : 'border-dim bg-sunken text-fg-secondary'
+                  }`}
                   title={on ? '点击取消排除' : '点击加入排除'}
                 >
                   {on ? '✕' : '+'} {t.tag}{' '}
-                  <span style={{ opacity: 0.5 }}>×{t.count}</span>
+                  <span className="opacity-50">×{t.count}</span>
                 </button>
               )
             })}
           </div>
         </div>
       ) : (
-        <p style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', margin: 0 }}>
+        <p className="text-xs text-fg-tertiary m-0">
           train 还没有 tag 分布。也可以仅靠下方「自定义排除」继续。
         </p>
       )}
 
       <div>
-        <p style={{ fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)', margin: '0 0 4px' }}>
+        <p className="text-2xs text-fg-tertiary m-0 mb-1">
           自定义排除：
         </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className="flex items-center gap-1.5">
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -698,8 +665,7 @@ function ExcludeTagsPicker({
               }
             }}
             placeholder="输入 tag，回车添加"
-            className="input flex-1"
-            style={{ fontSize: 'var(--t-xs)' }}
+            className="input flex-1 text-xs"
           />
           <button
             onClick={addCustom}
@@ -710,22 +676,17 @@ function ExcludeTagsPicker({
           </button>
         </div>
         {customTags.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+          <div className="flex flex-wrap gap-1 mt-1.5">
             {customTags.map((t) => (
               <span
                 key={t}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '2px 8px', borderRadius: 'var(--r-sm)',
-                  border: '1px solid var(--warn)', background: 'var(--warn-soft)',
-                  color: 'var(--warn)', fontSize: 'var(--t-2xs)', fontFamily: 'var(--font-mono)',
-                }}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border border-warn bg-warn-soft text-warn text-2xs font-mono"
                 title="自定义排除（点 × 移除）"
               >
                 {t}
                 <button
                   onClick={() => onToggle(t)}
-                  style={{ color: 'var(--warn)', opacity: 0.7, cursor: 'pointer', background: 'none', border: 'none', padding: 0, fontSize: 'var(--t-xs)' }}
+                  className="text-warn opacity-70 cursor-pointer bg-transparent border-none p-0 text-xs"
                   aria-label={`移除 ${t}`}
                 >
                   ×
@@ -770,12 +731,8 @@ function RegPreview({
     return m
   }, [items])
   return (
-    <section style={{
-      borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-      background: 'var(--bg-surface)', padding: 8,
-      flex: 1, minHeight: 0, overflowY: 'auto',
-    }}>
-      <p style={{ fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)', padding: '0 4px 4px', margin: 0 }}>
+    <section className="rounded-md border border-subtle bg-surface p-2 flex-1 min-h-0 overflow-y-auto">
+      <p className="text-2xs text-fg-tertiary px-1 pb-1 m-0">
         reg/（共 {reg.image_count} 张）— 点击查看大图 + caption
       </p>
       <ImageGrid
@@ -838,27 +795,21 @@ function RegStatsPanel({
   }, [exists, imageCount, meta])
 
   return (
-    <div className="flex flex-col gap-3" style={{ minWidth: 0 }}>
+    <div className="flex flex-col gap-3 min-w-0">
       {/* 当前状态卡片 */}
-      <div style={{
-        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)', padding: '10px 12px',
-      }}>
-        <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
-          <span style={{
-            display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
-            background: exists ? 'var(--ok)' : 'var(--fg-tertiary)', flexShrink: 0,
-          }} />
-          <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>集状态</span>
+      <div className="rounded-md border border-subtle bg-surface px-3 py-2.5">
+        <div className="flex items-center gap-1.5 mb-2.5">
+          <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${exists ? 'bg-ok' : 'bg-fg-tertiary'}`} />
+          <span className="caption uppercase tracking-wider text-xs">集状态</span>
         </div>
 
         {!exists ? (
-          <div style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>
+          <div className="text-xs text-fg-tertiary">
             当前版本 还未生成 reg 集。<br />
             设置参数后点击「开始生成」
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 'var(--t-xs)' }}>
+          <div className="flex flex-col gap-1.5 text-xs">
             <StatLine label="图片数" value={imageCount} />
             {meta && (
               <>
@@ -882,26 +833,23 @@ function RegStatsPanel({
 
       {/* AR bucket 分布 */}
       {arBuckets.length > 0 && (
-        <div style={{
-          borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-          background: 'var(--bg-surface)', padding: '10px 12px',
-        }}>
-          <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
-            <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
-            <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>AR bucket</span>
+        <div className="rounded-md border border-subtle bg-surface px-3 py-2.5">
+          <div className="flex items-center gap-1.5 mb-2.5">
+            <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-accent" />
+            <span className="caption uppercase tracking-wider text-xs">AR bucket</span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="flex flex-col gap-2">
             {arBuckets.map((b) => (
               <div key={b.label}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--t-xs)', marginBottom: 2 }}>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)' }}>{b.label}</span>
-                  <span style={{ color: 'var(--fg-tertiary)' }}>{b.pct}%</span>
+                <div className="flex justify-between text-xs mb-0.5">
+                  <span className="font-mono text-fg-primary">{b.label}</span>
+                  <span className="text-fg-tertiary">{b.pct}%</span>
                 </div>
-                <div style={{ height: 6, borderRadius: 3, background: 'var(--bg-sunken)', overflow: 'hidden' }}>
-                  <div style={{
-                    height: '100%', background: 'var(--accent)', borderRadius: 3,
-                    width: `${b.pct}%`, transition: 'width 0.4s ease',
-                  }} />
+                <div className="h-1.5 rounded-[3px] bg-sunken overflow-hidden">
+                  <div
+                    className="h-full rounded-[3px] bg-accent transition-[width] duration-400 ease"
+                    style={{ width: `${b.pct}%` }}
+                  />
                 </div>
               </div>
             ))}
@@ -910,20 +858,17 @@ function RegStatsPanel({
       )}
 
       {/* 当前配置摘要 */}
-      <div style={{
-        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)', padding: '10px 12px',
-      }}>
-        <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
-          <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--info)', flexShrink: 0 }} />
-          <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>配置</span>
+      <div className="rounded-md border border-subtle bg-surface px-3 py-2.5">
+        <div className="flex items-center gap-1.5 mb-2.5">
+          <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-info" />
+          <span className="caption uppercase tracking-wider text-xs">配置</span>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 'var(--t-xs)' }}>
+        <div className="flex flex-col gap-1.5 text-xs">
           <StatLine label="train 图数" value={trainImageCount} />
           <StatLine label="API 来源" value={apiSource} />
           <StatLine label="自动打标" value={autoTag ? '✓ 启用' : '× 关闭'} dim={!autoTag} />
           {isLive && (
-            <div style={{ marginTop: 4, padding: '4px 6px', borderRadius: 'var(--r-sm)', background: 'var(--warn-soft)', color: 'var(--warn)', fontSize: 'var(--t-xs)' }}>
+            <div className="mt-1 px-1.5 py-1 rounded-sm bg-warn-soft text-warn text-xs">
               生成中 · 等待完成
             </div>
           )}
@@ -944,13 +889,9 @@ function StatLine({
 }) {
   const v = String(value)
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-      <span style={{ color: 'var(--fg-tertiary)' }}>{label}</span>
-      <span style={{
-        fontFamily: 'var(--font-mono)',
-        color: dim ? 'var(--fg-tertiary)' : 'var(--fg-primary)',
-        fontWeight: 500,
-      }}>{v}</span>
+    <div className="flex justify-between items-baseline">
+      <span className="text-fg-tertiary">{label}</span>
+      <span className={`font-mono font-medium ${dim ? 'text-fg-tertiary' : 'text-fg-primary'}`}>{v}</span>
     </div>
   )
 }

@@ -152,7 +152,7 @@ export default function TagEditPage() {
   )
 
   if (!activeVersion) {
-    return <p style={{ color: 'var(--fg-tertiary)', padding: 24 }}>请先选择 / 创建一个版本</p>
+    return <p className="text-fg-tertiary p-6">请先选择 / 创建一个版本</p>
   }
 
   const handleClick = (key: string, e: React.MouseEvent) => {
@@ -240,56 +240,37 @@ export default function TagEditPage() {
        * 普通模式:   [图片网格 flex:1] [右侧面板 32%]
        * 编辑模式:   [大图预览 flex:1] [图片网格 flex:1.5] [右侧面板 32%]
        */}
-      <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 10 }}>
+      <div className="flex flex-1 min-h-0 gap-2.5">
 
         {/* ── 大图预览（仅编辑模式）── */}
         {isEditing && (
-          <section style={{
-            flex: 1,
-            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
-            minWidth: 0, overflow: 'hidden',
-          }}>
+          <section className="flex-1 rounded-md border border-subtle bg-surface flex flex-col min-w-0 overflow-hidden">
             {/* 文件名 header */}
-            <div style={{
-              padding: '8px 12px', borderBottom: '1px solid var(--border-subtle)',
-              flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>单图编辑</span>
-              <code style={{
-                flex: 1, minWidth: 0, fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
-                color: 'var(--fg-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
+            <div className="px-3 py-2 border-b border-subtle shrink-0 flex items-center gap-2">
+              <span className="text-xs text-fg-tertiary">单图编辑</span>
+              <code className="flex-1 min-w-0 text-xs font-mono text-fg-secondary truncate">
                 {activeFolder}/{activeName}
               </code>
             </div>
             {/* 图片区：position:relative + absolute img 保证可靠填充 */}
-            <div style={{
-              flex: 1, position: 'relative', background: 'var(--bg-sunken)',
-            }}>
+            <div className="flex-1 relative bg-sunken">
               <img
                 key={activeKey}
                 src={api.versionThumbUrl(project.id, activeVersion.id, 'train', activeName, activeFolder, 800)}
                 alt={activeName}
-                style={{
-                  position: 'absolute', inset: 8,
-                  width: 'calc(100% - 16px)', height: 'calc(100% - 16px)',
-                  objectFit: 'contain', borderRadius: 'var(--r-sm)',
-                }}
+                className="absolute inset-2 object-contain rounded-sm"
+                style={{ width: 'calc(100% - 16px)', height: 'calc(100% - 16px)' }}
               />
             </div>
           </section>
         )}
 
         {/* ── 图片网格（始终显示）── */}
-        <section style={{
-          flex: isEditing ? 1.5 : 1,
-          borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-          background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
-          minWidth: 0, overflow: 'hidden',
-        }}>
+        <section
+          className="rounded-md border border-subtle bg-surface flex flex-col min-w-0 overflow-hidden"
+          style={{ flex: isEditing ? 1.5 : 1 }}>
           {/* 只有 inner div 可滚动，外层 section overflow:hidden 防整页滚 */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+          <div className="flex-1 overflow-y-auto p-2">
             <ImageGrid
               items={captionItems}
               selected={sel}
@@ -301,10 +282,7 @@ export default function TagEditPage() {
         </section>
 
         {/* ── 右侧面板：宽度恒定，BulkActionBar 永远在这里 ── */}
-        <div style={{
-          flex: '0 0 32%', display: 'flex', flexDirection: 'column', gap: 10,
-          minWidth: 0,
-        }}>
+        <div className="flex flex-col gap-2.5 min-w-0" style={{ flex: '0 0 32%' }}>
           <BulkActionBar
             cache={cache}
             selectedKeys={selectedKeys}
@@ -321,20 +299,14 @@ export default function TagEditPage() {
 
           {isEditing ? (
             /* 标签编辑器 */
-            <section style={{
-              flex: 1,
-              borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-              background: 'var(--bg-surface)', padding: 10,
-              display: 'flex', flexDirection: 'column', gap: 8,
-              minHeight: 0, overflow: 'hidden',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <section className="flex-1 rounded-md border border-subtle bg-surface p-2.5 flex flex-col gap-2 min-h-0 overflow-hidden">
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button onClick={() => navActive(-1)} disabled={navKeys.length === 0} aria-label="上一张" className="btn btn-secondary btn-sm">◀</button>
-                <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', flex: 1, textAlign: 'center' }}>
+                <span className="text-xs text-fg-tertiary font-mono flex-1 text-center">
                   {activeIndex >= 0 ? `${activeIndex + 1} / ${navKeys.length}` : `– / ${navKeys.length}`}
                 </span>
                 <button onClick={() => navActive(1)} disabled={navKeys.length === 0} aria-label="下一张" className="btn btn-secondary btn-sm">▶</button>
-                <button onClick={() => setActiveKey('')} className="btn btn-ghost btn-sm" aria-label="关闭编辑" style={{ marginLeft: 4 }}>✕</button>
+                <button onClick={() => setActiveKey('')} className="btn btn-ghost btn-sm ml-1" aria-label="关闭编辑">✕</button>
               </div>
               <TagEditor tags={activeTags} onChange={updateActiveTags} />
             </section>

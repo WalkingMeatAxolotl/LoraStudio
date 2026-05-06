@@ -296,19 +296,19 @@ export default function CurationPage() {
 
   if (!activeVersion) {
     return (
-      <p style={{ color: 'var(--fg-tertiary)', padding: 24 }}>
+      <p className="text-fg-tertiary p-6">
         请先选择 / 创建一个版本（左上 VersionTabs）
       </p>
     )
   }
   if (error) {
     return (
-      <div style={{ padding: 12, borderRadius: 'var(--r-md)', background: 'var(--err-soft)', border: '1px solid var(--err)', color: 'var(--err)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-sm)' }}>
+      <div className="p-3 rounded-md bg-err-soft border border-err text-err font-mono text-sm">
         {error}
       </div>
     )
   }
-  if (!view) return <p style={{ color: 'var(--fg-tertiary)', padding: 24 }}>加载...</p>
+  if (!view) return <p className="text-fg-tertiary p-6">加载...</p>
 
   const switchRightFolder = (next: string) => {
     setRightFolder(next)
@@ -493,13 +493,12 @@ export default function CurationPage() {
       title="筛选图片"
       subtitle="download → train"
       actions={
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+        <label className="flex items-center gap-1.5 text-sm text-fg-secondary whitespace-nowrap shrink-0">
           排序
           <select
             value={sortMode}
             onChange={(e) => setSortMode(e.target.value as SortMode)}
-            className="input"
-            style={{ padding: '3px 8px', fontSize: 'var(--t-sm)' }}
+            className="input px-2 py-0.5 text-sm"
             title="排序作用于左右两个网格"
           >
             {SORT_OPTIONS.map((o) => (
@@ -568,8 +567,8 @@ export default function CurationPage() {
                 value={newFolder}
                 onChange={(e) => setNewFolder(e.target.value)}
                 placeholder="+ 新建:5_concept"
-                className="input input-mono"
-                style={{ width: 144, padding: '3px 8px', fontSize: 'var(--t-sm)' }}
+                className="input input-mono px-2 py-0.5 text-sm"
+                style={{ width: 144 }}
               />
               <BtnSecondary
                 onClick={doCreateFolder}
@@ -612,8 +611,8 @@ export default function CurationPage() {
           />
 
           {renaming && (
-            <div className="flex items-center gap-2 my-3" style={{ fontSize: 'var(--t-sm)' }}>
-              <span style={{ color: 'var(--fg-secondary)' }}>改名 {renaming.target} →</span>
+            <div className="flex items-center gap-2 my-3 text-sm">
+              <span className="text-fg-secondary">改名 {renaming.target} →</span>
               <input
                 autoFocus
                 value={renaming.value}
@@ -624,8 +623,8 @@ export default function CurationPage() {
                   if (e.key === 'Enter') doRenameFolder()
                   if (e.key === 'Escape') setRenaming(null)
                 }}
-                className="input input-mono"
-                style={{ width: 176, padding: '3px 8px' }}
+                className="input input-mono px-2 py-0.5"
+                style={{ width: 176 }}
               />
               <BtnPrimary onClick={doRenameFolder} disabled={busy}>
                 确认
@@ -700,44 +699,36 @@ function FolderSummary({
 }) {
   if (folders.length === 0) {
     return (
-      <p style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-tertiary)' }}>
+      <p className="text-sm text-fg-tertiary">
         还没有训练文件夹，点击「+ 新建」创建
       </p>
     )
   }
   const total = folders.reduce((s, f) => s + (counts[f] ?? 0), 0)
   return (
-    <div className="flex flex-wrap items-center gap-1.5" style={{ fontSize: 'var(--t-sm)' }}>
+    <div className="flex flex-wrap items-center gap-1.5 text-sm">
       {folders.map((f) => {
         const isActive = f === activeFolder
         return (
           <span
             key={f}
-            className="group inline-flex items-center transition-colors"
-            style={{
-              borderRadius: 'var(--r-md)',
-              border: isActive ? '1px solid var(--accent)' : '1px solid var(--border-default)',
-              background: isActive ? 'var(--accent-soft)' : 'var(--bg-surface)',
-            }}
+            className={`group inline-flex items-center transition-colors rounded-md ${
+              isActive ? 'border border-accent bg-accent-soft' : 'border border-dim bg-surface'
+            }`}
           >
             <button
               onClick={() => onSwitch(f)}
               title={isActive ? '当前查看（也是复制目标）' : '点击切换查看 + 复制目标'}
-              style={{
-                padding: '2px 8px',
-                color: isActive ? 'var(--accent)' : 'var(--fg-secondary)',
-                fontFamily: 'var(--font-mono)',
-              }}
+              className={`px-2 py-0.5 font-mono ${isActive ? 'text-accent' : 'text-fg-secondary'}`}
             >
               {f}
-              <span style={{ color: 'var(--fg-tertiary)' }}> ({counts[f] ?? 0})</span>
+              <span className="text-fg-tertiary"> ({counts[f] ?? 0})</span>
             </button>
             <button
               onClick={() => onRename(f)}
               disabled={busy}
               title="改名"
-              className="opacity-0 group-hover:opacity-100"
-              style={{ padding: '2px 4px', fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}
+              className="opacity-0 group-hover:opacity-100 px-1 py-0.5 text-xs text-fg-tertiary"
             >
               ✎
             </button>
@@ -745,15 +736,14 @@ function FolderSummary({
               onClick={() => onDelete(f)}
               disabled={busy}
               title="删除文件夹"
-              className="opacity-0 group-hover:opacity-100"
-              style={{ padding: '2px 4px', fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}
+              className="opacity-0 group-hover:opacity-100 px-1 py-0.5 text-xs text-fg-tertiary"
             >
               ×
             </button>
           </span>
         )
       })}
-      <span style={{ color: 'var(--fg-tertiary)', marginLeft: 8 }}>总 {total} 张</span>
+      <span className="text-fg-tertiary ml-2">总 {total} 张</span>
     </div>
   )
 }
@@ -772,15 +762,7 @@ function AltHoverPreview({ focus }: { focus: Focus }) {
       className="fixed inset-0 z-40 pointer-events-none flex items-center justify-center p-6"
     >
       <div
-        className="relative flex flex-col overflow-hidden"
-        style={{
-          background: 'rgba(20, 18, 12, 0.9)',
-          borderRadius: 'var(--r-lg)',
-          border: '1px solid var(--border-strong)',
-          boxShadow: 'var(--sh-xl)',
-          maxWidth: '95vw',
-          maxHeight: '95vh',
-        }}
+        className="relative flex flex-col overflow-hidden rounded-lg border border-bold max-w-[95vw] max-h-[95vh] bg-black/90 shadow-xl"
       >
         <img
           src={focus.url}
@@ -788,22 +770,15 @@ function AltHoverPreview({ focus }: { focus: Focus }) {
           className="max-w-[95vw] max-h-[88vh] object-contain"
         />
         <div
-          className="flex items-center gap-2 shrink-0"
-          style={{ padding: '6px 12px', borderTop: '1px solid rgba(255,255,255,0.08)' }}
+          className="flex items-center gap-2 shrink-0 px-3 py-1.5 border-t border-white/[0.08]"
         >
-          <span
-            className={focus.side === 'left' ? 'badge badge-ok' : 'badge badge-info'}
-            style={{ flexShrink: 0 }}
-          >
+          <span className={`shrink-0 ${focus.side === 'left' ? 'badge badge-ok' : 'badge badge-info'}`}>
             {sourceLabel}
           </span>
-          <code
-            className="mono truncate flex-1 min-w-0"
-            style={{ color: 'var(--fg-inverse)', fontSize: 'var(--t-sm)' }}
-          >
+          <code className="mono truncate flex-1 min-w-0 text-fg-inverse text-sm">
             {focus.name}
           </code>
-          <span style={{ fontSize: 'var(--t-xs)', color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}>
+          <span className="text-xs shrink-0 text-white/40">
             松开 Alt 关闭
           </span>
         </div>
@@ -812,9 +787,9 @@ function AltHoverPreview({ focus }: { focus: Focus }) {
   )
 }
 
-const ACCENT_BAR_COLOR: Record<'emerald' | 'cyan', string> = {
-  emerald: 'var(--ok)',
-  cyan: 'var(--info)',
+const ACCENT_BAR_CLS: Record<'emerald' | 'cyan', string> = {
+  emerald: 'bg-ok',
+  cyan: 'bg-info',
 }
 
 function PanelCard({
@@ -831,21 +806,16 @@ function PanelCard({
   children: React.ReactNode
 }) {
   return (
-    <section
-      className="flex flex-col min-h-0"
-      style={{ borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)', overflow: 'hidden' }}
+    <section className="flex flex-col min-h-0 rounded-md border border-subtle bg-surface overflow-hidden"
     >
-      <div style={{ height: 2, background: ACCENT_BAR_COLOR[accent] }} />
-      <header
-        className="flex flex-wrap items-center gap-1.5"
-        style={{ padding: '6px 10px', borderBottom: '1px solid var(--border-subtle)', fontSize: 'var(--t-sm)' }}
-      >
-        <h3 style={{ fontWeight: 600 }}>{title}</h3>
-        <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>{subtitle}</span>
+      <div className={`h-0.5 ${ACCENT_BAR_CLS[accent]}`} />
+      <header className="flex flex-wrap items-center gap-1.5 px-2.5 py-1.5 border-b border-subtle text-sm">
+        <h3 className="font-semibold">{title}</h3>
+        <span className="text-xs text-fg-tertiary">{subtitle}</span>
         <span className="flex-1" />
         {actions}
       </header>
-      <div className="flex-1 min-h-0 flex flex-col" style={{ padding: 8 }}>{children}</div>
+      <div className="flex-1 min-h-0 flex flex-col p-2">{children}</div>
     </section>
   )
 }
@@ -879,8 +849,7 @@ function BtnDanger({
   return (
     <button
       {...rest}
-      className="btn btn-sm"
-      style={{ background: 'var(--err-soft)', color: 'var(--err)' }}
+      className="btn btn-sm bg-err-soft text-err border-err"
     >
       {children}
     </button>

@@ -16,14 +16,14 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   render() {
     if (this.state.error) {
       return (
-        <div className="min-h-screen flex items-center justify-center p-8">
-          <div className="max-w-xl w-full bg-red-50 border border-red-200 rounded-lg p-6">
-            <h1 className="text-red-700 font-semibold text-lg mb-2">应用初始化失败</h1>
-            <pre className="text-sm text-red-600 whitespace-pre-wrap break-all">
+        <div className="min-h-screen flex items-center justify-center p-8 bg-canvas">
+          <div className="card max-w-[560px] w-full p-6">
+            <h1 className="text-err font-semibold text-lg mb-2">应用初始化失败</h1>
+            <pre className="text-sm text-fg-secondary whitespace-pre-wrap break-all">
               {this.state.error.message}
             </pre>
             <button
-              className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+              className="btn btn-primary btn-sm mt-4"
               onClick={() => window.location.reload()}
             >
               重新加载

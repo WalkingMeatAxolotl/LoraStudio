@@ -42,10 +42,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             className={
               'px-4 py-2 rounded-lg shadow-lg text-sm border ' +
               (t.kind === 'error'
-                ? 'bg-red-900/80 border-red-700 text-red-200'
+                ? 'bg-err-soft border-err text-err'
                 : t.kind === 'success'
-                ? 'bg-emerald-900/80 border-emerald-700 text-emerald-200'
-                : 'bg-slate-800/95 border-slate-600 text-slate-200')
+                ? 'bg-ok-soft border-ok text-ok'
+                : 'bg-elevated border-subtle text-fg-primary')
             }
           >
             {t.message}
