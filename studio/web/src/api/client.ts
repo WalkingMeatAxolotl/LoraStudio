@@ -1097,8 +1097,8 @@ export const api = {
   getLog: (id: number) => req<LogResponse>(`/api/logs/${id}`),
   getMonitorState: (taskId: number, maxPoints = 1500) =>
     req<MonitorState>(`/api/state?task_id=${taskId}&max_points=${maxPoints}&_=${Date.now()}`),
-  sampleImageUrl: (filename: string, taskId: number) =>
-    `/samples/${filename}?task_id=${taskId}`,
+  sampleImageUrl: (filename: string, taskId: number, w?: number) =>
+    `/samples/${filename}?task_id=${taskId}${w ? `&w=${w}` : ''}`,
 
   // Queue import / export ---------------------------------------------
   exportQueue: (ids?: number[]) => {

@@ -148,19 +148,36 @@ function SampleViewer({ samples, taskId }: {
   samples: Array<{ path: string; step?: number }>
   taskId: number
 }) {
-  const [active, setActive] = useState(0)
+  // 按数组原顺序铺（最新在末尾，对应训练时间轴）。多 prompt 同 step 就是相邻
+  // 几个相同 step 的项，下标重复，视觉上自己传达「同一步不同 prompt」。
+  const list = samples
+  const [active, setActive] = useState(list.length - 1)
+  const stripRef = useRef<HTMLDivElement | null>(null)
 
-  const list = useMemo(() => {
-    // newest first
-    return [...samples].reverse()
-  }, [samples])
+  // 初次有图 / 新增 sample 时，仅当用户当前选中是「最末或之后」（即跟随末尾）
+  // 才把 active 跟到新末尾；用户回头看早期图时不打断。
+  const prevLenRef = useRef(0)
+  useEffect(() => {
+    if (list.length === 0) {
+      setActive(0)
+      prevLenRef.current = 0
+      return
+    }
+    if (active >= prevLenRef.current - 1) {
+      setActive(list.length - 1)
+    }
+    prevLenRef.current = list.length
+  }, [list.length, active])
 
-  useEffect(() => { setActive(0) }, [samples.length])
-
-  const nav = (delta: number) => {
-    if (list.length === 0) return
-    setActive((prev) => (prev + delta + list.length) % list.length)
-  }
+  // active 变化时把 strip 滚到对应缩略图（仅水平方向，不影响外层）
+  useEffect(() => {
+    const strip = stripRef.current
+    if (!strip) return
+    const target = strip.children[active] as HTMLElement | undefined
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+    }
+  }, [active])
 
   if (!list.length) return (
     <div className="grid place-items-center h-[300px] text-fg-tertiary text-sm">
@@ -170,29 +187,66 @@ function SampleViewer({ samples, taskId }: {
 
   const cur = list[active]
   const filename = cur.path.split(/[\\/]/).pop() ?? cur.path
-  const imgUrl = api.sampleImageUrl(filename, taskId)
+  const fullUrl = api.sampleImageUrl(filename, taskId)
 
   return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="bg-sunken rounded-sm overflow-hidden relative flex items-center justify-center" style={{ width: '100%', minHeight: 360 }}>
+    <div className="flex flex-col gap-2.5 w-full">
+      {/* 顶部缩略图条 —— 横向滚动，按数组原顺序铺 */}
+      <div
+        ref={stripRef}
+        className="flex gap-1.5 overflow-x-auto pb-1 shrink-0"
+        style={{ scrollbarWidth: 'thin' }}
+      >
+        {list.map((s, i) => {
+          const fn = s.path.split(/[\\/]/).pop() ?? s.path
+          const thumbUrl = api.sampleImageUrl(fn, taskId, 128)
+          const isActive = i === active
+          return (
+            <button
+              key={`${fn}-${i}`}
+              onClick={() => setActive(i)}
+              className={[
+                'shrink-0 rounded-sm overflow-hidden border transition-colors relative',
+                isActive ? 'border-accent ring-2 ring-accent-soft' : 'border-subtle hover:border-bold',
+                'cursor-pointer p-0 bg-sunken',
+              ].join(' ')}
+              title={s.step != null ? `step ${s.step}` : fn}
+              style={{ width: 64, height: 64 }}
+            >
+              <img
+                src={thumbUrl}
+                alt=""
+                loading="lazy"
+                className="w-full h-full object-cover block"
+              />
+              {s.step != null && (
+                <span className="absolute bottom-0 inset-x-0 bg-black/55 text-white text-[10px] font-mono text-center leading-tight py-0.5">
+                  {s.step.toLocaleString()}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* 大图 —— 当前选中 */}
+      <div
+        className="bg-sunken rounded-sm overflow-hidden relative flex items-center justify-center flex-1 min-h-0"
+        style={{ minHeight: 320 }}
+      >
         <img
-          key={imgUrl}
-          src={imgUrl}
+          key={fullUrl}
+          src={fullUrl}
           alt="sample preview"
+          loading="lazy"
           className="max-w-full max-h-[480px] object-contain block"
         />
         {cur.step != null && (
-          <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 border border-subtle rounded-sm px-2.5 py-0.5 text-xs font-mono text-fg-secondary bg-input">
+          <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 border border-subtle rounded-sm px-2.5 py-0.5 text-xs font-mono text-fg-secondary bg-surface/85">
             step <strong className="text-accent">{cur.step.toLocaleString()}</strong>
+            <span className="text-fg-tertiary ml-2">{active + 1} / {list.length}</span>
           </div>
         )}
-      </div>
-      <div className="flex items-center gap-3">
-        <button onClick={() => nav(-1)} disabled={list.length === 0} className="btn btn-secondary btn-sm">&#9664;</button>
-        <span className="text-xs text-fg-tertiary font-mono tabular-nums">
-          {active + 1} / {list.length}
-        </span>
-        <button onClick={() => nav(1)} disabled={list.length === 0} className="btn btn-secondary btn-sm">&#9654;</button>
       </div>
     </div>
   )
