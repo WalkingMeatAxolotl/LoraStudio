@@ -337,15 +337,6 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
         style={{ height: 'var(--topbar-h)' }}
       >
         <Logo collapsed={collapsed} />
-        {!collapsed && (
-          <button
-            onClick={toggle}
-            title="折叠"
-            className="p-1 text-fg-tertiary bg-transparent border-none rounded cursor-pointer flex hover:bg-overlay transition-colors"
-          >
-            {I.chevL}
-          </button>
-        )}
       </div>
 
       {/* main nav */}
@@ -363,21 +354,19 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
         )}
       </nav>
 
-      {/* tools + collapse toggle */}
+      {/* tools + toggle */}
       <div className={`border-t border-subtle flex flex-col gap-0.5 shrink-0 ${collapsed ? 'px-1.5 py-2' : 'p-2.5'}`}>
         <NavItem to="/tools/presets" label="预设" icon={I.preset} active={isMain('/tools/presets')} collapsed={collapsed} />
         <NavItem to="/tools/monitor" label="监控" icon={I.monitor} active={isMain('/tools/monitor')} collapsed={collapsed} />
         <NavItem to="/tools/settings" label="设置" icon={I.cog} active={isMain('/tools/settings')} collapsed={collapsed} />
         <ThemeToggle collapsed={collapsed} />
-        {collapsed && (
-          <button
-            onClick={toggle}
-            title="展开"
-            className="flex justify-center p-2 mt-1 text-fg-tertiary bg-transparent border-none rounded cursor-pointer hover:bg-overlay transition-colors"
-          >
-            {I.chevR}
-          </button>
-        )}
+        <button
+          onClick={toggle}
+          title={collapsed ? '展开' : '折叠'}
+          className={`text-fg-tertiary bg-transparent border-none rounded cursor-pointer hover:bg-overlay transition-colors ${collapsed ? 'flex justify-center p-2 mt-1' : 'flex items-center gap-1.5 p-2 mt-1 text-xs'}`}
+        >
+          {collapsed ? I.chevR : <>{I.chevL}<span>收起</span></>}
+        </button>
       </div>
     </aside>
   )

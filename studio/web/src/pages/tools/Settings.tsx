@@ -684,7 +684,7 @@ function ModelStatusBadge({ exists, size, status, fileCount, existsCount }: {
     return <StatusLabel bg="bg-err-soft" fg="text-err" text="失败" />
   }
   if (exists) {
-    return <StatusLabel bg="bg-ok" fg="text-ok" text={`✓ ${fmtBytes(size)}${fileCount !== undefined ? ` (${existsCount}/${fileCount})` : ''}`} />
+    return <StatusLabel bg="bg-ok-soft" fg="text-ok" text={`✓ ${fmtBytes(size)}${fileCount !== undefined ? ` (${existsCount}/${fileCount})` : ''}`} />
   }
   if (fileCount !== undefined && existsCount! > 0) {
     return <StatusLabel bg="bg-warn-soft" fg="text-warn" text={`部分 (${existsCount}/${fileCount})`} />

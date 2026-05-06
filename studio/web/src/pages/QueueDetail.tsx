@@ -161,7 +161,7 @@ export default function QueueDetailPage() {
     <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* Header */}
       <header className="px-6 py-4 border-b border-subtle flex flex-col gap-2 shrink-0 bg-canvas">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <Link to="/queue" className="btn btn-ghost btn-sm no-underline"
           >← 队列</Link>
           <span className="text-fg-tertiary">/</span>
@@ -179,6 +179,19 @@ export default function QueueDetailPage() {
               {status === 'running' && <span className="dot dot-running" />}
               {STATUS_LABEL[status]}
             </span>
+          )}
+          <span className="flex-1" />
+          {isLive && (
+            <button onClick={cancel} disabled={busy} className="btn btn-sm bg-warn-soft border border-warn text-warn"
+            >取消任务</button>
+          )}
+          {isTerminal && (
+            <>
+              <button onClick={retry} disabled={busy} className="btn btn-primary btn-sm">重试</button>
+              <button onClick={() => setConfirmDelete(true)} disabled={busy}
+                className="btn btn-sm bg-err-soft border border-err text-err"
+              >删除记录</button>
+            </>
           )}
         </div>
 
@@ -225,25 +238,6 @@ export default function QueueDetailPage() {
         {tab === 'outputs' && <OutputsTab taskId={taskId} taskName={task?.name ?? ''} />}
       </div>
 
-      {/* Footer actions */}
-      <footer className="flex items-center gap-2 px-6 py-2.5 border-t border-subtle shrink-0 bg-surface">
-        <Link to="/queue" className="btn btn-ghost btn-sm no-underline">
-          ← 返回队列
-        </Link>
-        <span className="flex-1" />
-        {isLive && (
-          <button onClick={cancel} disabled={busy} className="btn btn-sm bg-warn-soft border border-warn text-warn"
-          >取消任务</button>
-        )}
-        {isTerminal && (
-          <>
-            <button onClick={retry} disabled={busy} className="btn btn-primary btn-sm">重试</button>
-            <button onClick={() => setConfirmDelete(true)} disabled={busy}
-              className="btn btn-sm bg-err-soft border border-err text-err"
-            >删除记录</button>
-          </>
-        )}
-      </footer>
 
       {confirmDelete && task && (
         <ConfirmDialog

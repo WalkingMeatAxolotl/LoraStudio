@@ -142,23 +142,28 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
   )
 }
 
-// ── SampleGrid ────────────────────────────────────────────────────────────
+// ── SampleViewer（单图 + 左右切换） ──────────────────────────────────────
 
-function SampleGrid({ samples, taskId }: {
+function SampleViewer({ samples, taskId }: {
   samples: Array<{ path: string; step?: number }>
   taskId: number
 }) {
   const [active, setActive] = useState(0)
 
   const list = useMemo(() => {
-    // newest first, max 24
-    return [...samples].reverse().slice(0, 24)
+    // newest first
+    return [...samples].reverse()
   }, [samples])
 
-  useEffect(() => { setActive(0) }, [list])
+  useEffect(() => { setActive(0) }, [samples.length])
+
+  const nav = (delta: number) => {
+    if (list.length === 0) return
+    setActive((prev) => (prev + delta + list.length) % list.length)
+  }
 
   if (!list.length) return (
-    <div className="grid place-items-center h-[200px] text-fg-tertiary text-sm">
+    <div className="grid place-items-center h-[300px] text-fg-tertiary text-sm">
       等待采样图…
     </div>
   )
@@ -168,43 +173,26 @@ function SampleGrid({ samples, taskId }: {
   const imgUrl = api.sampleImageUrl(filename, taskId)
 
   return (
-    <div className="flex flex-col gap-2">
-      {/* Thumbnail strip */}
-      <div className="flex flex-wrap gap-1 p-2 bg-sunken rounded-sm">
-        {list.map((s, i) => {
-          const fn = s.path.split(/[\\/]/).pop() ?? s.path
-          return (
-            <button
-              key={i}
-              onClick={() => setActive(i)}
-              className={`w-11 h-11 rounded-sm overflow-hidden border-2 bg-overlay p-0 cursor-pointer transition-[border-color] duration-[120ms] shrink-0 ${i === active ? 'border-accent' : 'border-transparent'}`}
-            >
-              <img
-                src={api.sampleImageUrl(fn, taskId)}
-                alt={`step ${s.step ?? i}`}
-                className="w-full h-full object-cover block"
-                onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }}
-              />
-            </button>
-          )
-        })}
-      </div>
-      {/* Large preview */}
-      <div className="flex-1 min-h-[200px] bg-sunken rounded-sm overflow-hidden relative flex items-center justify-center">
+    <div className="flex flex-col items-center gap-3">
+      <div className="bg-sunken rounded-sm overflow-hidden relative flex items-center justify-center" style={{ width: '100%', minHeight: 360 }}>
         <img
           key={imgUrl}
           src={imgUrl}
           alt="sample preview"
-          className="max-w-full max-h-[320px] object-contain block"
+          className="max-w-full max-h-[480px] object-contain block"
         />
         {cur.step != null && (
-          <div
-            className="absolute bottom-2 left-1/2 -translate-x-1/2 border border-subtle rounded-sm px-2.5 py-0.5 text-xs font-mono text-fg-secondary"
-            style={{ background: 'rgba(246,245,241,0.9)' }}
-          >
+          <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 border border-subtle rounded-sm px-2.5 py-0.5 text-xs font-mono text-fg-secondary bg-input">
             step <strong className="text-accent">{cur.step.toLocaleString()}</strong>
           </div>
         )}
+      </div>
+      <div className="flex items-center gap-3">
+        <button onClick={() => nav(-1)} disabled={list.length === 0} className="btn btn-secondary btn-sm">&#9664;</button>
+        <span className="text-xs text-fg-tertiary font-mono tabular-nums">
+          {active + 1} / {list.length}
+        </span>
+        <button onClick={() => nav(1)} disabled={list.length === 0} className="btn btn-secondary btn-sm">&#9654;</button>
       </div>
     </div>
   )
@@ -259,13 +247,25 @@ export default function MonitorDashboard({ taskId }: { taskId: number }) {
   const progress = totalSteps > 0 ? Math.min(100, (step / totalSteps) * 100) : 0
   const elapsed = state?.start_time ? fmtSec(Date.now() / 1000 - state.start_time) : '--'
 
-  // Current loss
-  const lastLoss = useMemo(() => {
+  // Recent loss vs previous (windowed comparison)
+  const lossInfo = useMemo(() => {
+    if (!losses.length) return null
+    const WINDOW = Math.min(50, Math.floor(losses.length / 3)) || losses.length
+    const raw = losses.map((l) => l.loss)
+    const recent = raw.slice(-WINDOW)
+    const prev = raw.length > WINDOW ? raw.slice(-WINDOW * 2, -WINDOW) : null
+    const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length
+    if (!prev || prev.length === 0) return { val: recentAvg, delta: null }
+    const prevAvg = prev.reduce((a, b) => a + b, 0) / prev.length
+    return { val: recentAvg, delta: recentAvg - prevAvg }
+  }, [losses])
+
+  // Average loss (raw)
+  const avgLoss = useMemo(() => {
     if (!losses.length) return null
     const raw = losses.map((l) => l.loss)
-    const ema = calcEMA(raw, emaAlpha)
-    return ema[ema.length - 1]
-  }, [losses, emaAlpha])
+    return raw.reduce((a, b) => a + b, 0) / raw.length
+  }, [losses])
 
   // Current LR
   const lastLr = lrHistory.length ? lrHistory[lrHistory.length - 1].lr : null
@@ -288,7 +288,6 @@ export default function MonitorDashboard({ taskId }: { taskId: number }) {
   }
 
   const lrSparkline = lrHistory.slice(-60).map((l) => l.lr)
-  const config = state?.config ?? {}
 
   return (
     <div className="flex flex-col gap-3.5 p-4 overflow-y-auto">
@@ -322,12 +321,20 @@ export default function MonitorDashboard({ taskId }: { taskId: number }) {
         </a>
       </div>
 
-      {/* 5 stat cards */}
-      <div className="grid grid-cols-5 gap-2.5">
+      {/* 6 stat cards */}
+      <div className="grid grid-cols-6 gap-2.5">
         <StatCard label="step" value={step ? step.toLocaleString() : '--'}
           sub={totalSteps ? `of ${totalSteps.toLocaleString()}` : undefined} tone="accent" />
-        <StatCard label="loss" value={lastLoss != null ? lastLoss.toFixed(4) : '--'}
-          sub={losses.length > 1 ? `↓ trend` : 'awaiting'} tone="ok" />
+        <StatCard
+          label="loss"
+          value={lossInfo ? lossInfo.val.toFixed(4) : '--'}
+          sub={lossInfo?.delta != null
+            ? `recent avg, ${lossInfo.delta > 0 ? '↑' : '↓'}${Math.abs(lossInfo.delta).toFixed(4)}`
+            : losses.length > 0 ? 'recent avg' : 'awaiting'}
+          tone={lossInfo?.delta != null ? (lossInfo.delta < 0 ? 'ok' : 'warn') : undefined}
+        />
+        <StatCard label="avg loss" value={avgLoss != null ? avgLoss.toFixed(4) : '--'}
+          sub={losses.length ? `${losses.length} pts raw mean` : 'awaiting'} />
         <StatCard label="lr" value={fmtLr(lastLr)}
           sub={lrHistory.length ? 'learning rate' : undefined} />
         <StatCard
@@ -339,70 +346,44 @@ export default function MonitorDashboard({ taskId }: { taskId: number }) {
         <StatCard label="eta" value={eta} sub={speed ? `${speed.toFixed(2)} it/s` : undefined} />
       </div>
 
-      {/* Loss chart + samples */}
-      <div className="grid grid-cols-[1.6fr_1fr] gap-3.5">
-        {/* Loss chart */}
-        <div className="card p-4">
-          <div className="flex items-center justify-between mb-2.5">
-            <span className="text-sm font-semibold">loss</span>
-            <div className="flex items-center gap-2 text-xs text-fg-tertiary">
-              <label className="flex items-center gap-1 cursor-pointer">
-                smooth
-                <input type="range" min="0.001" max="0.3" step="0.001" value={emaAlpha}
-                  onChange={(e) => setEmaAlpha(parseFloat(e.target.value))}
-                  style={{ width: 60, accentColor: 'var(--accent)' }}
-                />
-                <span className="font-mono w-[3ch]">{emaAlpha.toFixed(2)}</span>
-              </label>
-            </div>
-          </div>
-          <LossChart losses={losses} emaAlpha={emaAlpha} />
-        </div>
-
-        {/* Samples */}
+      {/* 左：采样图（竖） / 右：loss → LR */}
+      <div className="grid grid-cols-[1fr_1.5fr] gap-3.5">
+        {/* 左：采样图 — 撑满全高 */}
         <div className="card p-0 overflow-hidden flex flex-col">
           <div className="px-3.5 py-2.5 border-b border-subtle flex items-center justify-between shrink-0">
             <span className="text-sm font-semibold">采样</span>
             <span className="text-xs text-fg-tertiary font-mono">{samples.length} 张</span>
           </div>
-          <div className="flex-1 p-2.5 min-h-0">
-            <SampleGrid samples={samples} taskId={taskId} />
+          <div className="flex-1 p-3 min-h-0 flex items-center justify-center">
+            <SampleViewer samples={samples} taskId={taskId} />
           </div>
         </div>
-      </div>
 
-      {/* LR sparkline + config */}
-      <div className="grid grid-cols-[1fr_1.6fr] gap-3.5">
-        {/* LR chart */}
-        <div className="card p-4">
-          <div className="text-sm font-semibold mb-1.5">learning rate</div>
-          <div className="text-2xl font-semibold font-mono tabular-nums text-warn">
-            {fmtLr(lastLr)}
+        {/* 右：loss + lr */}
+        <div className="flex flex-col gap-3.5">
+          <div className="card p-4">
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="text-sm font-semibold">loss</span>
+              <div className="flex items-center gap-2 text-xs text-fg-tertiary">
+                <label className="flex items-center gap-1 cursor-pointer">
+                  smooth
+                  <input type="range" min="0.001" max="0.3" step="0.001" value={emaAlpha}
+                    onChange={(e) => setEmaAlpha(parseFloat(e.target.value))}
+                    style={{ width: 60, accentColor: 'var(--accent)' }}
+                  />
+                  <span className="font-mono w-[3ch]">{emaAlpha.toFixed(2)}</span>
+                </label>
+              </div>
+            </div>
+            <LossChart losses={losses} emaAlpha={emaAlpha} />
           </div>
-          <Sparkline values={lrSparkline} color="var(--warn)" />
-        </div>
 
-        {/* Config */}
-        <div className="card p-0 overflow-hidden">
-          <div className="px-3.5 py-2.5 border-b border-subtle flex items-center justify-between">
-            <span className="text-sm font-semibold">训练配置</span>
-            <span className="caption">{Object.keys(config).length} 项</span>
-          </div>
-          <div className="max-h-[200px] overflow-y-auto">
-            {Object.entries(config).map(([k, v]) => (
-              <div
-                key={k}
-                className="flex justify-between items-center px-3.5 py-1.5 text-xs border-b border-subtle last:border-b-0 hover:bg-overlay transition-colors"
-              >
-                <span className="text-fg-tertiary font-mono">{k}</span>
-                <span className="text-fg-primary font-mono font-medium">{String(v)}</span>
-              </div>
-            ))}
-            {Object.keys(config).length === 0 && (
-              <div className="p-3.5 text-fg-tertiary text-xs text-center">
-                训练配置加载中…
-              </div>
-            )}
+          <div className="card p-4">
+            <div className="text-sm font-semibold mb-1.5">learning rate</div>
+            <div className="text-2xl font-semibold font-mono tabular-nums text-warn">
+              {fmtLr(lastLr)}
+            </div>
+            <Sparkline values={lrSparkline} color="var(--warn)" />
           </div>
         </div>
       </div>
