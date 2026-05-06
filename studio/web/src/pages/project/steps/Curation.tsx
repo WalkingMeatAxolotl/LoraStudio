@@ -390,6 +390,7 @@ export default function CurationPage() {
       setNewFolder('')
       switchRightFolder(name)
       await refresh()
+      await reload()
     } catch (e) {
       toast(String(e), 'error')
     } finally {
@@ -417,6 +418,10 @@ export default function CurationPage() {
       setRenaming(null)
       toast(`${target} → ${next}`, 'success')
       await refresh()
+      // 关键：reload 项目 context，让 activeVersion.stats.train_folders 跟上磁盘真实
+      // 名字。否则 Train 页仍按旧 folder 名解析 N_label，repeat 显示错（没生效是
+      // 误解，启动训练时后端按真实磁盘读，但前端展示错本身就是 bug）。
+      await reload()
     } catch (e) {
       toast(String(e), 'error')
     } finally {
@@ -440,6 +445,7 @@ export default function CurationPage() {
       })
       if (rightFolder === name) switchRightFolder('')
       await refresh()
+      await reload()
     } catch (e) {
       toast(String(e), 'error')
     } finally {
