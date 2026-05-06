@@ -235,42 +235,21 @@ export default function TagEditPage() {
     >
       {isEditing ? (
         // ── EDIT MODE ─────────────────────────────────────────────────────────
-        // grid-template-areas: image column spans full height;
-        // toolbar only covers center + right columns.
+        // flex row: [image - full height] [grid - full height] [right panel]
+        // right panel = flex column: [BulkActionBar] [tag editor]
+        // BulkActionBar 与 tag editor 左右边界完全对齐（同一列内）
         //
-        //   [image ] [  toolbar  toolbar ]
-        //   [image ] [  grid  ] [ editor ]
+        //   [  image  ] [      grid      ] [ BulkActionBar ]
+        //   [  image  ] [      grid      ] [  tag editor   ]
         //
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '380px 1fr 280px',
-          gridTemplateRows: 'auto 1fr',
-          gridTemplateAreas: `". topbar topbar" "image grid editor"`,
-          gap: 10, flex: 1, minHeight: 0,
-        }}>
-          {/* toolbar — above center + right only */}
-          <div style={{ gridArea: 'topbar' }}>
-            <BulkActionBar
-              cache={cache}
-              selectedKeys={selectedKeys}
-              onApply={applyBulkUpdates}
-              tagSuggestions={tagSuggestions}
-              defaultScope="selected"
-              onClearSelection={() => setSel(new Set())}
-              filterTag={filterTag}
-              onFilterTagChange={setFilterTag}
-              totalCount={keys.length}
-              filteredCount={filteredKeys.length}
-              onSelectAll={() => setSel(new Set(filteredKeys))}
-            />
-          </div>
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 10 }}>
 
-          {/* LEFT: large image — full height (no toolbar above) */}
+          {/* LEFT: large image — full height, flex:3 */}
           <section style={{
-            gridArea: 'image',
+            flex: 3,
             borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
             background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
-            minHeight: 0, overflow: 'hidden',
+            minHeight: 0, minWidth: 0, overflow: 'hidden',
           }}>
             <div style={{
               padding: '8px 12px', borderBottom: '1px solid var(--border-subtle)',
@@ -298,12 +277,12 @@ export default function TagEditPage() {
             </div>
           </section>
 
-          {/* CENTER: image grid */}
+          {/* CENTER: image grid — full height, flex:5 */}
           <section style={{
-            gridArea: 'grid',
+            flex: 5,
             borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
             background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
-            minHeight: 0, overflow: 'hidden',
+            minHeight: 0, minWidth: 0, overflow: 'hidden',
           }}>
             <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
               <ImageGrid
@@ -316,36 +295,11 @@ export default function TagEditPage() {
             </div>
           </section>
 
-          {/* RIGHT: tag editor */}
-          <section style={{
-            gridArea: 'editor',
-            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-surface)', padding: 10,
-            display: 'flex', flexDirection: 'column', gap: 8,
-            minHeight: 0,
+          {/* RIGHT PANEL: BulkActionBar + tag editor，flex:4，二者对齐 */}
+          <div style={{
+            flex: 4, display: 'flex', flexDirection: 'column', gap: 10,
+            minHeight: 0, minWidth: 0,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-              <button onClick={() => navActive(-1)} disabled={navKeys.length === 0} aria-label="上一张" className="btn btn-secondary btn-sm">◀</button>
-              <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', flex: 1, textAlign: 'center' }}>
-                {activeIndex >= 0 ? `${activeIndex + 1} / ${navKeys.length}` : `– / ${navKeys.length}`}
-              </span>
-              <button onClick={() => navActive(1)} disabled={navKeys.length === 0} aria-label="下一张" className="btn btn-secondary btn-sm">▶</button>
-              <button onClick={() => setActiveKey('')} className="btn btn-ghost btn-sm" aria-label="关闭编辑" style={{ marginLeft: 4 }}>✕</button>
-            </div>
-            <TagEditor tags={activeTags} onChange={updateActiveTags} />
-          </section>
-        </div>
-      ) : (
-        // ── NORMAL MODE ───────────────────────────────────────────────────────
-        // toolbar full-width above grid + stats
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 260px',
-          gridTemplateRows: 'auto 1fr',
-          gridTemplateAreas: `"topbar topbar" "grid stats"`,
-          gap: 10, flex: 1, minHeight: 0,
-        }}>
-          <div style={{ gridArea: 'topbar' }}>
             <BulkActionBar
               cache={cache}
               selectedKeys={selectedKeys}
@@ -359,10 +313,46 @@ export default function TagEditPage() {
               filteredCount={filteredKeys.length}
               onSelectAll={() => setSel(new Set(filteredKeys))}
             />
+            <section style={{
+              flex: 1,
+              borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+              background: 'var(--bg-surface)', padding: 10,
+              display: 'flex', flexDirection: 'column', gap: 8,
+              minHeight: 0, overflow: 'hidden',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                <button onClick={() => navActive(-1)} disabled={navKeys.length === 0} aria-label="上一张" className="btn btn-secondary btn-sm">◀</button>
+                <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', flex: 1, textAlign: 'center' }}>
+                  {activeIndex >= 0 ? `${activeIndex + 1} / ${navKeys.length}` : `– / ${navKeys.length}`}
+                </span>
+                <button onClick={() => navActive(1)} disabled={navKeys.length === 0} aria-label="下一张" className="btn btn-secondary btn-sm">▶</button>
+                <button onClick={() => setActiveKey('')} className="btn btn-ghost btn-sm" aria-label="关闭编辑" style={{ marginLeft: 4 }}>✕</button>
+              </div>
+              <TagEditor tags={activeTags} onChange={updateActiveTags} />
+            </section>
           </div>
+        </div>
+      ) : (
+        // ── NORMAL MODE ───────────────────────────────────────────────────────
+        // flex column: [BulkActionBar] [row: grid | stats]
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10 }}>
+          <BulkActionBar
+            cache={cache}
+            selectedKeys={selectedKeys}
+            onApply={applyBulkUpdates}
+            tagSuggestions={tagSuggestions}
+            defaultScope="selected"
+            onClearSelection={() => setSel(new Set())}
+            filterTag={filterTag}
+            onFilterTagChange={setFilterTag}
+            totalCount={keys.length}
+            filteredCount={filteredKeys.length}
+            onSelectAll={() => setSel(new Set(filteredKeys))}
+          />
+          <div style={{ flex: 1, display: 'flex', gap: 10, minHeight: 0 }}>
 
           <section style={{
-            gridArea: 'grid',
+            flex: 1,
             borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
             background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
             minHeight: 0, overflow: 'hidden',
@@ -378,12 +368,13 @@ export default function TagEditPage() {
             </div>
           </section>
 
-          <div style={{ gridArea: 'stats', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <TagStatsPanel
-              cache={cache}
-              selectedKeys={selectedKeys}
-              onPickTag={handlePickTag}
-            />
+            <div style={{ flex: '0 0 25%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <TagStatsPanel
+                cache={cache}
+                selectedKeys={selectedKeys}
+                onPickTag={handlePickTag}
+              />
+            </div>
           </div>
         </div>
       )}
