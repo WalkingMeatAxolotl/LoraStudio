@@ -138,17 +138,17 @@ export default function ProjectLayout() {
 
   if (error) {
     return (
-      <div style={{ margin: 16, padding: 12, borderRadius: 'var(--r-md)', background: 'var(--err-soft)', border: '1px solid var(--err)', color: 'var(--err)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-sm)' }}>
+      <div className="m-4 p-3 rounded-md border border-err bg-err-soft text-err font-mono text-sm">
         {error}
       </div>
     )
   }
   if (!project) {
-    return <p style={{ padding: 24, color: 'var(--fg-tertiary)' }}>加载项目...</p>
+    return <p className="p-6 text-fg-tertiary">加载项目...</p>
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="flex flex-col h-full">
       <Outlet context={{ project, activeVersion, reload }} />
       {creating && (
         <NewVersionDialog
@@ -194,28 +194,17 @@ export function NewVersionDialog({
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/50"
       onClick={onCancel}
     >
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 'var(--r-lg)',
-          padding: 24,
-          width: '90%',
-          maxWidth: 440,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-          boxShadow: 'var(--sh-xl)',
-        }}
+        className="bg-elevated border border-dim rounded-lg w-[90%] max-w-[440px] p-6 flex flex-col gap-4 shadow-xl"
       >
-        <h2 style={{ margin: 0, fontSize: 'var(--t-lg)', fontWeight: 600 }}>新建版本</h2>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>label</span>
+        <h2 className="m-0 text-lg font-semibold">新建版本</h2>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-fg-tertiary font-mono">label</span>
           <input
             autoFocus
             value={label}
@@ -225,8 +214,8 @@ export function NewVersionDialog({
           />
         </label>
         {existingVersions.length > 0 && (
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>从…创建</span>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-fg-tertiary font-mono">从…创建</span>
             <select
               value={forkFrom}
               onChange={(e) => setForkFrom(e.target.value)}
@@ -240,14 +229,14 @@ export function NewVersionDialog({
               ))}
             </select>
             {forkFrom !== '' && (
-              <p style={{ margin: 0, fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>
+              <p className="m-0 text-xs text-fg-tertiary">
                 将复制 train/、reg/、训练配置、解锁状态（output/、samples/ 不复制）
               </p>
             )}
           </label>
         )}
-        {err && <p style={{ margin: 0, fontSize: 'var(--t-sm)', color: 'var(--err)' }}>{err}</p>}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        {err && <p className="m-0 text-sm text-err">{err}</p>}
+        <div className="flex gap-2 justify-end">
           <button
             type="button"
             onClick={onCancel}

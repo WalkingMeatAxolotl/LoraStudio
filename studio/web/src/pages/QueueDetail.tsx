@@ -58,38 +58,20 @@ function StatCard({ label, value, sub, mono, large, tone }: {
   large?: boolean
   tone?: 'accent' | 'ok' | 'warn' | 'err' | 'neutral'
 }) {
-  const toneColor = tone ? `var(--${tone})` : 'var(--fg-primary)'
+  const toneClass = tone ? `text-${tone}` : 'text-fg-primary'
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', gap: 4,
-      padding: '14px 18px',
-      background: 'var(--bg-surface)',
-      borderRadius: 'var(--r-md)',
-      border: '1px solid var(--border-subtle)',
-    }}>
-      <span style={{
-        fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)',
-        fontFamily: 'var(--font-mono)', letterSpacing: '0.04em',
-        textTransform: 'uppercase',
-      }}>
+    <div className="flex flex-col gap-1 px-[18px] py-3.5 bg-surface rounded-md border border-subtle">
+      <span className="text-xs text-fg-tertiary font-mono tracking-widest uppercase">
         {label}
       </span>
-      <span style={{
-        fontSize: large ? 'var(--t-3xl)' : 'var(--t-xl)',
-        fontWeight: 600,
-        fontFamily: mono ? 'var(--font-mono)' : 'var(--font-sans)',
-        fontVariantNumeric: 'tabular-nums',
-        letterSpacing: '-0.02em',
-        color: toneColor,
-        lineHeight: 1.1,
-      }}>
+      <span
+        className={`${large ? 'text-3xl' : 'text-xl'} font-semibold ${mono ? 'font-mono' : 'font-sans'} tabular-nums ${toneClass}`}
+        style={{ letterSpacing: '-0.02em', lineHeight: 1.1 }}
+      >
         {value}
       </span>
       {sub && (
-        <span style={{
-          fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)',
-          fontFamily: 'var(--font-mono)',
-        }}>
+        <span className="text-xs text-fg-tertiary font-mono">
           {sub}
         </span>
       )}
@@ -139,7 +121,7 @@ export default function QueueDetailPage() {
     return () => window.clearInterval(tick)
   }, [task?.status])
 
-  if (!Number.isFinite(taskId)) return <p style={{ color: 'var(--err)' }}>无效任务 ID</p>
+  if (!Number.isFinite(taskId)) return <p className="text-err">无效任务 ID</p>
 
   const status = task?.status
   const isLive = status === 'running' || status === 'pending'
@@ -176,26 +158,20 @@ export default function QueueDetailPage() {
   ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+    <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* Header */}
-      <header style={{
-        padding: '16px 24px',
-        borderBottom: '1px solid var(--border-subtle)',
-        display: 'flex', flexDirection: 'column', gap: 8,
-        flexShrink: 0, background: 'var(--bg-canvas)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Link to="/queue" className="btn btn-ghost btn-sm"
-            style={{ textDecoration: 'none' }}
+      <header className="px-6 py-4 border-b border-subtle flex flex-col gap-2 shrink-0 bg-canvas">
+        <div className="flex items-center gap-2.5">
+          <Link to="/queue" className="btn btn-ghost btn-sm no-underline"
           >← 队列</Link>
-          <span style={{ color: 'var(--fg-tertiary)' }}>/</span>
-          <h1 style={{ margin: 0, fontSize: 'var(--t-xl)', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+          <span className="text-fg-tertiary">/</span>
+          <h1 className="m-0 text-xl font-semibold font-mono">
             #{taskId}
           </h1>
           {task && (
             <>
-              <span style={{ color: 'var(--fg-secondary)', fontSize: 'var(--t-md)' }}>{task.name}</span>
-              <code style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>{task.config_name}.yaml</code>
+              <span className="text-fg-secondary text-md">{task.name}</span>
+              <code className="text-xs text-fg-tertiary font-mono">{task.config_name}.yaml</code>
             </>
           )}
           {status && (
@@ -207,18 +183,14 @@ export default function QueueDetailPage() {
         </div>
 
         {error && (
-          <div style={{
-            padding: '8px 12px', borderRadius: 'var(--r-md)',
-            background: 'var(--err-soft)', border: '1px solid var(--err)',
-            color: 'var(--err)', fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
-          }}>
+          <div className="px-3 py-2 rounded-md bg-err-soft border border-err text-err text-xs font-mono">
             {error}
           </div>
         )}
 
         {/* Stat cards for running tasks */}
         {task && task.status === 'running' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginTop: 4 }}>
+          <div className="grid grid-cols-4 gap-2.5 mt-1">
             <StatCard label="运行时长" value={fmtDuration(task.started_at, null)} mono large tone="accent" />
             <StatCard label="开始时间" value={fmtTime(task.started_at)} mono />
             <StatCard label="Config" value={task.config_name} mono />
@@ -228,26 +200,12 @@ export default function QueueDetailPage() {
       </header>
 
       {/* Tabs */}
-      <nav style={{
-        display: 'flex', alignItems: 'center', gap: 0,
-        borderBottom: '1px solid var(--border-subtle)',
-        flexShrink: 0, padding: '0 24px',
-      }}>
+      <nav className="flex items-center gap-0 border-b border-subtle shrink-0 px-6">
         {tabs.map(({ key, label }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
-            style={{
-              padding: '8px 18px',
-              fontSize: 'var(--t-sm)',
-              fontWeight: tab === key ? 600 : 400,
-              border: 'none', background: 'transparent',
-              color: tab === key ? 'var(--accent)' : 'var(--fg-tertiary)',
-              borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
-              marginBottom: -1, cursor: 'pointer',
-            }}
-            onMouseEnter={(e) => { if (tab !== key) { (e.currentTarget as HTMLElement).style.color = 'var(--fg-primary)'; (e.currentTarget as HTMLElement).style.borderBottomColor = 'var(--border-default)' } }}
-            onMouseLeave={(e) => { if (tab !== key) { (e.currentTarget as HTMLElement).style.color = 'var(--fg-tertiary)'; (e.currentTarget as HTMLElement).style.borderBottomColor = 'transparent' } }}
+            className={`py-2 px-[18px] text-sm border-0 bg-transparent -mb-px cursor-pointer transition-colors ${tab === key ? 'font-semibold text-accent border-b-2 border-accent' : 'font-normal text-fg-tertiary hover:text-fg-primary border-b-2 border-transparent hover:border-default'}`}
           >
             {label}
           </button>
@@ -255,10 +213,10 @@ export default function QueueDetailPage() {
       </nav>
 
       {/* Tab body */}
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         {tab === 'overview' && task && <OverviewTab task={task} />}
         {tab === 'overview' && !task && (
-          <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)' }}>
+          <div className="p-6 text-center text-fg-tertiary text-sm">
             加载中...
           </div>
         )}
@@ -268,27 +226,20 @@ export default function QueueDetailPage() {
       </div>
 
       {/* Footer actions */}
-      <footer style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '10px 24px',
-        borderTop: '1px solid var(--border-subtle)', flexShrink: 0,
-        background: 'var(--bg-surface)',
-      }}>
-        <Link to="/queue" className="btn btn-ghost btn-sm" style={{ textDecoration: 'none' }}>
+      <footer className="flex items-center gap-2 px-6 py-2.5 border-t border-subtle shrink-0 bg-surface">
+        <Link to="/queue" className="btn btn-ghost btn-sm no-underline">
           ← 返回队列
         </Link>
-        <span style={{ flex: 1 }} />
+        <span className="flex-1" />
         {isLive && (
-          <button onClick={cancel} disabled={busy} className="btn btn-sm"
-            style={{ background: 'var(--warn-soft)', border: '1px solid var(--warn)', color: 'var(--warn)' }}
+          <button onClick={cancel} disabled={busy} className="btn btn-sm bg-warn-soft border border-warn text-warn"
           >取消任务</button>
         )}
         {isTerminal && (
           <>
             <button onClick={retry} disabled={busy} className="btn btn-primary btn-sm">重试</button>
             <button onClick={() => setConfirmDelete(true)} disabled={busy}
-              className="btn btn-sm"
-              style={{ background: 'var(--err-soft)', border: '1px solid var(--err)', color: 'var(--err)' }}
+              className="btn btn-sm bg-err-soft border border-err text-err"
             >删除记录</button>
           </>
         )}
@@ -300,10 +251,10 @@ export default function QueueDetailPage() {
           message={
             <>
               将永久删除任务{' '}
-              <code style={{ color: 'var(--fg-primary)', fontFamily: 'var(--font-mono)' }}>#{task.id} {task.name}</code>{' '}
+              <code className="text-fg-primary font-mono">#{task.id} {task.name}</code>{' '}
               的数据库记录。
               <br />
-              <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-xs)' }}>
+              <span className="text-fg-tertiary text-xs">
                 LoRA / 训练日志 / 监控状态文件不会被删，仍在磁盘上。
               </span>
             </>
@@ -323,9 +274,9 @@ export default function QueueDetailPage() {
 
 function OverviewTab({ task }: { task: Task }) {
   const items: Array<{ label: string; value: React.ReactNode; mono?: boolean }> = [
-    { label: 'ID',     value: <code style={{ fontFamily: 'var(--font-mono)' }}>{task.id}</code> },
+    { label: 'ID',     value: <code className="font-mono">{task.id}</code> },
     { label: '名称',   value: task.name },
-    { label: 'Config', value: <code style={{ fontFamily: 'var(--font-mono)' }}>{task.config_name}.yaml</code> },
+    { label: 'Config', value: <code className="font-mono">{task.config_name}.yaml</code> },
     { label: '状态',   value: <span className={STATUS_BADGE[task.status]}>{task.status === 'running' && <span className="dot dot-running" />}{STATUS_LABEL[task.status]}</span> },
     { label: '优先级', value: task.priority, mono: true },
     { label: '入队时间', value: fmtTime(task.created_at) },
@@ -341,37 +292,34 @@ function OverviewTab({ task }: { task: Task }) {
       label: '来源',
       value: task.project_id && task.version_id ? (
         <Link to={`/projects/${task.project_id}/v/${task.version_id}/train`}
-          style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-sm)' }}
+          className="text-accent font-mono text-sm"
         >项目 #{task.project_id} / v#{task.version_id}</Link>
       ) : '—',
     })
   }
   if (task.config_path) {
-    items.push({ label: 'Config 路径', value: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)', wordBreak: 'break-all' }}>{task.config_path}</code> })
+    items.push({ label: 'Config 路径', value: <code className="font-mono text-xs break-all">{task.config_path}</code> })
   }
   if (task.monitor_state_path) {
-    items.push({ label: '监控文件', value: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)', wordBreak: 'break-all' }}>{task.monitor_state_path}</code> })
+    items.push({ label: '监控文件', value: <code className="font-mono text-xs break-all">{task.monitor_state_path}</code> })
   }
   if (task.error_msg) {
-    items.push({ label: '错误', value: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)', wordBreak: 'break-all', color: 'var(--err)' }}>{task.error_msg}</code> })
+    items.push({ label: '错误', value: <code className="font-mono text-xs break-all text-err">{task.error_msg}</code> })
   }
 
   return (
-    <div style={{ overflowY: 'auto', padding: 20 }}>
-      <div className="card" style={{ padding: 0, overflow: 'hidden', maxWidth: 720 }}>
+    <div className="overflow-y-auto p-5">
+      <div className="card overflow-hidden p-0" style={{ maxWidth: 720 }}>
         {items.map((row, i) => (
-          <div key={row.label} style={{
-            display: 'grid', gridTemplateColumns: '140px 1fr',
-            alignItems: 'center', gap: 12, padding: '10px 18px',
-            borderBottom: i < items.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-          }}>
-            <span style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-tertiary)', fontWeight: 400 }}>
+          <div
+            key={row.label}
+            className={`grid gap-3 items-center px-[18px] py-2.5 ${i < items.length - 1 ? 'border-b border-subtle' : 'border-b-0'}`}
+            style={{ gridTemplateColumns: '140px 1fr' }}
+          >
+            <span className="text-sm text-fg-tertiary font-normal">
               {row.label}
             </span>
-            <span style={{
-              fontSize: 'var(--t-sm)', color: 'var(--fg-primary)',
-              fontFamily: row.mono ? 'var(--font-mono)' : 'inherit',
-            }}>
+            <span className={`text-sm text-fg-primary ${row.mono ? 'font-mono' : ''}`}>
               {row.value}
             </span>
           </div>
@@ -416,35 +364,21 @@ function LogTab({ taskId }: { taskId: number }) {
   }, [content, autoScroll])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, padding: 16 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, fontSize: 'var(--t-xs)',
-        paddingBottom: 10, flexShrink: 0,
-      }}>
-        <label style={{ color: 'var(--fg-tertiary)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+    <div className="flex flex-col flex-1 min-h-0 p-4">
+      <div className="flex items-center gap-3 text-xs pb-2.5 shrink-0">
+        <label className="text-fg-tertiary flex items-center gap-1.5 cursor-pointer">
           <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)}
             style={{ width: 14, height: 14, accentColor: 'var(--accent)' }} />
           自动滚动
         </label>
-        <span style={{ flex: 1 }} />
+        <span className="flex-1" />
         <button onClick={() => void refresh()} className="btn btn-ghost btn-sm">刷新</button>
       </div>
       {error && (
-        <div style={{
-          marginBottom: 10, padding: 10, borderRadius: 'var(--r-md)',
-          background: 'var(--err-soft)', border: '1px solid var(--err)',
-          color: 'var(--err)', fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
-        }}>{error}</div>
+        <div className="mb-2.5 p-2.5 rounded-md bg-err-soft border border-err text-err text-xs font-mono">{error}</div>
       )}
-      <pre ref={preRef} style={{
-        flex: 1, minHeight: 0, overflow: 'auto',
-        background: 'var(--bg-sunken)', border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--r-md)', padding: 14,
-        fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
-        color: 'var(--fg-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-        margin: 0, lineHeight: 1.6,
-      }}>
-        {content || <span style={{ color: 'var(--fg-tertiary)' }}>（尚无日志）</span>}
+      <pre ref={preRef} className="flex-1 min-h-0 overflow-auto bg-sunken border border-subtle rounded-md p-3.5 text-xs font-mono text-fg-secondary whitespace-pre-wrap break-all m-0" style={{ lineHeight: 1.6 }}>
+        {content || <span className="text-fg-tertiary">（尚无日志）</span>}
       </pre>
     </div>
   )
@@ -454,7 +388,7 @@ function LogTab({ taskId }: { taskId: number }) {
 
 function MonitorTab({ taskId }: { taskId: number }) {
   return (
-    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+    <div className="flex-1 min-h-0 overflow-hidden">
       <MonitorDashboard taskId={taskId} />
     </div>
   )
@@ -503,24 +437,18 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, padding: 16, gap: 10 }}>
+    <div className="flex flex-col flex-1 min-h-0 p-4 gap-2.5">
       {data?.output_dir ? (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-xs)',
-          flexShrink: 0, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 10,
-        }}>
-          <span style={{ color: 'var(--fg-tertiary)', flexShrink: 0 }}>目录</span>
-          <code style={{
-            flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap', color: 'var(--fg-primary)', fontFamily: 'var(--font-mono)',
-          }}>{data.output_dir}</code>
+        <div className="flex items-center gap-2 text-xs shrink-0 border-b border-subtle pb-2.5">
+          <span className="text-fg-tertiary shrink-0">目录</span>
+          <code className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-fg-primary font-mono">{data.output_dir}</code>
           <button onClick={copyPath} className="btn btn-ghost btn-sm">复制</button>
           {data.supports_open_folder ? (
             <button onClick={openFolder} disabled={busy || !data.exists}
               className="btn btn-secondary btn-sm"
             >打开</button>
           ) : (
-            <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', flexShrink: 0 }}>（远程）</span>
+            <span className="text-xs text-fg-tertiary shrink-0">（远程）</span>
           )}
           <button onClick={() => setRefreshKey((k) => k + 1)} className="btn btn-ghost btn-sm">刷新</button>
           {data.exists && data.files.length > 0 && (
@@ -530,57 +458,46 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
           )}
         </div>
       ) : (
-        <div style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)', flexShrink: 0, padding: '8px 0' }}>
+        <div className="text-fg-tertiary text-sm shrink-0 py-2">
           该任务没有 project / version 关联，找不到输出目录
         </div>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {error ? (
-          <div style={{ padding: 10, borderRadius: 'var(--r-md)', background: 'var(--err-soft)', border: '1px solid var(--err)', color: 'var(--err)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>{error}</div>
+          <div className="p-2.5 rounded-md bg-err-soft border border-err text-err font-mono text-xs">{error}</div>
         ) : !data ? (
-          <div style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)', textAlign: 'center', padding: 20 }}>加载中...</div>
+          <div className="text-fg-tertiary text-sm text-center p-5">加载中...</div>
         ) : !data.exists ? (
-          <div style={{ color: 'var(--warn)', fontSize: 'var(--t-sm)', textAlign: 'center', padding: 20 }}>目录不存在</div>
+          <div className="text-warn text-sm text-center p-5">目录不存在</div>
         ) : sortedFiles.length === 0 ? (
-          <div style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)', textAlign: 'center', padding: 20 }}>目录为空</div>
+          <div className="text-fg-tertiary text-sm text-center p-5">目录为空</div>
         ) : (
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{
-              display: 'grid', gridTemplateColumns: '1fr 100px 160px 80px',
-              gap: 8, padding: '8px 16px', fontSize: 'var(--t-xs)',
-              color: 'var(--fg-tertiary)', borderBottom: '1px solid var(--border-subtle)',
-              fontFamily: 'var(--font-mono)',
-            }}>
+          <div className="card overflow-hidden p-0">
+            <div
+              className="grid gap-2 px-4 py-2 text-xs text-fg-tertiary border-b border-subtle font-mono"
+              style={{ gridTemplateColumns: '1fr 100px 160px 80px' }}
+            >
               <span>文件</span>
-              <span style={{ textAlign: 'right' }}>大小</span>
-              <span style={{ textAlign: 'right' }}>修改时间</span>
-              <span style={{ textAlign: 'right' }}></span>
+              <span className="text-right">大小</span>
+              <span className="text-right">修改时间</span>
+              <span className="text-right"></span>
             </div>
             {sortedFiles.map((f) => (
-              <div key={f.name} style={{
-                display: 'grid', gridTemplateColumns: '1fr 100px 160px 80px',
-                gap: 8, padding: '8px 16px', alignItems: 'center',
-                borderBottom: '1px solid var(--border-subtle)',
-                fontSize: 'var(--t-xs)',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+              <div
+                key={f.name}
+                className="grid gap-2 px-4 py-2 items-center border-b border-subtle text-xs hover:bg-overlay transition-colors"
+                style={{ gridTemplateColumns: '1fr 100px 160px 80px' }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                  <code style={{
-                    fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>{f.name}</code>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <code className="font-mono text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap">{f.name}</code>
                   {f.is_lora && <span className="badge badge-ok">LoRA</span>}
                 </div>
-                <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)' }}>{fmtBytes(f.size)}</span>
-                <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)' }}>{fmtTime(f.mtime)}</span>
-                <span style={{ textAlign: 'right' }}>
+                <span className="text-right font-mono text-fg-tertiary">{fmtBytes(f.size)}</span>
+                <span className="text-right font-mono text-fg-tertiary">{fmtTime(f.mtime)}</span>
+                <span className="text-right">
                   <a href={api.taskOutputDownloadUrl(taskId, f.name)} download={f.name}
-                    style={{ color: 'var(--accent)', textDecoration: 'none', fontSize: 'var(--t-xs)' }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
+                    className="text-accent no-underline hover:underline text-xs"
                   >下载</a>
                 </span>
               </div>
@@ -602,26 +519,16 @@ function ConfirmDialog({
   danger?: boolean; busy?: boolean; onConfirm: () => void; onCancel: () => void
 }) {
   return (
-    <div onClick={onCancel} style={{
-      position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.6)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-    }}>
-      <div onClick={(e) => e.stopPropagation()} style={{
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--r-lg)',
-        boxShadow: 'var(--sh-xl)',
-        width: '100%', maxWidth: 420,
-      }}>
-        <header style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}>
-          <h3 style={{ margin: 0, fontSize: 'var(--t-md)', fontWeight: 600, color: 'var(--fg-primary)' }}>{title}</h3>
+    <div onClick={onCancel} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+      <div onClick={(e) => e.stopPropagation()} className="bg-elevated border border-subtle rounded-lg shadow-lg w-full max-w-[420px]">
+        <header className="px-[18px] py-3.5 border-b border-subtle">
+          <h3 className="m-0 text-md font-semibold text-fg-primary">{title}</h3>
         </header>
-        <div style={{ padding: '14px 18px', fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)' }}>{message}</div>
-        <footer style={{ padding: '12px 18px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+        <div className="px-[18px] py-3.5 text-sm text-fg-secondary">{message}</div>
+        <footer className="px-[18px] py-3 border-t border-subtle flex items-center gap-2 justify-end">
           <button onClick={onCancel} disabled={busy} className="btn btn-ghost btn-sm">{cancelLabel}</button>
           <button onClick={onConfirm} disabled={busy}
-            className={danger ? 'btn btn-sm' : 'btn btn-primary btn-sm'}
-            style={danger ? { background: 'var(--err)', border: '1px solid var(--err)', color: 'var(--err-fg)' } : {}}
+            className={danger ? 'btn btn-sm bg-err border border-err text-fg-inverse' : 'btn btn-primary btn-sm'}
           >{busy ? '...' : confirmLabel}</button>
         </footer>
       </div>

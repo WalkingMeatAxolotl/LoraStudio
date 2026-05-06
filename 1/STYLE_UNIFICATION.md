@@ -1,6 +1,6 @@
 # 样式统一计划：Tailwind + Token 系统
 
-> **最后更新：** 2026-05-06 batch-2 全部完成（每次提交后同步修改本文件）
+> **最后更新：** 2026-05-06 暗色模式 + 字号调节完成（每次提交后同步修改本文件）
 >
 > **目标：** 消灭双轨制样式（Tailwind 原生色值 vs CSS 变量内联 style），统一为
 > **Tailwind 工具类 + token 变量映射**，为暗色模式和字号调整做准备。
@@ -226,20 +226,20 @@ darkMode: ['class', '.theme-dark'],
 
 | 页面 | 当前状态 | 优先级 | 进度 |
 |------|---------|--------|------|
-| `project/Overview.tsx` | CSS 变量内联 | 低 | ⬜ |
-| `project/Layout.tsx` | CSS 变量内联 | 低 | ⬜ |
-| `project/steps/Curation.tsx` | 混用（Tailwind 布局 + CSS 变量细节） | 中 | ⬜ |
-| `project/steps/Download.tsx` | Tailwind 原生色 | 中 | ⬜ |
-| `project/steps/Tagging.tsx` | Tailwind 原生色 | 中 | ⬜ |
-| `project/steps/Train.tsx` | Tailwind 原生色 | 中 | ⬜ |
-| `project/steps/Regularization.tsx` | Tailwind 原生色 | 中 | ⬜ |
-| `project/steps/TagEdit.tsx` | 混用 | 低（已重写布局） | ⬜ |
-| `tools/Presets.tsx` | 混用 | 中 | ⬜ |
-| `tools/Settings.tsx` | Tailwind 原生色 | 中 | ⬜ |
-| `tools/Monitor.tsx` | 混用 | 低 | ⬜ |
-| `Queue.tsx` | CSS 变量内联 | 低 | ⬜ |
-| `QueueDetail.tsx` | 混用 | 低 | ⬜ |
-| `Projects.tsx` | 混用 | 低 | ⬜ |
+| `project/Overview.tsx` | CSS 变量内联 | 低 | ✅ |
+| `project/Layout.tsx` | CSS 变量内联 | 低 | ✅ |
+| `project/steps/Curation.tsx` | 混用（Tailwind 布局 + CSS 变量细节） | 中 | ✅ |
+| `project/steps/Download.tsx` | Tailwind 原生色 | 中 | ✅ |
+| `project/steps/Tagging.tsx` | Tailwind 原生色 | 中 | ✅ |
+| `project/steps/Train.tsx` | Tailwind 原生色 | 中 | ✅ |
+| `project/steps/Regularization.tsx` | Tailwind 原生色 | 中 | ✅ |
+| `project/steps/TagEdit.tsx` | 混用 | 低（已重写布局） | ✅ |
+| `tools/Presets.tsx` | 混用 | 中 | ✅ |
+| `tools/Settings.tsx` | Tailwind 原生色 | 中 | ✅ |
+| `tools/Monitor.tsx` | 混用 | 低 | ✅ |
+| `Queue.tsx` | CSS 变量内联 | 低 | ✅ |
+| `QueueDetail.tsx` | 混用 | 低 | ✅ |
+| `Projects.tsx` | 混用 | 低 | ✅ |
 
 ---
 
@@ -310,25 +310,22 @@ className="badge badge-ok"
 
 ---
 
-## 五、暗色模式接入计划（未开始）
+## 五、暗色模式（✅ 已完成）
 
-1. **触发器：** `<body>` class 切换 `.theme-dark`，在 Settings 页面加切换按钮
-2. **持久化：** `localStorage.setItem('theme', 'dark')`，`main.tsx` 启动时读取并应用
-3. **Tailwind 配置：** `darkMode: ['class', '.theme-dark']`
-4. **测试范围：** 所有使用 token 颜色变量的组件自动跟随；使用硬编码原生色的需要迁移（批次 1）
-
----
-
-## 六、字号调节计划（未开始）
-
-已有 `.density-tight` / `.density-loose` 骨架，需要：
-1. `tokens.css` 完善 `density-tight` 内减小所有 `--t-*` 值
-2. `tokens.css` 完善 `density-loose` 内增大所有 `--t-*` 值
-3. Settings 页面加"显示密度"选择器（紧凑 / 正常 / 宽松）
-4. 持久化到 localStorage
+- [x] **触发器：** Sidebar 暗色模式按钮 + Settings「显示」节主题切换
+- [x] **持久化：** `localStorage.setItem('studio.theme', ...)`，`main.tsx` 启动时 `initTheme()` 恢复
+- [x] **实现：** `lib/theme.ts` — `toggleTheme()` / `applyTheme()` / `getStoredTheme()`
 
 ---
+## 六、字号调节（✅ 已完成）
 
+- [x] `tokens.css` 完善 `density-tight` — 覆盖所有 `--t-*` 和 `--s-*` 变量
+- [x] `tokens.css` 完善 `density-loose` — 覆盖所有 `--t-*` 和 `--s-*` 变量
+- [x] 新增 `--t-2xs` (10px) 字号档位，`tailwind.config.js` 注册 `text-2xs`
+- [x] Settings「显示」节 — 界面缩放选择器（紧凑 / 默认 / 宽松）
+- [x] 持久化：`localStorage.setItem('studio.density', ...)`，`main.tsx` 启动时恢复
+
+---
 ## 七、进度追踪
 
 ### 已完成（已提交）
@@ -344,15 +341,12 @@ className="badge badge-ok"
 | `b3e3042` | 批次 2-3：StepShell/TagStatsPanel/PathPicker 迁移 |
 | `d387e3a` | 批次 2-4：Sidebar（全面重写，保留 2 处必要 CSS 变量内联）/SchemaForm 迁移 |
 | `1c088ef` | 批次 2-5（完成）：MonitorDashboard 迁移，批次 2 全部完成 |
+| *(待提交)* | 批次 3（完成）：14 个页面文件全部迁移至 Tailwind token 类名 |
+| *(待提交)* | 暗色模式 + 字号调节：Sidebar 主题按钮、Settings「显示」节、localStorage 持久化 |
 
 ### 待开始
 
-- **批次 3：页面文件清理**（下一步重点）
-  - 优先：`project/steps/Download.tsx`、`Tagging.tsx`、`Train.tsx`（有硬编码原生色）
-  - 其次：`project/Overview.tsx`、`project/Layout.tsx`、`Curation.tsx`
-  - 最后：`tools/` 页面、`Queue.tsx`、`Projects.tsx`
-- 暗色模式 toggle（Settings 页面按钮 + localStorage）
-- 字号调节（density 选择器）
+- *(暂无 — 核心迁移/功能全部完成)*
 
 ---
 

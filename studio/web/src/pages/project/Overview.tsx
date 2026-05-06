@@ -26,25 +26,25 @@ function StatCard({
   tone?: 'ok' | 'warn' | 'err' | 'accent'
   mono?: boolean
 }) {
-  const color =
-    tone === 'ok'     ? 'var(--ok)'
-    : tone === 'warn' ? 'var(--warn)'
-    : tone === 'err'  ? 'var(--err)'
-    : tone === 'accent' ? 'var(--accent)'
-    : 'var(--fg-primary)'
+  const colorCls =
+    tone === 'ok'     ? 'text-ok'
+    : tone === 'warn' ? 'text-warn'
+    : tone === 'err'  ? 'text-err'
+    : tone === 'accent' ? 'text-accent'
+    : 'text-fg-primary'
   return (
     <div className="card" style={{ padding: 18 }}>
-      <div className="caption" style={{ marginBottom: 10 }}>{label}</div>
-      <div style={{
-        fontFamily: mono ? 'var(--font-mono)' : 'var(--font-sans)',
-        fontSize: 'var(--t-2xl)',
-        fontWeight: 600,
-        letterSpacing: '-0.02em',
-        color,
-        lineHeight: 1.05,
-      }}>{value}</div>
+      <div className="caption mb-2.5">{label}</div>
+      <div
+        className={`text-2xl ${colorCls} ${mono ? 'font-mono' : ''}`}
+        style={{
+          fontWeight: 600,
+          letterSpacing: '-0.02em',
+          lineHeight: 1.05,
+        }}
+      >{value}</div>
       {sub && (
-        <div style={{ marginTop: 6, fontSize: 'var(--t-sm)', color: 'var(--fg-tertiary)' }}>{sub}</div>
+        <div className="mt-1.5 text-sm text-fg-tertiary">{sub}</div>
       )}
     </div>
   )
@@ -114,40 +114,37 @@ function deriveTimeline(project: ProjectDetail, activeVersion: Version | null): 
 
 function PipelineTimeline({ steps }: { steps: PipelineStep[] }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${steps.length}, 1fr)`, gap: 0 }}>
+    <div className="grid" style={{ gridTemplateColumns: `repeat(${steps.length}, 1fr)` }}>
       {steps.map((s, i) => (
-        <div key={i} style={{ position: 'relative', padding: '0 8px' }}>
+        <div key={i} className="relative px-2">
           {/* left connector */}
           {i > 0 && (
-            <div style={{
-              position: 'absolute', top: 14, left: 0,
-              width: 'calc(50% - 16px)', height: 2,
-              background: s.status !== 'pending' ? 'var(--ok)' : 'var(--border-subtle)',
-            }} />
+            <div
+              className={`absolute top-[14px] left-0 h-0.5 ${s.status !== 'pending' ? 'bg-ok' : 'bg-[var(--border-subtle)]'}`}
+              style={{ width: 'calc(50% - 16px)' }}
+            />
           )}
           {/* right connector */}
           {i < steps.length - 1 && (
-            <div style={{
-              position: 'absolute', top: 14, right: 0,
-              width: 'calc(50% - 16px)', height: 2,
-              background: s.status === 'done' ? 'var(--ok)' : 'var(--border-subtle)',
-            }} />
+            <div
+              className={`absolute top-[14px] right-0 h-0.5 ${s.status === 'done' ? 'bg-ok' : 'bg-[var(--border-subtle)]'}`}
+              style={{ width: 'calc(50% - 16px)' }}
+            />
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', position: 'relative' }}>
-            <div style={{
-              width: 30, height: 30, borderRadius: '50%',
-              background: s.status === 'done' ? 'var(--ok)' : s.status === 'active' ? 'var(--accent)' : 'var(--bg-overlay)',
-              color: s.status === 'pending' ? 'var(--fg-tertiary)' : 'white',
-              display: 'grid', placeItems: 'center',
-              fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12,
-              border: s.status === 'active' ? '3px solid var(--accent-soft)' : 'none',
-            }}>
+          <div className="flex flex-col items-center text-center relative">
+            <div
+              className={`w-[30px] h-[30px] rounded-full grid place-items-center font-mono font-bold text-xs ${
+                s.status === 'done' ? 'bg-ok text-white'
+                : s.status === 'active' ? 'bg-accent text-white border-[3px] border-accent-soft'
+                : 'bg-overlay text-fg-tertiary'
+              }`}
+            >
               {s.status === 'done' ? '✓' : s.idx}
             </div>
-            <div style={{ marginTop: 8, fontSize: 'var(--t-sm)', fontWeight: s.status === 'active' ? 600 : 500 }}>
+            <div className={`mt-2 text-sm ${s.status === 'active' ? 'font-semibold' : 'font-medium'}`}>
               {s.label}
             </div>
-            <div className="mono" style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', marginTop: 2 }}>
+            <div className="mono text-xs text-fg-tertiary mt-0.5">
               {s.meta}
             </div>
           </div>
@@ -250,22 +247,18 @@ export default function ProjectOverview() {
         }
       />
 
-      <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div className="p-6 flex flex-col gap-5">
         {/* Stat cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
           {stats.map((s, i) => (
             <StatCard key={i} {...s} />
           ))}
         </div>
 
         {/* Pipeline timeline */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{
-            padding: '14px 18px',
-            borderBottom: '1px solid var(--border-subtle)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          }}>
-            <h2 style={{ margin: 0, fontSize: 'var(--t-md)', fontWeight: 600 }}>流水线进度</h2>
+        <div className="card p-0 overflow-hidden">
+          <div className="px-4.5 py-3.5 border-b border-subtle flex items-center justify-between">
+            <h2 className="text-md font-semibold" style={{ margin: 0 }}>流水线进度</h2>
             <span className="caption">stages</span>
           </div>
           <div style={{ padding: 18 }}>
@@ -275,13 +268,12 @@ export default function ProjectOverview() {
 
         {/* Versions panel */}
         <div className="card" style={{ padding: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
-            <h2 style={{ margin: 0, fontSize: 'var(--t-md)', fontWeight: 600, flex: 1 }}>版本</h2>
+          <div className="flex items-center mb-3.5">
+            <h2 className="text-md font-semibold flex-1" style={{ margin: 0 }}>版本</h2>
             <button
-              className="btn btn-ghost btn-sm"
+              className="btn btn-ghost btn-sm border border-dashed border-dim"
               onClick={handleNewVersion}
               disabled={newVersionBusy}
-              style={{ border: '1px dashed var(--border-default)' }}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                 <path d="M12 5v14M5 12h14" />
@@ -290,34 +282,31 @@ export default function ProjectOverview() {
             </button>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="flex flex-col gap-2">
             {project.versions.map((v) => {
               const isActive = v.id === project.active_version_id
               return (
                 <div
                   key={v.id}
-                  style={{
-                    padding: 14,
-                    borderRadius: 'var(--r-md)',
-                    border: isActive ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
-                    background: isActive ? 'var(--accent-soft)' : 'transparent',
-                  }}
+                  className={`p-3.5 rounded-md ${
+                    isActive ? 'border border-accent bg-accent-soft' : 'border border-subtle'
+                  }`}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{v.label}</span>
+                  <div className="flex justify-between items-center">
+                    <span className="font-mono font-semibold">{v.label}</span>
                     <StageBadge stage={v.stage} />
                   </div>
-                  <div style={{ marginTop: 6, display: 'flex', gap: 14, fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)' }}>
+                  <div className="mt-1.5 flex gap-3.5 text-sm text-fg-secondary">
                     <span>{v.stats?.train_image_count ?? 0} 训练图</span>
                     <span>{v.stats?.reg_image_count ?? 0} 正则图</span>
                     {v.stats?.has_output && (
-                      <span style={{ color: 'var(--ok)' }}>✓ 已训练</span>
+                      <span className="text-ok">✓ 已训练</span>
                     )}
                   </div>
                   {v.note && (
-                    <p style={{ margin: '6px 0 0', fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)' }}>{v.note}</p>
+                    <p className="mt-1.5 text-sm text-fg-secondary">{v.note}</p>
                   )}
-                  <div style={{ marginTop: 10 }}>
+                  <div className="mt-2.5">
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={() => handleActivate(v)}

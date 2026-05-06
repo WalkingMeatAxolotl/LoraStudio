@@ -156,10 +156,7 @@ export default function QueuePage() {
         <>
           <button onClick={clearDone} disabled={busy} className="btn btn-ghost btn-sm">清理已完成</button>
           {hasRunning && (
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ color: 'var(--warn)', borderColor: 'var(--warn)' }}
-            >
+            <button className="btn btn-secondary btn-sm text-warn border-warn">
               暂停队列
             </button>
           )}
@@ -190,60 +187,43 @@ export default function QueuePage() {
         </>
       }
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className="flex flex-col gap-2.5">
         {error && (
-          <div style={{
-            padding: '10px 14px', borderRadius: 'var(--r-md)', background: 'var(--err-soft)',
-            border: '1px solid var(--err)', color: 'var(--err)',
-            fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
-          }}>
+          <div className="px-3.5 py-2.5 rounded-md bg-err-soft border border-err text-err text-xs font-mono">
             {error}
           </div>
         )}
 
         {!loaded ? (
-          <div style={{
-            borderRadius: 'var(--r-lg)',
-            border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-surface)',
-            overflow: 'hidden',
-          }}>
+          <div className="rounded-lg border border-subtle bg-surface overflow-hidden">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} style={{
-                padding: '18px 22px',
-                display: 'grid', gridTemplateColumns: '60px 1fr 110px 1fr 160px', gap: 16,
-                alignItems: 'center',
-                borderBottom: i < 2 ? '1px solid var(--border-subtle)' : 'none',
-                opacity: 0.4,
-              }}>
-                <div style={{ height: 14, background: 'var(--bg-overlay)', borderRadius: 4 }} />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{ height: 13, background: 'var(--bg-overlay)', borderRadius: 4, width: '60%' }} />
-                  <div style={{ height: 10, background: 'var(--bg-overlay)', borderRadius: 4, width: '40%' }} />
+              <div
+                key={i}
+                className={`py-[18px] px-[22px] grid gap-4 items-center opacity-40 ${i < 2 ? 'border-b border-subtle' : 'border-b-0'}`}
+                style={{ gridTemplateColumns: '60px 1fr 110px 1fr 160px' }}
+              >
+                <div className="h-3.5 rounded bg-overlay" />
+                <div className="flex flex-col gap-1">
+                  <div className="h-[13px] rounded bg-overlay w-3/5" />
+                  <div className="h-2.5 rounded bg-overlay w-2/5" />
                 </div>
-                <div style={{ height: 20, background: 'var(--bg-overlay)', borderRadius: 4 }} />
-                <div style={{ height: 10, background: 'var(--bg-overlay)', borderRadius: 4 }} />
-                <div style={{ height: 10, background: 'var(--bg-overlay)', borderRadius: 4 }} />
+                <div className="h-5 rounded bg-overlay" />
+                <div className="h-2.5 rounded bg-overlay" />
+                <div className="h-2.5 rounded bg-overlay" />
               </div>
             ))}
           </div>
         ) : tasks.length === 0 ? (
-          <div style={{
-            borderRadius: 'var(--r-lg)', border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-surface)',
-            padding: '48px 0', textAlign: 'center',
-          }}>
-            <div style={{ fontSize: 'var(--t-md)', fontWeight: 600, color: 'var(--fg-secondary)', marginBottom: 6 }}>
+          <div className="rounded-lg border border-subtle bg-surface py-12 text-center">
+            <div className="text-md font-semibold text-fg-secondary mb-1.5">
               队列为空
             </div>
-            <div style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-tertiary)' }}>
+            <div className="text-sm text-fg-tertiary">
               从项目训练页入队任务即可
             </div>
           </div>
         ) : (
-          <div style={{
-            display: 'flex', flexDirection: 'column', gap: 8,
-          }}>
+          <div className="flex flex-col gap-2">
             {sorted.map((t) => {
               const isRunning = t.status === 'running'
               const isTerminal = ['done', 'failed', 'canceled'].includes(t.status)
@@ -256,56 +236,30 @@ export default function QueuePage() {
                 <button
                   key={t.id}
                   onClick={() => navigate(`/queue/${t.id}`)}
-                  className="card card-hover"
-                  style={{
-                    padding: 0, textAlign: 'left',
-                    border: isRunning ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
-                    cursor: isRunning ? 'pointer' : 'default',
-                    overflow: 'hidden', display: 'block',
-                    background: isRunning ? 'var(--accent-soft)' : 'var(--bg-surface)',
-                  }}
+                  className={`card card-hover block overflow-hidden text-left p-0 ${isRunning ? 'cursor-pointer border border-accent bg-accent-soft' : 'cursor-default border border-subtle bg-surface'}`}
                 >
-                  <div style={{
-                    padding: '16px 22px',
-                    display: 'grid',
-                    gridTemplateColumns: '60px 1fr 110px 1fr 160px',
-                    gap: 16, alignItems: 'center',
-                  }}>
+                  <div
+                    className="px-[22px] py-4 grid gap-4 items-center"
+                    style={{ gridTemplateColumns: '60px 1fr 110px 1fr 160px' }}
+                  >
                     {/* #ID */}
-                    <span style={{
-                      fontFamily: 'var(--font-mono)', fontSize: 'var(--t-sm)',
-                      color: isRunning ? 'var(--accent)' : 'var(--fg-tertiary)',
-                      fontWeight: isRunning ? 600 : 400,
-                    }}>
+                    <span className={`font-mono text-sm ${isRunning ? 'text-accent font-semibold' : 'text-fg-tertiary font-normal'}`}>
                       #{t.id}
                     </span>
 
                     {/* 名称 + 种类 */}
                     <div style={{ minWidth: 0 }}>
-                      <div style={{
-                        fontWeight: 600, color: 'var(--fg-primary)',
-                        fontSize: 'var(--t-sm)', overflow: 'hidden',
-                        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}>
+                      <div className="font-semibold text-fg-primary text-sm overflow-hidden text-ellipsis whitespace-nowrap">
                         {t.name}
                       </div>
-                      <div style={{
-                        fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)',
-                        color: 'var(--fg-tertiary)', marginTop: 2,
-                        display: 'flex', alignItems: 'center', gap: 6,
-                      }}>
+                      <div className="font-mono text-xs text-fg-tertiary mt-0.5 flex items-center gap-1.5">
                         <span>{KIND_LABEL[kind]}</span>
                         <span>{t.config_name}</span>
                         {hasProject && (
                           <Link
                             to={`/projects/${t.project_id}/v/${t.version_id}/train`}
                             onClick={(e) => e.stopPropagation()}
-                            style={{
-                              color: 'var(--accent)', fontSize: 'var(--t-2xs)',
-                              textDecoration: 'none', flexShrink: 0,
-                            }}
-                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
-                            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
+                            className="text-accent text-xs no-underline hover:underline shrink-0"
                           >
                             项目
                           </Link>
@@ -314,51 +268,48 @@ export default function QueuePage() {
                     </div>
 
                     {/* 状态 */}
-                    <span className={`badge badge-${tone}`} style={{ textAlign: 'center', fontSize: 'var(--t-xs)' }}>
+                    <span className={`badge badge-${tone} text-xs text-center`}>
                       {isRunning && <span className="dot dot-running" />}
                       {STATUS_LABEL[t.status]}
                     </span>
 
                     {/* 进度 / 报错 */}
-                    <div style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)', minWidth: 0 }}>
+                    <div className="text-sm text-fg-secondary" style={{ minWidth: 0 }}>
                       {isRunning ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)', fontSize: 'var(--t-xs)' }}>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-mono text-fg-tertiary text-xs">
                             {fmtDuration(t.started_at, null)}
                           </span>
-                          <div style={{ height: 4, background: 'var(--bg-overlay)', borderRadius: 2, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', background: 'var(--accent)', width: '42%', borderRadius: 2 }} />
+                          <div className="h-1 bg-overlay rounded-sm overflow-hidden">
+                            <div className="h-full bg-accent rounded-sm" style={{ width: '42%' }} />
                           </div>
                         </div>
                       ) : t.error_msg ? (
-                        <span style={{ color: 'var(--err)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', fontSize: 'var(--t-xs)' }}>
+                        <span className="text-err overflow-hidden text-ellipsis whitespace-nowrap block text-xs">
                           {t.error_msg}
                         </span>
                       ) : isTerminal ? (
-                        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)', fontSize: 'var(--t-xs)' }}>
+                        <span className="font-mono text-fg-tertiary text-xs">
                           用时 {fmtDuration(t.started_at, t.finished_at)}
                         </span>
                       ) : (
-                        <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-xs)' }}>—</span>
+                        <span className="text-fg-tertiary text-xs">—</span>
                       )}
                     </div>
 
                     {/* ETA / 时间 */}
-                    <span style={{
-                      fontFamily: 'var(--font-mono)', fontSize: 'var(--t-sm)',
-                      color: 'var(--fg-tertiary)', textAlign: 'right',
-                    }}>
+                    <span className="font-mono text-sm text-fg-tertiary text-right">
                       {isRunning ? (
                         <>
-                          {eta && <span style={{ color: 'var(--accent)' }}>{eta}</span>}
+                          {eta && <span className="text-accent">{eta}</span>}
                           {eta && <br />}
-                          <span style={{ fontSize: 'var(--t-xs)' }}>{fmtAgo(t.started_at!)} 开始</span>
+                          <span className="text-xs">{fmtAgo(t.started_at!)} 开始</span>
                         </>
                       ) : t.finished_at ? (
                         <>
                           <span>{fmtAgo(t.finished_at)}</span>
                           <br />
-                          <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>完成</span>
+                          <span className="text-xs text-fg-tertiary">完成</span>
                         </>
                       ) : (
                         <span>前面 {prevCount(t.id)} 个</span>
