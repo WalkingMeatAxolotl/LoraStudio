@@ -29,7 +29,6 @@ function useBreadcrumbs(): Crumb[] {
   if (parts[0] === 'projects') {
     const crumbs: Crumb[] = [{ label: '项目' }]
 
-    // Use context for project title + version label; fall back to URL parts while loading
     const projectLabel = ctx?.project?.title ?? (parts[1] ? `#${parts[1]}` : null)
     if (projectLabel) crumbs.push({ label: projectLabel })
 
@@ -55,25 +54,19 @@ export default function Topbar() {
   const crumbs = useBreadcrumbs()
 
   return (
-    <header style={{
-      height: 'var(--topbar-h)',
-      padding: '0 20px',
-      display: 'flex', alignItems: 'center', gap: 16,
-      borderBottom: '1px solid var(--border-subtle)',
-      background: 'var(--bg-canvas)',
-      flexShrink: 0,
-    }}>
+    <header
+      className="flex items-center gap-4 border-b border-subtle bg-canvas shrink-0 px-5"
+      style={{ height: 'var(--topbar-h)' }}
+    >
       {/* breadcrumb */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+      <div className="flex items-center gap-2 flex-1 min-w-0">
         {crumbs.map((b, i) => (
-          <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {i > 0 && <span style={{ color: 'var(--fg-tertiary)', userSelect: 'none' }}>/</span>}
-            <span style={{
-              fontSize: 'var(--t-sm)',
-              fontFamily: b.mono ? 'var(--font-mono)' : 'var(--font-sans)',
-              color: i === crumbs.length - 1 ? 'var(--fg-primary)' : 'var(--fg-secondary)',
-              fontWeight: i === crumbs.length - 1 ? 600 : 400,
-            }}>
+          <span key={i} className="flex items-center gap-2">
+            {i > 0 && <span className="text-fg-tertiary select-none">/</span>}
+            <span className={
+              `text-sm ${b.mono ? 'font-mono' : ''} ` +
+              (i === crumbs.length - 1 ? 'text-fg-primary font-semibold' : 'text-fg-secondary')
+            }>
               {b.label}
             </span>
           </span>
@@ -81,15 +74,9 @@ export default function Topbar() {
       </div>
 
       {/* search placeholder */}
-      <button style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '5px 10px 5px 12px',
-        background: 'var(--bg-surface)', border: '1px solid var(--border-default)',
-        borderRadius: 'var(--r-md)', color: 'var(--fg-tertiary)',
-        fontSize: 'var(--t-sm)', minWidth: 200, cursor: 'default',
-      }}>
+      <button className="flex items-center gap-2 text-fg-tertiary text-sm bg-surface border border-dim rounded-md cursor-default min-w-[200px] py-[5px] pl-3 pr-[10px]">
         {SearchIcon}
-        <span style={{ flex: 1, textAlign: 'left' }}>跳转 / 搜索…</span>
+        <span className="flex-1 text-left">跳转 / 搜索…</span>
         <span className="kbd">⌘K</span>
       </button>
     </header>
