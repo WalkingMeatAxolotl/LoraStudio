@@ -75,12 +75,18 @@ function deriveTimeline(project: ProjectDetail, activeVersion: Version | null): 
     {
       label: '筛选',
       stages: ['curating'],
-      meta: () => `train: ${activeVersion?.stats?.train_image_count ?? 0}`,
+      meta: () => {
+        const n = activeVersion?.stats?.train_image_count ?? 0
+        return n > 0 ? `${n} 张` : '—'
+      },
     },
     {
       label: '打标',
       stages: ['tagging'],
-      meta: () => activeVersion?.stats?.train_image_count ? `${activeVersion.stats.train_image_count} 张` : '—',
+      meta: () => {
+        const n = activeVersion?.stats?.train_image_count ?? 0
+        return n > 0 ? `${n} 张` : '—'
+      },
     },
     {
       label: '标签编辑',
@@ -90,12 +96,15 @@ function deriveTimeline(project: ProjectDetail, activeVersion: Version | null): 
     {
       label: '正则集',
       stages: ['configured'],
-      meta: () => `reg: ${activeVersion?.stats?.reg_image_count ?? 0}`,
+      meta: () => {
+        const n = activeVersion?.stats?.reg_image_count ?? 0
+        return n > 0 ? `${n} 张` : '—'
+      },
     },
     {
       label: '训练',
       stages: ['training', 'done'],
-      meta: () => activeVersion?.stats?.has_output ? '已出 checkpoint' : '—',
+      meta: () => activeVersion?.stats?.has_output ? '已出模型' : '—',
     },
   ]
 
@@ -116,35 +125,42 @@ function PipelineTimeline({ steps }: { steps: PipelineStep[] }) {
   return (
     <div className="grid" style={{ gridTemplateColumns: `repeat(${steps.length}, 1fr)` }}>
       {steps.map((s, i) => (
-        <div key={i} className="relative px-2">
+        <div key={i} className="relative px-1 min-w-0">
           {/* left connector */}
           {i > 0 && (
             <div
-              className={`absolute top-[14px] left-0 h-0.5 ${s.status !== 'pending' ? 'bg-ok' : 'bg-[var(--border-subtle)]'}`}
-              style={{ width: 'calc(50% - 16px)' }}
+              className={`absolute top-[15px] left-0 h-0.5 ${s.status !== 'pending' ? 'bg-ok' : 'bg-border-subtle'}`}
+              style={{ width: 'calc(50% - 15px)' }}
             />
           )}
           {/* right connector */}
           {i < steps.length - 1 && (
             <div
-              className={`absolute top-[14px] right-0 h-0.5 ${s.status === 'done' ? 'bg-ok' : 'bg-[var(--border-subtle)]'}`}
-              style={{ width: 'calc(50% - 16px)' }}
+              className={`absolute top-[15px] right-0 h-0.5 ${s.status === 'done' ? 'bg-ok' : 'bg-border-subtle'}`}
+              style={{ width: 'calc(50% - 15px)' }}
             />
           )}
-          <div className="flex flex-col items-center text-center relative">
+          <div className="flex flex-col items-center text-center relative min-w-0">
+            {/* 步骤圆点 */}
             <div
-              className={`w-[30px] h-[30px] rounded-full grid place-items-center font-mono font-bold text-xs ${
-                s.status === 'done' ? 'bg-ok text-white'
-                : s.status === 'active' ? 'bg-accent text-white border-[3px] border-accent-soft'
+              className={`w-[30px] h-[30px] rounded-full grid place-items-center font-mono font-bold text-xs shrink-0 ${
+                s.status === 'done'   ? 'bg-ok text-fg-inverse'
+                : s.status === 'active' ? 'bg-accent text-fg-inverse ring-[3px] ring-accent-soft'
                 : 'bg-overlay text-fg-tertiary'
               }`}
             >
               {s.status === 'done' ? '✓' : s.idx}
             </div>
-            <div className={`mt-2 text-sm ${s.status === 'active' ? 'font-semibold' : 'font-medium'}`}>
+            {/* 步骤标签 */}
+            <div className={`mt-2 text-sm font-medium leading-tight max-w-full overflow-hidden text-ellipsis whitespace-nowrap ${
+              s.status === 'pending' ? 'text-fg-tertiary' : 'text-fg-primary'
+            }`}>
               {s.label}
             </div>
-            <div className="mono text-xs text-fg-tertiary mt-0.5">
+            {/* 元信息 */}
+            <div className={`text-xs mt-0.5 max-w-full overflow-hidden text-ellipsis whitespace-nowrap ${
+              s.meta === '—' ? 'text-fg-disabled' : 'text-fg-tertiary'
+            }`}>
               {s.meta}
             </div>
           </div>
