@@ -40,14 +40,33 @@ export default function TrainPage() {
   const [reg, setReg] = useState<RegStatus | null>(null)
   const [busy, setBusy] = useState(false)
 
-  /** 已保存的 config JSON 快照，用于可靠判断是否 dirty */
+  /** 已落盘的 config JSON 快照，dirty 判断的 baseline。 */
   const savedJsonRef = useRef<string | null>(null)
+  /** 当前 config 的同步镜像。React setState 是 queued 的，事件 handler 跑完才
+   * flush；onEnqueue / cleanup-on-unmount 需要立刻读到最新值，不能等 React
+   * commit。所有 setConfig 都走 setConfigSync 包装，写 ref 同步、写 state 异步。 */
+  const configRef = useRef<ConfigData | null>(null)
+  /** 当前在飞的 save promise，dedup 重叠的保存请求。 */
+  const inFlightSaveRef = useRef<Promise<void> | null>(null)
+  /** 等待中的 debounce setTimeout id；onEnqueue 需要 cancel 它。 */
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** 当前预设的原始 config（fork 时缓的那份），picker「· 已自定义」标签
+   * 用它做基准。null = 还没拉到 / 没绑定到任何预设。 */
+  const presetBaselineRef = useRef<ConfigData | null>(null)
 
   // 预设 picker（dropdown 模式，与 Presets 页一致）
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerSearch, setPickerSearch] = useState('')
   const pickerAnchorRef = useRef<HTMLButtonElement | null>(null)
   const pickerPopRef = useRef<HTMLDivElement | null>(null)
+
+  /** 包装 setConfig：先同步写 configRef（绕 React state flush 延迟），再调
+   * setConfig 触发 React 渲染。 SchemaForm.onChange / 任何想改 config 的入口
+   * 都要走这个，不要直接 setConfig。 */
+  const setConfigSync = useCallback((v: ConfigData | null) => {
+    configRef.current = v
+    setConfig(v)
+  }, [])
 
   const vid = activeVersion?.id ?? null
 
@@ -56,12 +75,31 @@ export default function TrainPage() {
     try {
       const r = await api.getVersionConfig(project.id, vid)
       setConfigResp(r)
-      setConfig(r.config)
+      setConfigSync(r.config)
       savedJsonRef.current = JSON.stringify(r.config)
     } catch (e) {
       toast(`加载训练配置失败: ${e}`, 'error')
     }
-  }, [project.id, vid, toast])
+  }, [project.id, vid, toast, setConfigSync])
+
+  /** 拉当前 version 绑的预设 config，给 picker「· 已自定义」标签做 baseline。
+   * 预设可能已被删（找不到就清掉 baseline，标签自然不显示）。 */
+  const refreshPresetBaseline = useCallback(async (name: string | null) => {
+    if (!name) {
+      presetBaselineRef.current = null
+      return
+    }
+    try {
+      presetBaselineRef.current = await api.getPreset(name)
+    } catch {
+      presetBaselineRef.current = null
+    }
+  }, [])
+
+  // 进入页面 / 切 version 时拉一次预设 baseline；config_name 变化也跟上
+  useEffect(() => {
+    void refreshPresetBaseline(activeVersion?.config_name ?? null)
+  }, [activeVersion?.config_name, refreshPresetBaseline])
 
   useEffect(() => {
     api.schema().then(setSchema).catch((e) => toast(`schema 加载失败: ${e}`, 'error'))
@@ -78,19 +116,6 @@ export default function TrainPage() {
     api.getRegStatus(project.id, vid).then(setReg).catch(() => setReg(null))
   }, [project.id, vid])
 
-  // dirty 状态下离开页面给浏览器原生确认弹窗——
-  // 路由内切页不会触发，但关 tab / 刷新 / 跨域跳转能挡住。
-  useEffect(() => {
-    const isDirty =
-      config !== null && JSON.stringify(config) !== savedJsonRef.current
-    if (!isDirty) return
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault()
-      e.returnValue = ''
-    }
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
-  }, [config])
 
   // 全局模型路径仍然灰显 readonly（值来自 Settings.models 配置；version 维度
   // 改了没意义）。PP10.4 起项目特定字段（data_dir 等）改成可编辑：fork preset
@@ -111,10 +136,82 @@ export default function TrainPage() {
     return h
   }, [configResp?.project_specific_fields])
 
-  const dirty = useMemo(() => {
-    if (!config) return false
-    return JSON.stringify(config) !== savedJsonRef.current
-  }, [config])
+  /** 把项目特定字段（data_dir / reg_data_dir 等）从 config 里拿掉再 JSON。
+   * picker「· 已自定义」标签比对预设原值时要排除这几个：fork 时项目预填会把
+   * 它们覆盖成项目路径，跟预设原值天然不一样，但这不算用户自己改了。 */
+  const stripProjectFields = useCallback((cfg: ConfigData | null): string => {
+    if (!cfg) return ''
+    const skip = new Set(configResp?.project_specific_fields ?? [])
+    const filtered: ConfigData = {}
+    for (const k of Object.keys(cfg)) {
+      if (!skip.has(k)) filtered[k] = cfg[k]
+    }
+    return JSON.stringify(filtered)
+  }, [configResp?.project_specific_fields])
+
+  /** 当前 config 是否相对预设原值有自定义改动（picker 标签用）。
+   * 注意 presetBaselineRef 是 ref 不进 deps 数组；它只在 fork 时变，那时
+   * config 也会跟着变，依赖 config 重算就够。 */
+  const customized = useMemo(() => {
+    if (!config || !presetBaselineRef.current) return false
+    return stripProjectFields(config) !== stripProjectFields(presetBaselineRef.current)
+  }, [config, stripProjectFields])
+
+  /** 落盘 cfg。串行化保证：如果上一次 save 还在飞，等它跑完再决定是否要再
+   * save；这样多次 setConfig + debounce 不会丢任何一次的内容。
+   *
+   * 注意 race：用户在 await 期间可能又改了 config —— 那时不能用 server 返回的
+   * 归一化结果去覆盖 React state（会清空他正在打字的字段）。靠 reference
+   * 比对 configRef.current === cfg 区分：
+   *   - 相等 → 用户没动过，安全 sync server 归一化结果到 UI
+   *   - 不等 → 用户有新内容，只更新 savedJson baseline，UI state 不动；
+   *            useEffect debounce 会自然为新内容触发下一轮 save 收敛 */
+  const persistConfig = useCallback(async (cfg: ConfigData): Promise<void> => {
+    while (inFlightSaveRef.current) {
+      await inFlightSaveRef.current
+    }
+    if (JSON.stringify(cfg) === savedJsonRef.current) return
+    const p = (async () => {
+      const r = await api.putVersionConfig(project.id, vid!, cfg)
+      setConfigResp((prev) => prev ? { ...prev, has_config: true, config: r.config } : prev)
+      // baseline 用 server 归一化后的 r.config，下次 dirty diff 才不会假阳性。
+      savedJsonRef.current = JSON.stringify(r.config)
+      if (configRef.current === cfg) {
+        configRef.current = r.config
+        setConfig(r.config)
+      }
+    })()
+    inFlightSaveRef.current = p
+    try { await p } finally { inFlightSaveRef.current = null }
+  }, [project.id, vid])
+
+  // ── auto-save ─────────────────────────────────────────────────────────
+  // config 变化 → 600ms 后没新改动就落盘。中途又改 → cleanup clearTimeout 重置。
+  useEffect(() => {
+    if (!config) return
+    if (JSON.stringify(config) === savedJsonRef.current) return
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null
+      void persistConfig(config).catch((e) => toast(`保存失败：${e}`, 'error'))
+    }, 600)
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
+      }
+    }
+  }, [config, persistConfig, toast])
+
+  // 卸载时（路由切走）如果还有 dirty 没落盘 → fire-and-forget 把 PUT 发出去。
+  // fetch 一旦发起，浏览器会继续送，不需要 await。catch 静默以免 cleanup 抛出。
+  useEffect(() => {
+    return () => {
+      const cur = configRef.current
+      if (!cur || !vid) return
+      if (JSON.stringify(cur) === savedJsonRef.current) return
+      void api.putVersionConfig(project.id, vid, cur).catch(() => {})
+    }
+  }, [project.id, vid])
 
   const filteredPresets = useMemo(
     () => presets.filter((p) => !pickerSearch || p.name.toLowerCase().includes(pickerSearch.toLowerCase())),
@@ -164,20 +261,6 @@ export default function TrainPage() {
     }
   }
 
-  // dirty 时落盘 config（onEnqueue 用）。不再作为按钮暴露——
-  // 老的「保存配置 / 已保存」按钮删了，保存语义并入「开始训练」。
-  const persistConfig = async () => {
-    if (!config) return
-    const r = await api.putVersionConfig(project.id, vid, config)
-    setConfigResp({
-      has_config: true,
-      config: r.config,
-      project_specific_fields: configResp?.project_specific_fields ?? [],
-    })
-    setConfig(r.config)
-    savedJsonRef.current = JSON.stringify(r.config)
-  }
-
   const onSaveAsPreset = async () => {
     const name = window.prompt(
       '保存为新预设。预设名（字母 / 数字 / _ / -，会清掉项目特定字段）：',
@@ -218,10 +301,21 @@ export default function TrainPage() {
     }
     setBusy(true)
     try {
-      // dirty 时先落盘当前编辑——以前是弹 confirm 让用户「按上次保存的配置入队」，
-      // 容易让用户的改动被默默忽略；现在「开始训练」永远用当前表单的值。
-      if (dirty && config) {
-        await persistConfig()
+      // 1. 干掉等待中的 debounce save；不然它可能在 enqueue 之后才 fire，导致
+      //    worker 起来时读的是旧 config。
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
+      }
+      // 2. 等任何正在飞的 save 跑完（debounce 刚刚 fire 的那一次）。
+      if (inFlightSaveRef.current) await inFlightSaveRef.current
+      // 3. 用 configRef（不是 config closure）再 diff 一次。覆盖「用户在 input
+      //    里敲完值不离开焦点直接点开始训练」的场景：input.onBlur (commit) 同步
+      //    setConfig 入队但 React 还没 flush，config closure 是旧的，但 configRef
+      //    在 setConfigSync 里同步更新过了。
+      const cur = configRef.current
+      if (cur && JSON.stringify(cur) !== savedJsonRef.current) {
+        await persistConfig(cur)
       }
       const t = await api.enqueueVersionTraining(project.id, vid)
       toast(`已入队 #${t.id}，去 /queue 查看进度`, 'success')
@@ -282,6 +376,14 @@ export default function TrainPage() {
                 configResp?.has_config ? 'text-fg-primary' : 'text-fg-tertiary',
               ].join(' ')}>
                 {activeVersion.config_name ?? '(未选)'}
+                {customized && (
+                  <span
+                    className="ml-2 text-xs text-warn font-normal"
+                    title="此版本基于预设拷贝。修改只影响当前版本，不影响预设池里的原值。"
+                  >
+                    · 已自定义
+                  </span>
+                )}
               </span>
               <span className="text-fg-tertiary text-md">▾</span>
             </button>
@@ -293,15 +395,6 @@ export default function TrainPage() {
             >
               另存为新预设
             </button>
-            {dirty && (
-              <span
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-warn-soft text-warn text-xs font-medium"
-                title="开始训练时会自动落盘"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-warn" />
-                未保存（开始训练自动落盘）
-              </span>
-            )}
 
             {/* popover */}
             {pickerOpen && (
@@ -382,7 +475,7 @@ export default function TrainPage() {
                 <SchemaForm
                   schema={schema}
                   values={config}
-                  onChange={setConfig}
+                  onChange={setConfigSync}
                   disabledFields={disabledFields}
                   disabledHints={disabledHints}
                   autoHints={autoHints}
