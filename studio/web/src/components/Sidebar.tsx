@@ -333,7 +333,7 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
     >
       {/* header / logo */}
       <div
-        className="flex items-center justify-between border-b border-subtle shrink-0 px-3.5"
+        className={`flex items-center border-b border-subtle shrink-0 px-3.5 ${collapsed ? 'justify-center' : ''}`}
         style={{ height: 'var(--topbar-h)' }}
       >
         <Logo collapsed={collapsed} />
