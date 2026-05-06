@@ -78,6 +78,20 @@ export default function TrainPage() {
     api.getRegStatus(project.id, vid).then(setReg).catch(() => setReg(null))
   }, [project.id, vid])
 
+  // dirty 状态下离开页面给浏览器原生确认弹窗——
+  // 路由内切页不会触发，但关 tab / 刷新 / 跨域跳转能挡住。
+  useEffect(() => {
+    const isDirty =
+      config !== null && JSON.stringify(config) !== savedJsonRef.current
+    if (!isDirty) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [config])
+
   // 全局模型路径仍然灰显 readonly（值来自 Settings.models 配置；version 维度
   // 改了没意义）。PP10.4 起项目特定字段（data_dir 等）改成可编辑：fork preset
   // 时仍然预填项目路径，但用户后续可以自由改（接续训练填 resume_lora 之类）。
@@ -141,24 +155,18 @@ export default function TrainPage() {
     }
   }
 
-  const onSaveConfig = async () => {
+  // dirty 时落盘 config（onEnqueue 用）。不再作为按钮暴露——
+  // 老的「保存配置 / 已保存」按钮删了，保存语义并入「开始训练」。
+  const persistConfig = async () => {
     if (!config) return
-    setBusy(true)
-    try {
-      const r = await api.putVersionConfig(project.id, vid, config)
-      setConfigResp({
-        has_config: true,
-        config: r.config,
-        project_specific_fields: configResp?.project_specific_fields ?? [],
-      })
-      setConfig(r.config)
-      savedJsonRef.current = JSON.stringify(r.config)
-      toast('已保存', 'success')
-    } catch (e) {
-      toast(String(e), 'error')
-    } finally {
-      setBusy(false)
-    }
+    const r = await api.putVersionConfig(project.id, vid, config)
+    setConfigResp({
+      has_config: true,
+      config: r.config,
+      project_specific_fields: configResp?.project_specific_fields ?? [],
+    })
+    setConfig(r.config)
+    savedJsonRef.current = JSON.stringify(r.config)
   }
 
   const onSaveAsPreset = async () => {
@@ -196,14 +204,16 @@ export default function TrainPage() {
 
   const onEnqueue = async () => {
     if (!configResp?.has_config) {
-      toast('先选预设并保存配置', 'error')
+      toast('先选预设', 'error')
       return
-    }
-    if (dirty) {
-      if (!window.confirm('当前有未保存的改动，确定按上次保存的配置入队？')) return
     }
     setBusy(true)
     try {
+      // dirty 时先落盘当前编辑——以前是弹 confirm 让用户「按上次保存的配置入队」，
+      // 容易让用户的改动被默默忽略；现在「开始训练」永远用当前表单的值。
+      if (dirty && config) {
+        await persistConfig()
+      }
       const t = await api.enqueueVersionTraining(project.id, vid)
       toast(`已入队 #${t.id}，去 /queue 查看进度`, 'success')
       void reload()
@@ -221,22 +231,13 @@ export default function TrainPage() {
       title="训练"
       subtitle="选预设 → 编辑 config → 入队训练"
       actions={
-        <>
-          <button
-            onClick={() => void onSaveConfig()}
-            disabled={busy || !dirty}
-            className="btn btn-secondary btn-sm"
-          >
-            {dirty ? '保存配置' : '已保存'}
-          </button>
-          <button
-            onClick={() => void onEnqueue()}
-            disabled={busy || !configResp?.has_config}
-            className="btn btn-primary"
-          >
-            开始训练
-          </button>
-        </>
+        <button
+          onClick={() => void onEnqueue()}
+          disabled={busy || !configResp?.has_config}
+          className="btn btn-primary"
+        >
+          开始训练
+        </button>
       }
     >
     <div className="flex flex-col h-full gap-3">
@@ -296,6 +297,23 @@ export default function TrainPage() {
             >
               另存为新预设
             </button>
+            {dirty && (
+              <span
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '4px 10px',
+                  borderRadius: 'var(--r-sm)',
+                  background: 'var(--warn-soft)',
+                  color: 'var(--warn)',
+                  fontSize: 'var(--t-xs)',
+                  fontWeight: 500,
+                }}
+                title="开始训练时会自动落盘"
+              >
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)' }} />
+                未保存（开始训练自动落盘）
+              </span>
+            )}
 
             {/* popover */}
             {pickerOpen && (
