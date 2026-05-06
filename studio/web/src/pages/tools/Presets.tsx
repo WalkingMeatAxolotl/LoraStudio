@@ -82,12 +82,26 @@ export default function PresetsPage() {
   }
 
   // ── 选定预设后加载 ──
+  // 新建模式（selected=null）：从 schema 默认值预填，避免「点了创建才弹出
+  // 一坨默认值」的认知错位 —— 后端 write_preset 会拿用户提交的 dict 走
+  // TrainingConfig.model_validate 补齐缺失字段的默认值，所以空表单提交也
+  // 会落盘成完整默认预设。前端先展示这些默认让用户在保存前就能看见+改。
   useEffect(() => {
     if (!selected) {
-      setConfig(null)
+      if (schema) {
+        const defaults: ConfigData = {}
+        for (const [name, prop] of Object.entries(schema.schema.properties)) {
+          if (prop.default !== undefined) defaults[name] = prop.default
+        }
+        setConfig(defaults)
+        savedJsonRef.current = JSON.stringify(defaults)
+      } else {
+        // schema 还没回来，等下一次 effect 触发（schema 进入依赖）
+        setConfig(null)
+        savedJsonRef.current = null
+      }
       setDescDraft('')
       setDescDirty(false)
-      savedJsonRef.current = null
       return
     }
     api.getPreset(selected).then((data) => {
@@ -99,7 +113,7 @@ export default function PresetsPage() {
       toast(`加载失败: ${e}`, 'error')
       setSelected(null)
     })
-  }, [selected, descriptions, toast])
+  }, [selected, schema, descriptions, toast])
 
   const dirty = useMemo(() => {
     if (!config) return false
