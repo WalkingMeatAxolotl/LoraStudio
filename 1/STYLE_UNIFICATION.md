@@ -341,8 +341,8 @@ className="badge badge-ok"
 | `b3e3042` | 批次 2-3：StepShell/TagStatsPanel/PathPicker 迁移 |
 | `d387e3a` | 批次 2-4：Sidebar（全面重写，保留 2 处必要 CSS 变量内联）/SchemaForm 迁移 |
 | `1c088ef` | 批次 2-5（完成）：MonitorDashboard 迁移，批次 2 全部完成 |
-| *(待提交)* | 批次 3（完成）：14 个页面文件全部迁移至 Tailwind token 类名 |
-| *(待提交)* | 暗色模式 + 字号调节：Sidebar 主题按钮、Settings「显示」节、localStorage 持久化 |
+| `c7e155e` | 批次 3（完成）：14 个页面文件全部迁移至 Tailwind token 类名 |
+| `7e2e73a` | 暗色模式 + 字号调节：Sidebar 主题按钮、Topbar 显示面板、localStorage 持久化 |
 
 ### 待开始
 
