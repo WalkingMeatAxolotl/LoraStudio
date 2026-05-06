@@ -1,8 +1,14 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import type { VersionStage } from '../api/client'
+import type { Version, VersionStage } from '../api/client'
 
-/** Map version stage → 0-based index of the current active step */
+/** Map version stage → 0-based index of the current active step.
+ *
+ * 注意：后端 stage 集合是 {curating, tagging, regularizing, ready, training,
+ * done}，**没有 editing 这个值**——打标完成后到正则启动前，stage 一直停在
+ * "tagging"。所以单看 stage，tag(2) 和 edit(3) 都不会变 done 状态。下方
+ * `isStepDone` 用 version.stats 派生覆盖，做到打完标 → tag/edit 立刻打勾。
+ */
 const STAGE_TO_STEP_IDX: Record<VersionStage, number> = {
   curating: 1,     // download done, curate active
   tagging: 2,      // download+curate done, tag active
@@ -230,15 +236,38 @@ const STEPS = [
   { key: 'train',    label: '训练',     idx: '6', icon: I.train },
 ]
 
-function ProjectStepperNav({ pid, activeVid, currentStep, stage, collapsed }: {
+function ProjectStepperNav({ pid, activeVid, currentStep, version, collapsed }: {
   pid: string
   activeVid: string | null
   currentStep: string | null
-  stage: VersionStage
+  version: Version | null
   collapsed: boolean
 }) {
   const overviewActive = currentStep === null
-  const activeStepIdx = STAGE_TO_STEP_IDX[stage] ?? 0
+  const stage: VersionStage = version?.stage ?? 'curating'
+  const stageStepIdx = STAGE_TO_STEP_IDX[stage] ?? 0
+  const stats = version?.stats
+
+  // 派生覆盖（stats / output_lora_path）：打完标 → tag+edit 立即 done；
+  // 正则集生成 → reg 立即 done；output_lora_path 存在 → train done。
+  // 这样不依赖后端 stage 跳转就能让侧边的勾勾跟上数据真相。
+  const isStepDone = (key: string, idx: number): boolean => {
+    if (idx < stageStepIdx) return true
+    if (
+      (key === 'tag' || key === 'edit') &&
+      stats &&
+      stats.train_image_count > 0 &&
+      stats.tagged_image_count >= stats.train_image_count
+    ) return true
+    if (
+      key === 'reg' &&
+      stats &&
+      stats.reg_meta_exists &&
+      stats.reg_image_count > 0
+    ) return true
+    if (key === 'train' && version?.output_lora_path) return true
+    return false
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 4px' }}>
@@ -274,7 +303,7 @@ function ProjectStepperNav({ pid, activeVid, currentStep, stage, collapsed }: {
 
       {STEPS.map((s, i) => {
         const isActive = s.key === currentStep
-        const isDone = i < activeStepIdx
+        const isDone = isStepDone(s.key, i)
 
         const href = s.key === 'download'
           ? `/projects/${pid}/download`
@@ -421,7 +450,7 @@ export default function Sidebar() {
             {/* Version selector + export with project name embedded */}
             <VersionPanel collapsed={collapsed} />
 
-            <ProjectStepperNav pid={pid} activeVid={activeVid} currentStep={currentStep} stage={ctx?.activeVersion?.stage ?? 'curating'} collapsed={collapsed} />
+            <ProjectStepperNav pid={pid} activeVid={activeVid} currentStep={currentStep} version={ctx?.activeVersion ?? null} collapsed={collapsed} />
           </div>
         )}
       </nav>
