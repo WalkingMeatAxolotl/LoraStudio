@@ -100,14 +100,9 @@ export default function BulkActionBar({
   const opDisabled = isSelected && selectedKeys.length === 0
 
   return (
-    <div style={{
-      borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-      background: 'var(--bg-surface)', padding: '8px 12px',
-      display: 'flex', flexDirection: 'column', gap: 6,
-      fontSize: 'var(--t-xs)', flexShrink: 0,
-    }}>
+    <div className="rounded-md border border-subtle bg-surface px-3 py-2 flex flex-col gap-1.5 text-xs shrink-0">
       {/* Main row: filter + select + bulk ops */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <div className="flex items-center gap-1.5 flex-wrap">
         {/* Filter section */}
         <TagAutocomplete
           value={filterTag}
@@ -125,14 +120,11 @@ export default function BulkActionBar({
             ✕
           </button>
         )}
-        <span style={{
-          color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)',
-          fontSize: 'var(--t-xs)', minWidth: 40,
-        }}>
+        <span className="text-fg-tertiary font-mono text-xs min-w-[40px]">
           {filterTag ? `${filteredCount}/${totalCount}` : totalCount}
         </span>
 
-        <span style={{ color: 'var(--border-default)' }}>|</span>
+        <span className="text-dim">|</span>
 
         {/* Selection section */}
         <button
@@ -150,10 +142,10 @@ export default function BulkActionBar({
           清空 ({selectedKeys.length})
         </button>
 
-        <span style={{ color: 'var(--border-default)' }}>|</span>
+        <span className="text-dim">|</span>
 
         {/* Scope + bulk ops section */}
-        <span style={{ color: 'var(--fg-tertiary)' }}>范围</span>
+        <span className="text-fg-tertiary">范围</span>
         <select
           value={scope}
           onChange={(e) => setScope(e.target.value as ScopeKind)}
@@ -164,7 +156,7 @@ export default function BulkActionBar({
           <option value="all">全部图片</option>
         </select>
 
-        <span style={{ color: 'var(--border-default)' }}>|</span>
+        <span className="text-dim">|</span>
 
         <OpBtn label="+ 加 tag" active={openOp === 'add'} disabled={opDisabled}
           onClick={() => setOpenOp(openOp === 'add' ? null : 'add')} />
@@ -174,28 +166,24 @@ export default function BulkActionBar({
           onClick={() => setOpenOp(openOp === 'replace' ? null : 'replace')} />
         <OpBtn label="dedupe" disabled={opDisabled} onClick={() => apply('dedupe')} />
 
-        <span style={{ flex: 1 }} />
+        <span className="flex-1" />
 
         {selectedKeys.length > 0 && (
-          <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
+          <span className="text-accent font-mono">
             已选 {selectedKeys.length} 张
           </span>
         )}
       </div>
 
       {/* Hint row */}
-      <div style={{ color: 'var(--fg-tertiary)', fontSize: '11px' }}>
+      <div className="text-fg-tertiary text-[11px]">
         alt+点击 = 查看大图并编辑 · 普通点击 = 多选
       </div>
 
       {/* Popover row */}
       {openOp && openOp !== 'dedupe' && (
         <div
-          style={{
-            borderRadius: 'var(--r-sm)', border: '1px solid var(--border-subtle)',
-            background: 'var(--bg-sunken)', padding: '6px 10px',
-            display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6,
-          }}
+          className="rounded-sm border border-subtle bg-sunken px-2.5 py-1.5 flex flex-wrap items-center gap-1.5"
           role="dialog"
           aria-label={`bulk-${openOp}`}
         >
@@ -217,7 +205,7 @@ export default function BulkActionBar({
           {openOp === 'replace' && (
             <>
               <TagsField value={oldTag} onChange={setOldTag} placeholder="old" suggestions={tagSuggestions} />
-              <span style={{ color: 'var(--fg-tertiary)' }}>→</span>
+              <span className="text-fg-tertiary">→</span>
               <TagsField value={newTag} onChange={setNewTag} placeholder="new" suggestions={tagSuggestions} />
             </>
           )}
@@ -236,26 +224,13 @@ function OpBtn({ label, onClick, disabled, active }: {
     <button
       onClick={onClick}
       disabled={disabled}
-      style={{
-        padding: '2px 8px', borderRadius: 'var(--r-sm)',
-        background: active ? 'var(--accent)' : 'var(--bg-overlay)',
-        border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
-        color: active ? 'var(--accent-fg)' : 'var(--fg-secondary)',
-        fontSize: 'var(--t-xs)', cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.4 : 1,
-      }}
-      onMouseEnter={(e) => {
-        if (!disabled && !active) {
-          (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'
-          ;(e.currentTarget as HTMLElement).style.color = 'var(--fg-primary)'
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!disabled && !active) {
-          (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)'
-          ;(e.currentTarget as HTMLElement).style.color = 'var(--fg-secondary)'
-        }
-      }}
+      className={[
+        'px-2 py-0.5 rounded-sm text-xs border transition-colors',
+        active
+          ? 'bg-accent border-accent text-accent-fg'
+          : 'bg-overlay border-subtle text-fg-secondary hover:bg-surface hover:text-fg-primary',
+        disabled ? 'opacity-40 cursor-default' : 'cursor-pointer',
+      ].join(' ')}
     >
       {label}
     </button>
@@ -292,7 +267,7 @@ function TagsField({ value, onChange, placeholder, suggestions }: TagsFieldProps
   }
 
   return (
-    <div style={{ position: 'relative' }} ref={ref}>
+    <div className="relative" ref={ref}>
       <input
         value={value}
         onChange={(e) => { onChange(e.target.value); setOpen(true) }}
@@ -303,25 +278,14 @@ function TagsField({ value, onChange, placeholder, suggestions }: TagsFieldProps
       />
       {open && matches.length > 0 && (
         <ul
-          style={{
-            position: 'absolute', left: 0, top: '100%', marginTop: 2, zIndex: 30,
-            background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--r-sm)', boxShadow: 'var(--sh-lg)',
-            maxHeight: 180, overflowY: 'auto', minWidth: 200,
-            listStyle: 'none', padding: '4px 0', margin: 0,
-          }}
+          className="absolute left-0 top-full mt-0.5 z-30 bg-elevated border border-subtle rounded-sm shadow-lg max-h-[180px] overflow-y-auto min-w-[200px] list-none p-1 m-0"
           role="listbox"
         >
           {matches.map((s) => (
             <li
               key={s}
               onMouseDown={(e) => { e.preventDefault(); pick(s) }}
-              style={{
-                padding: '4px 10px', fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
-                color: 'var(--fg-primary)', cursor: 'pointer',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+              className="px-2.5 py-1 text-xs font-mono text-fg-primary cursor-pointer hover:bg-overlay rounded-sm"
             >
               {s}
             </li>

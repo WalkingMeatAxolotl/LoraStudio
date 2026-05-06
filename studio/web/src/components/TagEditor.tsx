@@ -70,20 +70,18 @@ export default function TagEditor({
 
   if (natural) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 }}>
+      <div className="flex flex-col gap-2 flex-1 min-h-0">
         <textarea
           value={tags[0] ?? ''}
           onChange={(e) => onChange([e.target.value])}
           placeholder="自然语言 caption..."
-          className="input input-mono"
-          style={{ flex: 1, resize: 'none', fontSize: 'var(--t-sm)' }}
+          className="input input-mono text-sm flex-1 resize-none"
         />
         {onSave && (
           <button
             disabled={saving || !dirty}
             onClick={onSave}
-            className={dirty ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
-            style={{ alignSelf: 'flex-start' }}
+            className={`self-start ${dirty ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}`}
           >
             {saving ? '保存中...' : dirty ? '保存' : '已保存'}
           </button>
@@ -93,55 +91,39 @@ export default function TagEditor({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0 }}>
+    <div className="flex flex-col gap-1.5 flex-1 min-h-0">
       {/* mode switch */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-xs)', flexShrink: 0 }}>
+      <div className="flex items-center gap-1.5 text-xs shrink-0">
         <ModeBtn active={mode === 'chip'} onClick={switchToChip}>chip</ModeBtn>
         <ModeBtn active={mode === 'text'} onClick={switchToText}>文本</ModeBtn>
-        <span style={{ flex: 1 }} />
-        <span style={{ color: 'var(--fg-tertiary)' }}>{tags.length} tag</span>
+        <span className="flex-1" />
+        <span className="text-fg-tertiary">{tags.length} tag</span>
       </div>
 
       {/* content area — both modes use flex:1 so no height jitter */}
       {mode === 'chip' ? (
         <>
-          <div style={{
-            display: 'flex', flexWrap: 'wrap', gap: 4,
-            overflowY: 'auto', flex: 1, minHeight: 0, alignContent: 'flex-start',
-            padding: '4px 0',
-          }}>
+          <div className="flex flex-wrap gap-1 overflow-y-auto flex-1 min-h-0 content-start py-1">
             {tags.length === 0 && (
-              <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>还没有标签</span>
+              <span className="text-xs text-fg-tertiary">还没有标签</span>
             )}
             {tags.map((t) => (
               <span
                 key={t}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '3px 8px', borderRadius: 'var(--r-pill)',
-                  background: 'var(--bg-overlay)', border: '1px solid var(--border-subtle)',
-                  fontSize: 'var(--t-sm)', fontFamily: 'var(--font-mono)',
-                  color: 'var(--fg-primary)',
-                }}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-overlay border border-subtle text-sm font-mono text-fg-primary"
               >
                 {t}
                 <button
                   onClick={() => removeTag(t)}
                   aria-label={`删除 ${t}`}
-                  style={{
-                    background: 'transparent', border: 'none',
-                    color: 'var(--fg-tertiary)', cursor: 'pointer',
-                    padding: 0, fontSize: 'var(--t-sm)', lineHeight: 1,
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--err)' }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--fg-tertiary)' }}
+                  className="bg-transparent border-none text-fg-tertiary hover:text-err cursor-pointer p-0 text-sm leading-none"
                 >
                   ×
                 </button>
               </span>
             ))}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <div className="flex items-center gap-1.5 shrink-0">
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -153,8 +135,7 @@ export default function TagEditor({
                 }
               }}
               placeholder="添加标签后按 Enter / 逗号"
-              className="input input-mono"
-              style={{ flex: 1, fontSize: 'var(--t-xs)' }}
+              className="input input-mono text-xs flex-1"
             />
             {onSave && (
               <button
@@ -174,10 +155,9 @@ export default function TagEditor({
             onChange={(e) => setTextBuf(e.target.value)}
             onBlur={commitText}
             placeholder="逗号 / 换行分隔，失焦自动同步"
-            className="input input-mono"
-            style={{ flex: 1, resize: 'none', fontSize: 'var(--t-xs)' }}
+            className="input input-mono text-xs flex-1 resize-none"
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <div className="flex items-center gap-1.5 shrink-0">
             <button onClick={commitText} className="btn btn-ghost btn-sm">同步</button>
             {onSave && (
               <button
@@ -201,15 +181,12 @@ function ModeBtn({ active, onClick, children }: {
   return (
     <button
       onClick={onClick}
-      style={{
-        padding: '2px 8px', borderRadius: 'var(--r-sm)',
-        background: active ? 'var(--accent)' : 'var(--bg-overlay)',
-        border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
-        color: active ? 'var(--accent-fg)' : 'var(--fg-secondary)',
-        fontSize: 'var(--t-xs)', cursor: 'pointer',
-      }}
-      onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)' }}
-      onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
+      className={[
+        'px-2 py-0.5 rounded-sm text-xs border transition-colors cursor-pointer',
+        active
+          ? 'bg-accent border-accent text-accent-fg'
+          : 'bg-overlay border-subtle text-fg-secondary hover:bg-surface',
+      ].join(' ')}
     >
       {children}
     </button>
