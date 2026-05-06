@@ -39,22 +39,17 @@ function StatCard({ label, value, sub, tone }: {
   sub?: string
   tone?: 'accent' | 'ok' | 'warn'
 }) {
-  const color = tone ? `var(--${tone})` : 'var(--fg-primary)'
+  const colorCls = tone === 'accent' ? 'text-accent' : tone === 'ok' ? 'text-ok' : tone === 'warn' ? 'text-warn' : 'text-fg-primary'
   return (
-    <div style={{
-      background: 'var(--bg-surface)',
-      border: '1px solid var(--border-subtle)',
-      borderRadius: 'var(--r-md)',
-      padding: '14px 18px',
-    }}>
-      <div style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+    <div className="bg-surface border border-subtle rounded-md px-[18px] py-[14px]">
+      <div className="text-xs text-fg-tertiary font-mono uppercase tracking-[0.04em] mb-1.5">
         {label}
       </div>
-      <div style={{ fontSize: 'var(--t-3xl)', fontWeight: 600, fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em', color, lineHeight: 1.1 }}>
+      <div className={`text-3xl font-semibold font-mono tabular-nums tracking-[-0.02em] leading-[1.1] ${colorCls}`}>
         {value}
       </div>
       {sub && (
-        <div style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', marginTop: 4 }}>
+        <div className="text-xs text-fg-tertiary font-mono mt-1">
           {sub}
         </div>
       )}
@@ -69,7 +64,7 @@ function LossChart({ losses, emaAlpha }: {
   emaAlpha: number
 }) {
   if (!losses.length) return (
-    <div style={{ height: 240, display: 'grid', placeItems: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)' }}>
+    <div className="h-60 grid place-items-center text-fg-tertiary text-sm">
       等待数据…
     </div>
   )
@@ -133,7 +128,7 @@ function LossChart({ losses, emaAlpha }: {
 // ── Sparkline ─────────────────────────────────────────────────────────────
 
 function Sparkline({ values, color }: { values: number[]; color: string }) {
-  if (values.length < 2) return <div style={{ height: 50 }} />
+  if (values.length < 2) return <div className="h-[50px]" />
   const W = 200, H = 50
   const min = Math.min(...values), max = Math.max(...values)
   const range = max - min || 0.001
@@ -141,7 +136,7 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
   const y = (v: number) => H - ((v - min) / range) * H
   const path = values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('')
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height: 50, marginTop: 8, display: 'block' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full mt-2 block" style={{ height: 50 }}>
       <path d={path} stroke={color} strokeWidth="1.5" fill="none" />
     </svg>
   )
@@ -163,7 +158,7 @@ function SampleGrid({ samples, taskId }: {
   useEffect(() => { setActive(0) }, [list])
 
   if (!list.length) return (
-    <div style={{ display: 'grid', placeItems: 'center', height: 200, color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)' }}>
+    <div className="grid place-items-center h-[200px] text-fg-tertiary text-sm">
       等待采样图…
     </div>
   )
@@ -173,27 +168,21 @@ function SampleGrid({ samples, taskId }: {
   const imgUrl = api.sampleImageUrl(filename, taskId)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="flex flex-col gap-2">
       {/* Thumbnail strip */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: 8, background: 'var(--bg-sunken)', borderRadius: 'var(--r-sm)' }}>
+      <div className="flex flex-wrap gap-1 p-2 bg-sunken rounded-sm">
         {list.map((s, i) => {
           const fn = s.path.split(/[\\/]/).pop() ?? s.path
           return (
             <button
               key={i}
               onClick={() => setActive(i)}
-              style={{
-                width: 44, height: 44, borderRadius: 'var(--r-sm)', overflow: 'hidden',
-                border: `2px solid ${i === active ? 'var(--accent)' : 'transparent'}`,
-                background: 'var(--bg-overlay)', padding: 0, cursor: 'pointer',
-                transition: 'border-color 0.12s',
-                flexShrink: 0,
-              }}
+              className={`w-11 h-11 rounded-sm overflow-hidden border-2 bg-overlay p-0 cursor-pointer transition-[border-color] duration-[120ms] shrink-0 ${i === active ? 'border-accent' : 'border-transparent'}`}
             >
               <img
                 src={api.sampleImageUrl(fn, taskId)}
                 alt={`step ${s.step ?? i}`}
-                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                className="w-full h-full object-cover block"
                 onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }}
               />
             </button>
@@ -201,21 +190,19 @@ function SampleGrid({ samples, taskId }: {
         })}
       </div>
       {/* Large preview */}
-      <div style={{ flex: 1, minHeight: 200, background: 'var(--bg-sunken)', borderRadius: 'var(--r-sm)', overflow: 'hidden', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="flex-1 min-h-[200px] bg-sunken rounded-sm overflow-hidden relative flex items-center justify-center">
         <img
           key={imgUrl}
           src={imgUrl}
           alt="sample preview"
-          style={{ maxWidth: '100%', maxHeight: 320, objectFit: 'contain', display: 'block' }}
+          className="max-w-full max-h-[320px] object-contain block"
         />
         {cur.step != null && (
-          <div style={{
-            position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)',
-            background: 'rgba(246,245,241,0.9)', border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--r-sm)', padding: '2px 10px',
-            fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)', color: 'var(--fg-secondary)',
-          }}>
-            step <strong style={{ color: 'var(--accent)' }}>{cur.step.toLocaleString()}</strong>
+          <div
+            className="absolute bottom-2 left-1/2 -translate-x-1/2 border border-subtle rounded-sm px-2.5 py-0.5 text-xs font-mono text-fg-secondary"
+            style={{ background: 'rgba(246,245,241,0.9)' }}
+          >
+            step <strong className="text-accent">{cur.step.toLocaleString()}</strong>
           </div>
         )}
       </div>
@@ -294,7 +281,7 @@ export default function MonitorDashboard({ taskId }: { taskId: number }) {
 
   if (!state && !connected) {
     return (
-      <div style={{ display: 'grid', placeItems: 'center', height: 200, color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)' }}>
+      <div className="grid place-items-center h-[200px] text-fg-tertiary text-sm">
         等待训练数据…
       </div>
     )
@@ -304,42 +291,39 @@ export default function MonitorDashboard({ taskId }: { taskId: number }) {
   const config = state?.config ?? {}
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: 16, overflowY: 'auto' }}>
+    <div className="flex flex-col gap-3.5 p-4 overflow-y-auto">
       {/* Connection status + progress */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)',
-        flexShrink: 0,
-      }}>
-        <span style={{
-          width: 7, height: 7, borderRadius: '50%',
-          background: connected ? 'var(--ok)' : 'var(--err)',
-          display: 'inline-block', flexShrink: 0,
-          animation: connected ? 'pulse 2s infinite' : 'none',
-        }} />
+      <div className="flex items-center gap-2.5 text-xs text-fg-tertiary font-mono shrink-0">
+        <span className={`w-[7px] h-[7px] rounded-full inline-block shrink-0 ${connected ? 'bg-ok animate-pulse' : 'bg-err'}`} />
         {connected ? '实时' : '已断开'}
         {totalSteps > 0 && (
           <>
-            <span style={{ color: 'var(--border-default)' }}>·</span>
+            <span className="text-dim">·</span>
             <span>{step.toLocaleString()} / {totalSteps.toLocaleString()} steps</span>
-            <span style={{ color: 'var(--border-default)' }}>·</span>
+            <span className="text-dim">·</span>
             <span>{progress.toFixed(1)}%</span>
-            <div style={{ flex: 1, height: 4, background: 'var(--bg-overlay)', borderRadius: 2, overflow: 'hidden' }}>
-              <div style={{ width: `${progress}%`, height: '100%', background: 'var(--accent)', borderRadius: 2, transition: 'width 1s ease-out' }} />
+            <div className="flex-1 h-1 bg-overlay rounded overflow-hidden">
+              <div
+                className="h-full bg-accent rounded transition-[width] duration-[1s] ease-out"
+                style={{ width: `${progress}%` }}
+              />
             </div>
             <span>elapsed {elapsed}</span>
           </>
         )}
-        <span style={{ flex: 1 }} />
-        <a href={`/monitor_smooth.html?task_id=${taskId}`} target="_blank" rel="noopener"
-          style={{ color: 'var(--fg-tertiary)', textDecoration: 'none' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--fg-primary)' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--fg-tertiary)' }}
-        >独立监控 ↗</a>
+        <span className="flex-1" />
+        <a
+          href={`/monitor_smooth.html?task_id=${taskId}`}
+          target="_blank"
+          rel="noopener"
+          className="text-fg-tertiary no-underline hover:text-fg-primary transition-colors"
+        >
+          独立监控 ↗
+        </a>
       </div>
 
       {/* 5 stat cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
+      <div className="grid grid-cols-5 gap-2.5">
         <StatCard label="step" value={step ? step.toLocaleString() : '--'}
           sub={totalSteps ? `of ${totalSteps.toLocaleString()}` : undefined} tone="accent" />
         <StatCard label="loss" value={lastLoss != null ? lastLoss.toFixed(4) : '--'}
@@ -356,19 +340,19 @@ export default function MonitorDashboard({ taskId }: { taskId: number }) {
       </div>
 
       {/* Loss chart + samples */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 14 }}>
+      <div className="grid grid-cols-[1.6fr_1fr] gap-3.5">
         {/* Loss chart */}
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <span style={{ fontSize: 'var(--t-sm)', fontWeight: 600 }}>loss</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-sm font-semibold">loss</span>
+            <div className="flex items-center gap-2 text-xs text-fg-tertiary">
+              <label className="flex items-center gap-1 cursor-pointer">
                 smooth
                 <input type="range" min="0.001" max="0.3" step="0.001" value={emaAlpha}
                   onChange={(e) => setEmaAlpha(parseFloat(e.target.value))}
                   style={{ width: 60, accentColor: 'var(--accent)' }}
                 />
-                <span style={{ fontFamily: 'var(--font-mono)', width: '3ch' }}>{emaAlpha.toFixed(2)}</span>
+                <span className="font-mono w-[3ch]">{emaAlpha.toFixed(2)}</span>
               </label>
             </div>
           </div>
@@ -376,50 +360,46 @@ export default function MonitorDashboard({ taskId }: { taskId: number }) {
         </div>
 
         {/* Samples */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-            <span style={{ fontSize: 'var(--t-sm)', fontWeight: 600 }}>采样</span>
-            <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>{samples.length} 张</span>
+        <div className="card p-0 overflow-hidden flex flex-col">
+          <div className="px-3.5 py-2.5 border-b border-subtle flex items-center justify-between shrink-0">
+            <span className="text-sm font-semibold">采样</span>
+            <span className="text-xs text-fg-tertiary font-mono">{samples.length} 张</span>
           </div>
-          <div style={{ flex: 1, padding: 10, minHeight: 0 }}>
+          <div className="flex-1 p-2.5 min-h-0">
             <SampleGrid samples={samples} taskId={taskId} />
           </div>
         </div>
       </div>
 
       {/* LR sparkline + config */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: 14 }}>
+      <div className="grid grid-cols-[1fr_1.6fr] gap-3.5">
         {/* LR chart */}
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ fontSize: 'var(--t-sm)', fontWeight: 600, marginBottom: 6 }}>learning rate</div>
-          <div style={{ fontSize: 'var(--t-2xl)', fontWeight: 600, fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', color: 'var(--warn)' }}>
+        <div className="card p-4">
+          <div className="text-sm font-semibold mb-1.5">learning rate</div>
+          <div className="text-2xl font-semibold font-mono tabular-nums text-warn">
             {fmtLr(lastLr)}
           </div>
           <Sparkline values={lrSparkline} color="var(--warn)" />
         </div>
 
         {/* Config */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 'var(--t-sm)', fontWeight: 600 }}>训练配置</span>
+        <div className="card p-0 overflow-hidden">
+          <div className="px-3.5 py-2.5 border-b border-subtle flex items-center justify-between">
+            <span className="text-sm font-semibold">训练配置</span>
             <span className="caption">{Object.keys(config).length} 项</span>
           </div>
-          <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-            {Object.entries(config).map(([k, v], i, arr) => (
-              <div key={k} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '6px 14px', fontSize: 'var(--t-xs)',
-                borderBottom: i < arr.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-              }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+          <div className="max-h-[200px] overflow-y-auto">
+            {Object.entries(config).map(([k, v]) => (
+              <div
+                key={k}
+                className="flex justify-between items-center px-3.5 py-1.5 text-xs border-b border-subtle last:border-b-0 hover:bg-overlay transition-colors"
               >
-                <span style={{ color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>{k}</span>
-                <span style={{ color: 'var(--fg-primary)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{String(v)}</span>
+                <span className="text-fg-tertiary font-mono">{k}</span>
+                <span className="text-fg-primary font-mono font-medium">{String(v)}</span>
               </div>
             ))}
             {Object.keys(config).length === 0 && (
-              <div style={{ padding: 14, color: 'var(--fg-tertiary)', fontSize: 'var(--t-xs)', textAlign: 'center' }}>
+              <div className="p-3.5 text-fg-tertiary text-xs text-center">
                 训练配置加载中…
               </div>
             )}
