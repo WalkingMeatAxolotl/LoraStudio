@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 interface Props {
   tags: string[]
-  /** 用 textarea 渲染（适合 JoyCaption 自然语言）；否则 chip 列表。 */
   natural?: boolean
   onChange: (tags: string[]) => void
-  /** 父组件提交后调；失败 toast 由父组件处理。 */
   onSave?: () => void | Promise<void>
   saving?: boolean
   dirty?: boolean
@@ -14,43 +12,32 @@ interface Props {
 type Mode = 'chip' | 'text'
 
 const parseLine = (raw: string): string[] =>
-  raw
-    .split(/[,，\n]/)
-    .map((t) => t.trim())
-    .filter(Boolean)
+  raw.split(/[,，\n]/).map((t) => t.trim()).filter(Boolean)
 
 export default function TagEditor({
-  tags,
-  natural,
-  onChange,
-  onSave,
-  saving,
-  dirty,
+  tags, natural, onChange, onSave, saving, dirty,
 }: Props) {
   const [draft, setDraft] = useState('')
   const tagsJoined = useMemo(() => tags.join(', '), [tags])
   const [mode, setMode] = useState<Mode>(natural ? 'text' : 'chip')
-  // text 模式 buffer：初始用当前 tags 拼出来，避免「切到 text → 空白」
   const [textBuf, setTextBuf] = useState(() => tagsJoined)
 
-  // tags 变化（外部刷新）→ 清掉草稿
-  useEffect(() => {
-    setDraft('')
-  }, [tags])
+  // Reset draft when image switches
+  useEffect(() => { setDraft('') }, [tags])
 
-  // 进入 text 模式 / tags 外部变 → 同步 textBuf
+  // Sync textBuf when tags change WHILE in text mode (image switch)
+  const prevTagsJoinedRef = useRef(tagsJoined)
   useEffect(() => {
-    if (mode === 'text') setTextBuf(tagsJoined)
-  }, [mode, tagsJoined])
+    if (mode === 'text' && tagsJoined !== prevTagsJoinedRef.current) {
+      setTextBuf(tagsJoined)
+    }
+    prevTagsJoinedRef.current = tagsJoined
+  }, [tagsJoined, mode])
 
   const addTag = (raw: string) => {
     const t = raw.trim().replace(/^[,，]+|[,，]+$/g, '')
     if (!t) return
-    if (tags.includes(t)) {
-      setDraft('')
-      return
-    }
-    // 新 tag 默认插到开头（用户偏好：训练时主标签更靠前）
+    if (tags.includes(t)) { setDraft(''); return }
     onChange([t, ...tags])
     setDraft('')
   }
@@ -59,33 +46,44 @@ export default function TagEditor({
     onChange(tags.filter((x) => x !== t))
   }
 
-  // text 模式失焦或主动 commit → 把 textBuf 解析回 tags（去重保序）
   const commitText = () => {
     const next: string[] = []
     const seen = new Set<string>()
     for (const t of parseLine(textBuf)) {
       if (seen.has(t)) continue
-      seen.add(t)
-      next.push(t)
+      seen.add(t); next.push(t)
     }
     if (JSON.stringify(next) !== JSON.stringify(tags)) onChange(next)
   }
 
-  // natural 模式（JoyCaption） — 整段自由文本，不解析
+  const switchToText = () => {
+    if (mode === 'text') return
+    setTextBuf(tagsJoined) // sync immediately, no double-render via effect
+    setMode('text')
+  }
+
+  const switchToChip = () => {
+    if (mode === 'chip') return
+    commitText()
+    setMode('chip')
+  }
+
   if (natural) {
     return (
-      <div className="space-y-2 flex-1 min-h-0 flex flex-col">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 }}>
         <textarea
           value={tags[0] ?? ''}
           onChange={(e) => onChange([e.target.value])}
           placeholder="自然语言 caption..."
-          className="w-full flex-1 min-h-[180px] px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-sm focus:outline-none focus:border-cyan-500"
+          className="input input-mono"
+          style={{ flex: 1, resize: 'none', fontSize: 'var(--t-sm)' }}
         />
         {onSave && (
           <button
             disabled={saving || !dirty}
             onClick={onSave}
-            className="px-3 py-1 rounded text-xs bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500 self-start"
+            className={dirty ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+            style={{ alignSelf: 'flex-start' }}
           >
             {saving ? '保存中...' : dirty ? '保存' : '已保存'}
           </button>
@@ -95,74 +93,74 @@ export default function TagEditor({
   }
 
   return (
-    <div className="space-y-2 flex-1 min-h-0 flex flex-col">
-      <div className="flex items-center gap-2 text-[10px] shrink-0">
-        <span className="text-slate-500">编辑模式</span>
-        <ModeBtn
-          active={mode === 'chip'}
-          onClick={() => {
-            // 切回 chip 前先把 textarea 缓冲落到 tags（避免丢未失焦的改动）
-            if (mode === 'text') commitText()
-            setMode('chip')
-          }}
-        >
-          chip
-        </ModeBtn>
-        <ModeBtn
-          active={mode === 'text'}
-          onClick={() => {
-            // 直接切；textBuf 由 useEffect 同步当前 tags
-            setMode('text')
-          }}
-        >
-          文本
-        </ModeBtn>
-        <span className="flex-1" />
-        <span className="text-slate-500">{tags.length} tag</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0 }}>
+      {/* mode switch */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--t-xs)', flexShrink: 0 }}>
+        <ModeBtn active={mode === 'chip'} onClick={switchToChip}>chip</ModeBtn>
+        <ModeBtn active={mode === 'text'} onClick={switchToText}>文本</ModeBtn>
+        <span style={{ flex: 1 }} />
+        <span style={{ color: 'var(--fg-tertiary)' }}>{tags.length} tag</span>
       </div>
 
+      {/* content area — both modes use flex:1 so no height jitter */}
       {mode === 'chip' ? (
         <>
-          <div className="flex flex-wrap gap-1 overflow-y-auto flex-1 min-h-0 content-start">
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: 4,
+            overflowY: 'auto', flex: 1, minHeight: 0, alignContent: 'flex-start',
+            padding: '4px 0',
+          }}>
             {tags.length === 0 && (
-              <span className="text-xs text-slate-500">还没有标签</span>
+              <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>还没有标签</span>
             )}
             {tags.map((t) => (
               <span
                 key={t}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-xs text-slate-200"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px', borderRadius: 'var(--r-pill)',
+                  background: 'var(--bg-overlay)', border: '1px solid var(--border-subtle)',
+                  fontSize: 'var(--t-sm)', fontFamily: 'var(--font-mono)',
+                  color: 'var(--fg-primary)',
+                }}
               >
                 {t}
                 <button
                   onClick={() => removeTag(t)}
                   aria-label={`删除 ${t}`}
-                  className="text-slate-500 hover:text-red-400 px-1"
+                  style={{
+                    background: 'transparent', border: 'none',
+                    color: 'var(--fg-tertiary)', cursor: 'pointer',
+                    padding: 0, fontSize: 'var(--t-sm)', lineHeight: 1,
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--err)' }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--fg-tertiary)' }}
                 >
                   ×
                 </button>
               </span>
             ))}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ',' || e.key === '，') {
-                  e.preventDefault()
-                  addTag(draft)
+                  e.preventDefault(); addTag(draft)
                 } else if (e.key === 'Backspace' && !draft && tags.length) {
                   removeTag(tags[tags.length - 1])
                 }
               }}
               placeholder="添加标签后按 Enter / 逗号"
-              className="flex-1 px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs focus:outline-none focus:border-cyan-500"
+              className="input input-mono"
+              style={{ flex: 1, fontSize: 'var(--t-xs)' }}
             />
             {onSave && (
               <button
                 disabled={saving || !dirty}
                 onClick={onSave}
-                className="px-3 py-1 rounded text-xs bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500"
+                className={dirty ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
               >
                 {saving ? '保存中...' : dirty ? '保存' : '已保存'}
               </button>
@@ -176,20 +174,16 @@ export default function TagEditor({
             onChange={(e) => setTextBuf(e.target.value)}
             onBlur={commitText}
             placeholder="逗号 / 换行分隔，失焦自动同步"
-            className="w-full flex-1 min-h-[160px] px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-xs font-mono focus:outline-none focus:border-cyan-500 resize-none"
+            className="input input-mono"
+            style={{ flex: 1, resize: 'none', fontSize: 'var(--t-xs)' }}
           />
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={commitText}
-              className="px-2 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200"
-            >
-              同步
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <button onClick={commitText} className="btn btn-ghost btn-sm">同步</button>
             {onSave && (
               <button
                 disabled={saving || !dirty}
                 onClick={async () => { commitText(); await onSave() }}
-                className="px-3 py-1 rounded text-xs bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500"
+                className={dirty ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
               >
                 {saving ? '保存中...' : dirty ? '保存' : '已保存'}
               </button>
@@ -201,14 +195,21 @@ export default function TagEditor({
   )
 }
 
-function ModeBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function ModeBtn({ active, onClick, children }: {
+  active: boolean; onClick: () => void; children: React.ReactNode
+}) {
   return (
     <button
       onClick={onClick}
-      className={
-        'px-1.5 py-0.5 rounded ' +
-        (active ? 'bg-cyan-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600')
-      }
+      style={{
+        padding: '2px 8px', borderRadius: 'var(--r-sm)',
+        background: active ? 'var(--accent)' : 'var(--bg-overlay)',
+        border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
+        color: active ? 'var(--accent-fg)' : 'var(--fg-secondary)',
+        fontSize: 'var(--t-xs)', cursor: 'pointer',
+      }}
+      onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)' }}
+      onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
     >
       {children}
     </button>

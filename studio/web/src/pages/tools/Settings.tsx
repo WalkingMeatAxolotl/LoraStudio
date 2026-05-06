@@ -8,6 +8,7 @@ import {
   type SecretsPatch,
   type WD14Runtime,
 } from '../../api/client'
+import PageHeader from '../../components/PageHeader'
 import { useToast } from '../../components/Toast'
 import { useEventStream } from '../../lib/useEventStream'
 
@@ -57,6 +58,17 @@ const EMPTY: Secrets = {
   queue: { allow_gpu_during_train: false },
 }
 
+const textInput: React.CSSProperties = {
+  width: '100%',
+  padding: '4px 8px',
+  borderRadius: 'var(--r-sm)',
+  background: 'var(--bg-sunken)',
+  border: '1px solid var(--border-subtle)',
+  fontSize: 'var(--t-sm)',
+  color: 'var(--fg-primary)',
+  outline: 'none',
+}
+
 export default function SettingsPage() {
   const [server, setServer] = useState<Secrets | null>(null)
   const [draft, setDraft] = useState<Secrets>(EMPTY)
@@ -92,7 +104,6 @@ export default function SettingsPage() {
 
   const save = async () => {
     if (!server) return
-    // 把和 server 相同的 leaf 全部省掉，把 MASK 占位的字段也省掉（不变）
     const patch = buildPatch(draft, server)
     setSaving(true)
     setError(null)
@@ -111,414 +122,352 @@ export default function SettingsPage() {
 
   if (error && !server) {
     return (
-      <div className="text-red-300 font-mono text-sm p-4 bg-red-900/20 rounded">
+      <div style={{ color: 'var(--err)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-sm)', padding: 16, background: 'var(--err-soft)', borderRadius: 'var(--r-md)' }}>
         {error}
       </div>
     )
   }
 
   return (
-    <div className="max-w-3xl space-y-8 pb-12">
-      <header className="flex items-center gap-3">
-        <h1 className="text-2xl font-semibold flex-1">设置</h1>
-        <button
-          onClick={save}
-          disabled={!dirty || saving}
-          className="px-3 py-1.5 rounded text-sm bg-cyan-600 hover:bg-cyan-500
-            disabled:bg-slate-700 disabled:text-slate-500"
-        >
-          {saving ? '保存中...' : '保存'}
-        </button>
-      </header>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <PageHeader
+        eyebrow="全局 · settings"
+        title="设置"
+        subtitle="API 密钥、路径、模型和队列行为。"
+        sticky
+        actions={
+          <button
+            onClick={save}
+            disabled={!dirty || saving}
+            className="btn btn-primary btn-sm"
+          >
+            {saving ? '保存中...' : '保存'}
+          </button>
+        }
+      />
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 48px' }}>
+      <div style={{ maxWidth: 900, display: 'flex', flexDirection: 'column', gap: 32 }}>
 
       {error && (
-        <div className="p-3 rounded bg-red-900/40 border border-red-700 text-red-300 text-sm font-mono">
+        <div style={{ padding: 12, borderRadius: 'var(--r-md)', background: 'var(--err-soft)', border: '1px solid var(--err)', color: 'var(--err)', fontSize: 'var(--t-sm)', fontFamily: 'var(--font-mono)' }}>
           {error}
         </div>
       )}
 
-      <Section title="Gelbooru">
-        <Field label="user_id">
+      <SettingsSection title="Gelbooru">
+        <SettingsField label="user_id">
           <input
             type="text"
             value={draft.gelbooru.user_id}
             onChange={(e) => update('gelbooru', 'user_id', e.target.value)}
-            className={textInput}
+            style={textInput}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-        </Field>
-        <Field label="api_key">
+        </SettingsField>
+        <SettingsField label="api_key">
           <SensitiveInput
             value={draft.gelbooru.api_key}
             serverValue={server?.gelbooru.api_key ?? ''}
             onChange={(v) => update('gelbooru', 'api_key', v)}
           />
-        </Field>
-        <Field label="save_tags">
-          <Bool
-            value={draft.gelbooru.save_tags}
-            onChange={(v) => update('gelbooru', 'save_tags', v)}
-          />
-        </Field>
-        <Field label="convert_to_png">
-          <Bool
-            value={draft.gelbooru.convert_to_png}
-            onChange={(v) => update('gelbooru', 'convert_to_png', v)}
-          />
-        </Field>
-        <Field label="remove_alpha_channel">
-          <Bool
-            value={draft.gelbooru.remove_alpha_channel}
-            onChange={(v) => update('gelbooru', 'remove_alpha_channel', v)}
-          />
-        </Field>
-      </Section>
+        </SettingsField>
+        <SettingsField label="save_tags">
+          <Bool value={draft.gelbooru.save_tags} onChange={(v) => update('gelbooru', 'save_tags', v)} />
+        </SettingsField>
+        <SettingsField label="convert_to_png">
+          <Bool value={draft.gelbooru.convert_to_png} onChange={(v) => update('gelbooru', 'convert_to_png', v)} />
+        </SettingsField>
+        <SettingsField label="remove_alpha_channel">
+          <Bool value={draft.gelbooru.remove_alpha_channel} onChange={(v) => update('gelbooru', 'remove_alpha_channel', v)} />
+        </SettingsField>
+      </SettingsSection>
 
-      <Section title="Danbooru">
-        <Field label="username">
+      <SettingsSection title="Danbooru">
+        <SettingsField label="username">
           <input
             type="text"
             value={draft.danbooru.username}
             onChange={(e) => update('danbooru', 'username', e.target.value)}
             placeholder="可选；匿名也能跑（仅速率受限）"
-            className={textInput}
+            style={textInput}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-        </Field>
-        <Field label="api_key">
+        </SettingsField>
+        <SettingsField label="api_key">
           <SensitiveInput
             value={draft.danbooru.api_key}
             serverValue={server?.danbooru.api_key ?? ''}
             onChange={(v) => update('danbooru', 'api_key', v)}
           />
-        </Field>
-        <Field label="account_type">
+        </SettingsField>
+        <SettingsField label="account_type">
           <select
             value={draft.danbooru.account_type}
-            onChange={(e) =>
-              update(
-                'danbooru',
-                'account_type',
-                e.target.value as 'free' | 'gold' | 'platinum'
-              )
-            }
-            className={textInput}
+            onChange={(e) => update('danbooru', 'account_type', e.target.value as 'free' | 'gold' | 'platinum')}
+            style={textInput}
           >
             <option value="free">free（max 2 tag）</option>
             <option value="gold">gold（max 6 tag）</option>
             <option value="platinum">platinum（max 12 tag）</option>
           </select>
-        </Field>
-      </Section>
+        </SettingsField>
+      </SettingsSection>
 
-      <Section title="下载（全局）">
-        <Field label="exclude_tags (逗号分隔)">
+      <SettingsSection title="下载（全局）">
+        <SettingsField label="exclude_tags (逗号分隔)">
           <input
             type="text"
             value={draft.download.exclude_tags.join(', ')}
             onChange={(e) =>
-              update(
-                'download',
-                'exclude_tags',
-                e.target.value
-                  .split(',')
-                  .map((t) => t.trim().replace(/^-+/, ''))
-                  .filter(Boolean)
+              update('download', 'exclude_tags',
+                e.target.value.split(',').map((t) => t.trim().replace(/^-+/, '')).filter(Boolean)
               )
             }
             placeholder="例：comic, monochrome, lowres"
-            className={textInput}
+            style={textInput}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-        </Field>
-        <p className="text-[11px] text-slate-500 px-1">
+        </SettingsField>
+        <p style={{ fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)', padding: '0 4px' }}>
           搜索时自动追加 <code>-tag</code>，对 Gelbooru 与 Danbooru 同样生效。
         </p>
 
-        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800">
-          <Field label="parallel_workers">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, paddingTop: 8, borderTop: '1px solid var(--border-subtle)' }}>
+          <SettingsField label="parallel_workers">
             <input
-              type="number"
-              min={1}
-              max={16}
+              type="number" min={1} max={16}
               value={draft.download.parallel_workers}
-              onChange={(e) =>
-                update('download', 'parallel_workers', Math.max(1, Number(e.target.value) || 1))
-              }
-              className={textInput}
+              onChange={(e) => update('download', 'parallel_workers', Math.max(1, Number(e.target.value) || 1))}
+              style={textInput}
+              onFocus={focusBorder}
+              onBlur={blurBorder}
             />
-          </Field>
-          <Field label="api_rate_per_sec">
+          </SettingsField>
+          <SettingsField label="api_rate_per_sec">
             <input
-              type="number"
-              step="0.5"
-              min={0.5}
-              max={10}
+              type="number" step="0.5" min={0.5} max={10}
               value={draft.download.api_rate_per_sec}
-              onChange={(e) =>
-                update('download', 'api_rate_per_sec', Math.max(0.5, Number(e.target.value) || 0.5))
-              }
-              className={textInput}
+              onChange={(e) => update('download', 'api_rate_per_sec', Math.max(0.5, Number(e.target.value) || 0.5))}
+              style={textInput}
+              onFocus={focusBorder}
+              onBlur={blurBorder}
             />
-          </Field>
-          <Field label="cdn_rate_per_sec">
+          </SettingsField>
+          <SettingsField label="cdn_rate_per_sec">
             <input
-              type="number"
-              step="1"
-              min={1}
-              max={20}
+              type="number" step="1" min={1} max={20}
               value={draft.download.cdn_rate_per_sec}
-              onChange={(e) =>
-                update('download', 'cdn_rate_per_sec', Math.max(1, Number(e.target.value) || 1))
-              }
-              className={textInput}
+              onChange={(e) => update('download', 'cdn_rate_per_sec', Math.max(1, Number(e.target.value) || 1))}
+              style={textInput}
+              onFocus={focusBorder}
+              onBlur={blurBorder}
             />
-          </Field>
+          </SettingsField>
         </div>
-        <p className="text-[11px] text-slate-500 px-1 leading-relaxed">
-          API host (<code>gelbooru.com</code> / <code>danbooru.donmai.us</code>) 与 CDN host (
-          <code>img*.gelbooru.com</code> / <code>cdn.donmai.us</code>) 各自独立 token bucket。
-          带 api_key 时 gelbooru 实测 5 req/s 拉图很安全；遇到 429 会自动退避 60s + 速率减半。
-        </p>
-      </Section>
+      </SettingsSection>
 
-      <Section title="HuggingFace">
-        <Field label="token">
+      <SettingsSection title="HuggingFace">
+        <SettingsField label="token">
           <SensitiveInput
             value={draft.huggingface.token}
             serverValue={server?.huggingface.token ?? ''}
             onChange={(v) => update('huggingface', 'token', v)}
           />
-        </Field>
-      </Section>
+        </SettingsField>
+      </SettingsSection>
 
-      <Section title="JoyCaption (vLLM)">
-        <Field label="base_url">
+      <SettingsSection title="JoyCaption (vLLM)">
+        <SettingsField label="base_url">
           <input
             type="text"
             value={draft.joycaption.base_url}
             onChange={(e) => update('joycaption', 'base_url', e.target.value)}
-            className={textInput}
+            style={textInput}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-        </Field>
-        <Field label="model">
+        </SettingsField>
+        <SettingsField label="model">
           <input
             type="text"
             value={draft.joycaption.model}
             onChange={(e) => update('joycaption', 'model', e.target.value)}
-            className={textInput}
+            style={textInput}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-        </Field>
-        <Field label="prompt_template">
+        </SettingsField>
+        <SettingsField label="prompt_template">
           <input
             type="text"
             value={draft.joycaption.prompt_template}
-            onChange={(e) =>
-              update('joycaption', 'prompt_template', e.target.value)
-            }
-            className={textInput}
+            onChange={(e) => update('joycaption', 'prompt_template', e.target.value)}
+            style={textInput}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-        </Field>
-      </Section>
+        </SettingsField>
+      </SettingsSection>
 
-      <Section title="WD14">
-        <Field label="model_id (当前选用)">
+      <SettingsSection title="WD14">
+        <SettingsField label="model_id (当前选用)">
           <select
             value={draft.wd14.model_id}
             onChange={(e) => update('wd14', 'model_id', e.target.value)}
-            className={textInput}
+            style={textInput}
           >
-            {/* 候选列表渲染。后端 validator 会保证 model_id ∈ model_ids，
-             * 所以这里 dropdown 一定能命中当前值。 */}
-            {(draft.wd14.model_ids.length > 0
-              ? draft.wd14.model_ids
-              : [...DEFAULT_WD14_MODELS]
-            ).map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
+            {(draft.wd14.model_ids.length > 0 ? draft.wd14.model_ids : [...DEFAULT_WD14_MODELS]).map((m) => (
+              <option key={m} value={m}>{m}</option>
             ))}
           </select>
-        </Field>
-        <Field label="候选模型 (model_ids)">
+        </SettingsField>
+        <SettingsField label="候选模型 (model_ids)">
           <ModelIdsEditor
             ids={draft.wd14.model_ids}
             currentId={draft.wd14.model_id}
             onChange={(next) => update('wd14', 'model_ids', next)}
           />
-        </Field>
-        <Field label="local_dir (留空 = 自动 HF 下载)">
+        </SettingsField>
+        <SettingsField label="local_dir (留空 = 自动 HF 下载)">
           <input
             type="text"
             value={draft.wd14.local_dir ?? ''}
-            onChange={(e) =>
-              update('wd14', 'local_dir', e.target.value || null)
-            }
-            className={textInput}
+            onChange={(e) => update('wd14', 'local_dir', e.target.value || null)}
+            style={textInput}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-        </Field>
-        <Field label="threshold_general">
+        </SettingsField>
+        <SettingsField label="threshold_general">
           <input
-            type="number"
-            step="0.01"
-            min={0}
-            max={1}
+            type="number" step="0.01" min={0} max={1}
             value={draft.wd14.threshold_general}
-            onChange={(e) =>
-              update('wd14', 'threshold_general', Number(e.target.value))
-            }
-            className={textInput}
+            onChange={(e) => update('wd14', 'threshold_general', Number(e.target.value))}
+            style={textInput}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-        </Field>
-        <Field label="threshold_character">
+        </SettingsField>
+        <SettingsField label="threshold_character">
           <input
-            type="number"
-            step="0.01"
-            min={0}
-            max={1}
+            type="number" step="0.01" min={0} max={1}
             value={draft.wd14.threshold_character}
-            onChange={(e) =>
-              update('wd14', 'threshold_character', Number(e.target.value))
-            }
-            className={textInput}
+            onChange={(e) => update('wd14', 'threshold_character', Number(e.target.value))}
+            style={textInput}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-        </Field>
-        <Field label="blacklist_tags (逗号分隔)">
+        </SettingsField>
+        <SettingsField label="blacklist_tags (逗号分隔)">
           <input
             type="text"
             value={draft.wd14.blacklist_tags.join(', ')}
-            onChange={(e) =>
-              update(
-                'wd14',
-                'blacklist_tags',
-                e.target.value
-                  .split(',')
-                  .map((t) => t.trim())
-                  .filter(Boolean)
-              )
-            }
-            className={textInput}
+            onChange={(e) => update('wd14', 'blacklist_tags', e.target.value.split(',').map((t) => t.trim()).filter(Boolean))}
+            style={textInput}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-        </Field>
-        <Field label="batch_size (GPU 推理一批塞几张；CPU 自动降到 1)">
+        </SettingsField>
+        <SettingsField label="batch_size (GPU 推理一批塞几张；CPU 自动降到 1)">
           <input
-            type="number"
-            min={1}
-            max={64}
+            type="number" min={1} max={64}
             value={draft.wd14.batch_size}
-            onChange={(e) =>
-              update('wd14', 'batch_size', Math.max(1, Number(e.target.value) || 1))
-            }
-            className={textInput}
+            onChange={(e) => update('wd14', 'batch_size', Math.max(1, Number(e.target.value) || 1))}
+            style={textInput}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-        </Field>
+        </SettingsField>
         <WD14RuntimePanel />
-      </Section>
+      </SettingsSection>
 
-      <Section title="队列调度">
-        <p className="text-[11px] text-slate-500 px-1">
-          训练任务（占满 GPU）跟数据准备任务（下载 / 打标 / 正则集）
-          走两个独立槽位。下载（IO-only）始终跟训练并行；打标 / 正则集吃
-          GPU，默认在训练时推迟，避免抢显存 OOM。
-        </p>
-        <Field label="允许 GPU 任务与训练并行">
-          <div className="flex items-center gap-3">
-            <Bool
-              value={draft.queue.allow_gpu_during_train}
-              onChange={(v) => update('queue', 'allow_gpu_during_train', v)}
-            />
-            <span className="text-[10px] text-amber-300">
-              ⚠ WD14 打标推理 onnxruntime-gpu 大约占 ~2 GB；确认训练之外的剩余显存够再打开，否则 OOM
+      <SettingsSection title="队列调度">
+        <SettingsField label="允许 GPU 任务与训练并行">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Bool value={draft.queue.allow_gpu_during_train} onChange={(v) => update('queue', 'allow_gpu_during_train', v)} />
+            <span style={{ fontSize: 'var(--t-2xs)', color: 'var(--warn)' }}>
+              WD14 打标推理 onnxruntime-gpu 大约占 ~2 GB；确认训练之外的剩余显存够再打开，否则 OOM
             </span>
           </div>
-        </Field>
-      </Section>
+        </SettingsField>
+      </SettingsSection>
 
       <ModelsSection />
+    </div>
+    </div>
     </div>
   )
 }
 
-const textInput =
-  'w-full px-2 py-1.5 rounded bg-slate-900 border border-slate-700 text-sm text-slate-200 focus:outline-none focus:border-cyan-500'
+function focusBorder(e: React.FocusEvent<HTMLInputElement>) {
+  e.currentTarget.style.borderColor = 'var(--accent)'
+}
+function blurBorder(e: React.FocusEvent<HTMLInputElement>) {
+  e.currentTarget.style.borderColor = 'var(--border-subtle)'
+}
 
-function Section({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}) {
+// ── Section / Field ────────────────────────────────────────────────────────
+
+function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="border border-slate-700 rounded-lg bg-slate-800/40 p-4 space-y-3">
-      <h2 className="text-sm font-semibold text-slate-200 mb-1">{title}</h2>
+    <section style={{
+      borderRadius: 'var(--r-md)',
+      border: '1px solid var(--border-subtle)',
+      background: 'var(--bg-surface)',
+      padding: 16,
+      display: 'flex', flexDirection: 'column', gap: 12,
+    }}>
+      <h2 style={{ fontSize: 'var(--t-sm)', fontWeight: 600, color: 'var(--fg-primary)', marginBottom: 2 }}>{title}</h2>
       {children}
     </section>
   )
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string
-  children: React.ReactNode
-}) {
+function SettingsField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[180px_1fr] gap-3 items-center">
-      <label className="text-xs text-slate-400 font-mono">{label}</label>
+    <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 12, alignItems: 'center' }}>
+      <label style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-secondary)', fontFamily: 'var(--font-mono)' }}>{label}</label>
       {children}
     </div>
   )
 }
 
-function Bool({
-  value,
-  onChange,
-}: {
-  value: boolean
-  onChange: (v: boolean) => void
-}) {
+function Bool({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   return (
     <input
       type="checkbox"
       checked={value}
       onChange={(e) => onChange(e.target.checked)}
-      className="h-4 w-4 accent-cyan-500"
+      style={{ width: 16, height: 16, accentColor: 'var(--accent)' }}
     />
   )
 }
 
-function SensitiveInput({
-  value,
-  serverValue,
-  onChange,
-}: {
-  value: string
-  serverValue: string
-  onChange: (v: string) => void
+function SensitiveInput({ value, serverValue, onChange }: {
+  value: string; serverValue: string; onChange: (v: string) => void
 }) {
-  // 当 server 已有值时，input 显示空 + placeholder「已保存（不显示）」
-  // 用户输入任何内容才覆盖。把 MASK 当作「保持不变」的哨兵传回去。
   const masked = value === MASK
   return (
     <input
       type="password"
       value={masked ? '' : value}
-      placeholder={
-        serverValue === MASK ? '已保存（不显示），输入新值才覆盖' : ''
-      }
+      placeholder={serverValue === MASK ? '已保存（不显示），输入新值才覆盖' : ''}
       onChange={(e) => onChange(e.target.value || MASK)}
-      className={textInput}
+      style={textInput}
+      onFocus={focusBorder}
+      onBlur={blurBorder}
     />
   )
 }
 
-function ModelIdsEditor({
-  ids,
-  currentId,
-  onChange,
-}: {
-  ids: string[]
-  currentId: string
-  onChange: (next: string[]) => void
+// ── ModelIdsEditor ──────────────────────────────────────────────────────────
+
+function ModelIdsEditor({ ids, currentId, onChange }: {
+  ids: string[]; currentId: string; onChange: (next: string[]) => void
 }) {
   const [draft, setDraft] = useState('')
   const seen = new Set(ids)
@@ -526,82 +475,59 @@ function ModelIdsEditor({
   const add = () => {
     const v = draft.trim()
     if (!v) return
-    if (seen.has(v)) {
-      setDraft('')
-      return
-    }
+    if (seen.has(v)) { setDraft(''); return }
     onChange([...ids, v])
     setDraft('')
   }
   const remove = (m: string) => {
-    if (m === currentId) return // 后端 validator 会兜底，但前端先拦一道，提示更清晰
+    if (m === currentId) return
     onChange(ids.filter((x) => x !== m))
   }
 
   return (
-    <div className="space-y-1.5">
-      <ul className="space-y-1">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <ul style={{ display: 'flex', flexDirection: 'column', gap: 4, listStyle: 'none', margin: 0, padding: 0 }}>
         {ids.map((m) => {
           const isCurrent = m === currentId
           return (
-            <li
-              key={m}
-              className={
-                'flex items-center gap-2 px-2 py-1 rounded border text-xs ' +
-                (isCurrent
-                  ? 'border-cyan-700 bg-cyan-950/30'
-                  : 'border-slate-700 bg-slate-900/40')
-              }
-            >
-              <code className="font-mono text-slate-200 truncate flex-1 min-w-0">
-                {m}
-              </code>
+            <li key={m} style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '4px 8px', borderRadius: 'var(--r-sm)',
+              border: isCurrent ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
+              background: isCurrent ? 'var(--accent-soft)' : 'var(--bg-sunken)',
+              fontSize: 'var(--t-xs)',
+            }}>
+              <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m}</code>
               {isCurrent ? (
-                <span className="text-[10px] text-cyan-300">当前</span>
+                <span style={{ fontSize: 'var(--t-2xs)', color: 'var(--accent)' }}>当前</span>
               ) : (
-                <button
-                  onClick={() => remove(m)}
-                  className="text-[11px] text-slate-500 hover:text-red-400 px-1"
-                  title="删除"
-                >
-                  ×
-                </button>
+                <button onClick={() => remove(m)} style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', background: 'transparent', border: 'none', cursor: 'pointer' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--err)' }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--fg-tertiary)' }}
+                >×</button>
               )}
             </li>
           )
         })}
       </ul>
-      <div className="flex gap-1.5">
+      <div style={{ display: 'flex', gap: 6 }}>
         <input
           type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              add()
-            }
-          }}
-          placeholder="添加 HuggingFace 模型 ID，如 SmilingWolf/wd-vit-tagger-v3"
-          className={textInput + ' flex-1'}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
+          placeholder="添加 HuggingFace 模型 ID"
+          style={{ ...textInput, flex: 1 }}
+          onFocus={focusBorder}
+          onBlur={blurBorder}
         />
-        <button
-          onClick={add}
-          disabled={!draft.trim() || seen.has(draft.trim())}
-          className="px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 text-xs text-slate-200 disabled:bg-slate-800 disabled:text-slate-500"
-        >
-          + 添加
-        </button>
+        <button onClick={add} disabled={!draft.trim() || seen.has(draft.trim())} className="btn btn-secondary btn-sm">+ 添加</button>
       </div>
-      <p className="text-[10px] text-slate-500">
-        当前选用的模型不能在此删除，需先在上方下拉切到另一个再删。
-      </p>
     </div>
   )
 }
 
 function buildPatch(draft: Secrets, server: Secrets): SecretsPatch {
-  // 只保留与 server 不一致 的 leaf；MASK 占位则跳过（保持不变）。
   const out: Record<string, Record<string, unknown>> = {}
   for (const key of Object.keys(draft) as Section[]) {
     const sub: Record<string, unknown> = {}
@@ -618,9 +544,7 @@ function buildPatch(draft: Secrets, server: Secrets): SecretsPatch {
   return out as SecretsPatch
 }
 
-// ---------------------------------------------------------------------------
-// Models 区块 — Anima 主模型 / VAE / Qwen3 / T5 tokenizer 一键下载（PP7）
-// ---------------------------------------------------------------------------
+// ── Models Section ─────────────────────────────────────────────────────────
 
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -641,48 +565,39 @@ function ModelsSection() {
 
   const reload = useCallback(async () => {
     try {
-      const [c, sec] = await Promise.all([
-        api.getModelsCatalog(),
-        api.getSecrets(),
-      ])
+      const [c, sec] = await Promise.all([api.getModelsCatalog(), api.getSecrets()])
       setCatalog(c)
       const root = sec.models?.root ?? null
       setServerRoot(root)
-      // 仅在用户没编辑时同步；用户已经在 input 里改东西时不覆盖
       setRootDraft((prev) => (prev === '' || prev === (serverRoot ?? '') ? root ?? '' : prev))
       setSelectedAnima(sec.models?.selected_anima ?? 'preview3-base')
       setError(null)
     } catch (e) {
       setError(String(e))
     }
-    // serverRoot 故意不进 deps：只在「用户没编辑过」的情况同步
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const pickAnima = async (variant: string) => {
     if (variant === selectedAnima) return
-    setSelectedAnima(variant)  // 乐观更新
+    setSelectedAnima(variant)
     try {
       await api.updateSecrets({ models: { selected_anima: variant } })
       toast(`默认主模型已切到 ${variant}`, 'success')
       await reload()
     } catch (e) {
       toast(String(e), 'error')
-      void reload()  // 回滚到 server 真实值
+      void reload()
     }
   }
 
-  useEffect(() => {
-    void reload()
-  }, [reload])
+  useEffect(() => { void reload() }, [reload])
 
   const saveRoot = async () => {
     const v = rootDraft.trim()
     setSavingRoot(true)
     try {
-      await api.updateSecrets({
-        models: { root: v ? v : null },
-      })
+      await api.updateSecrets({ models: { root: v ? v : null } })
       toast(v ? `已保存模型根目录: ${v}` : '已恢复默认模型根目录', 'success')
       await reload()
     } catch (e) {
@@ -694,11 +609,8 @@ function ModelsSection() {
 
   const rootDirty = rootDraft.trim() !== (serverRoot ?? '')
 
-  // SSE：下载完成 / 失败时刷新 catalog（拿新文件大小）
   useEventStream((evt) => {
-    if (evt.type === 'model_download_changed') {
-      void reload()
-    }
+    if (evt.type === 'model_download_changed') { void reload() }
   })
 
   const start = async (model_id: string, variant?: string) => {
@@ -711,128 +623,66 @@ function ModelsSection() {
     } catch (e) {
       toast(String(e), 'error')
     } finally {
-      setBusy((s) => {
-        const n = new Set(s)
-        n.delete(key)
-        return n
-      })
+      setBusy((s) => { const n = new Set(s); n.delete(key); return n })
     }
   }
 
   return (
-    <Section title="Models（一键下载训练所需模型）">
-      <p className="text-[11px] text-slate-500 px-1">
-        默认走 hf-mirror.com 镜像（可在 server 启动前设 <code>HF_ENDPOINT</code>{' '}
-        覆盖）。新版本发布时改{' '}
-        <code>studio/services/model_downloader.py</code> 两行常量。
-      </p>
-
-      {/* 模型根目录配置（PP7） */}
-      <Field label="模型根目录 (models_root)">
-        <div className="flex items-center gap-1.5">
+    <SettingsSection title="Models（一键下载训练所需模型）">
+      <SettingsField label="模型根目录 (models_root)">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input
             type="text"
             value={rootDraft}
             onChange={(e) => setRootDraft(e.target.value)}
-            placeholder="留空 = 默认 REPO_ROOT/anima/，云端可填如 /data/anima"
-            className={textInput + ' flex-1'}
+            placeholder="留空 = 默认 REPO_ROOT/anima/"
+            style={{ ...textInput, flex: 1 }}
+            onFocus={focusBorder}
+            onBlur={blurBorder}
           />
-          <button
-            onClick={saveRoot}
-            disabled={!rootDirty || savingRoot}
-            className="px-2.5 py-1 rounded text-xs bg-cyan-600 hover:bg-cyan-500 text-white disabled:bg-slate-700 disabled:text-slate-500"
-            title={rootDirty ? '保存路径配置' : '未修改'}
-          >
+          <button onClick={saveRoot} disabled={!rootDirty || savingRoot} className="btn btn-primary btn-sm"
+            title={rootDirty ? '保存路径配置' : '未修改'}>
             {savingRoot ? '保存中...' : '保存路径'}
           </button>
-          <button
-            onClick={() => setRootDraft(serverRoot ?? '')}
-            disabled={!rootDirty || savingRoot}
-            className="px-2 py-1 rounded text-xs text-slate-400 hover:text-slate-200 disabled:opacity-30"
-            title="还原成 server 当前值"
-          >
-            ↻
-          </button>
+          <button onClick={() => setRootDraft(serverRoot ?? '')} disabled={!rootDirty || savingRoot}
+            style={{ padding: '2px 8px', color: 'var(--fg-tertiary)', background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 'var(--r-sm)', opacity: !rootDirty ? 0.3 : 1 }}
+          >↻</button>
         </div>
-      </Field>
-      <p className="text-[10px] text-slate-500 px-1 -mt-1">
-        当前生效路径：
-        <code className="text-slate-300">
-          {catalog?.models_root ?? '(loading...)'}
-        </code>
-        {serverRoot && rootDraft.trim() !== serverRoot && (
-          <span className="ml-2 text-amber-300">
-            ⚠ 输入框未保存（路径修改不会同步到上方主「保存」按钮，需点旁边的独立「保存」）
-          </span>
-        )}
-      </p>
-      {error && (
-        <div className="text-red-300 text-xs font-mono">{error}</div>
-      )}
+      </SettingsField>
+
+      {error && <div style={{ color: 'var(--err)', fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)' }}>{error}</div>}
       {!catalog ? (
-        <p className="text-slate-500 text-xs">加载...</p>
+        <p style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-xs)' }}>加载...</p>
       ) : (
-        <div className="space-y-2">
-          {/* Anima 主模型（多版本 + radio 选默认） */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {/* Anima 主模型 */}
           <ModelGroupCard title={catalog.anima_main.name}>
-            <p className="text-[11px] text-slate-500">
-              {catalog.anima_main.description} ·{' '}
-              <code>{catalog.anima_main.repo}</code>
-              <br />
-              选中的版本会作为<strong className="text-slate-300">新建 version</strong>
-              的默认 transformer（写入 yaml 时已展开为绝对路径，已存在 version 不会被改动）。
+            <p style={{ fontSize: 'var(--t-2xs)', color: 'var(--fg-tertiary)', margin: 0 }}>
+              {catalog.anima_main.description} · <code>{catalog.anima_main.repo}</code>
+              <br />选中的版本会作为<strong style={{ color: 'var(--fg-primary)' }}>新建 version</strong>的默认 transformer。
             </p>
-            <ul className="space-y-1 mt-1">
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
               {catalog.anima_main.variants.map((v) => {
                 const key = `anima_main:${v.variant}`
                 const dl = catalog.downloads[key]
                 const isSel = v.variant === selectedAnima
                 const canSelect = v.exists && dl?.status !== 'running'
                 return (
-                  <li
-                    key={v.variant}
-                    className={
-                      'flex items-center gap-2 text-xs px-1.5 py-1 rounded ' +
-                      (isSel ? 'bg-cyan-950/40 border border-cyan-800' : '')
-                    }
-                  >
-                    <input
-                      type="radio"
-                      name="anima_variant"
-                      checked={isSel}
-                      disabled={!canSelect}
+                  <li key={v.variant} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    fontSize: 'var(--t-xs)', padding: '4px 6px', borderRadius: 'var(--r-sm)',
+                    background: isSel ? 'var(--accent-soft)' : 'transparent',
+                    border: isSel ? '1px solid var(--accent)' : '1px solid transparent',
+                  }}>
+                    <input type="radio" name="anima_variant" checked={isSel} disabled={!canSelect}
                       onChange={() => void pickAnima(v.variant)}
-                      className="accent-cyan-500 shrink-0"
-                      title={
-                        canSelect
-                          ? '选作默认主模型'
-                          : v.exists
-                          ? '下载中...'
-                          : '未下载，请先下载'
-                      }
+                      style={{ accentColor: 'var(--accent)', flexShrink: 0 }}
+                      title={canSelect ? '选作默认主模型' : v.exists ? '下载中...' : '未下载，请先下载'}
                     />
-                    <code className="font-mono text-slate-200 w-32 shrink-0">
-                      {v.variant}
-                      {v.is_latest && (
-                        <span className="ml-1 text-[9px] text-cyan-300">
-                          latest
-                        </span>
-                      )}
-                    </code>
-                    <ModelStatusBadge
-                      exists={v.exists}
-                      size={v.size}
-                      status={dl?.status}
-                    />
-                    <span className="flex-1" />
-                    <DownloadButton
-                      exists={v.exists}
-                      status={dl?.status}
-                      busy={busy.has(key)}
-                      onClick={() =>
-                        void start('anima_main', v.variant)
-                      }
-                    />
+                    <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)', width: 128, flexShrink: 0 }}>{v.variant}</code>
+                    <ModelStatusBadge exists={v.exists} size={v.size} status={dl?.status} />
+                    <span style={{ flex: 1 }} />
+                    <DownloadButton exists={v.exists} status={dl?.status} busy={busy.has(key)} onClick={() => void start('anima_main', v.variant)} />
                   </li>
                 )
               })}
@@ -841,27 +691,15 @@ function ModelsSection() {
 
           {/* VAE */}
           <ModelGroupCard title={catalog.anima_vae.name}>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-500">
-                {catalog.anima_vae.description} ·{' '}
-                <code>{catalog.anima_vae.repo}</code>
-              </span>
-              <span className="flex-1" />
-              <ModelStatusBadge
-                exists={catalog.anima_vae.exists}
-                size={catalog.anima_vae.size}
-                status={catalog.downloads.anima_vae?.status}
-              />
-              <DownloadButton
-                exists={catalog.anima_vae.exists}
-                status={catalog.downloads.anima_vae?.status}
-                busy={busy.has('anima_vae')}
-                onClick={() => void start('anima_vae')}
-              />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-xs)' }}>
+              <span style={{ color: 'var(--fg-tertiary)' }}>{catalog.anima_vae.description} · <code>{catalog.anima_vae.repo}</code></span>
+              <span style={{ flex: 1 }} />
+              <ModelStatusBadge exists={catalog.anima_vae.exists} size={catalog.anima_vae.size} status={catalog.downloads.anima_vae?.status} />
+              <DownloadButton exists={catalog.anima_vae.exists} status={catalog.downloads.anima_vae?.status} busy={busy.has('anima_vae')} onClick={() => void start('anima_vae')} />
             </div>
           </ModelGroupCard>
 
-          {/* Qwen3 + T5 共用渲染 */}
+          {/* Qwen3 + T5 */}
           {(['qwen3', 't5_tokenizer'] as const).map((id) => {
             const m = catalog[id]
             const dl = catalog.downloads[id]
@@ -869,72 +707,31 @@ function ModelsSection() {
             const totalSize = m.files.reduce((s, f) => s + f.size, 0)
             return (
               <ModelGroupCard key={id} title={m.name}>
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-slate-500">
-                    {m.description} · <code>{m.repo}</code>
-                  </span>
-                  <span className="flex-1" />
-                  <ModelStatusBadge
-                    exists={allExist}
-                    size={totalSize}
-                    status={dl?.status}
-                    fileCount={m.files.length}
-                    existsCount={m.files.filter((f) => f.exists).length}
-                  />
-                  <DownloadButton
-                    exists={allExist}
-                    status={dl?.status}
-                    busy={busy.has(id)}
-                    onClick={() => void start(id)}
-                  />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-xs)' }}>
+                  <span style={{ color: 'var(--fg-tertiary)' }}>{m.description} · <code>{m.repo}</code></span>
+                  <span style={{ flex: 1 }} />
+                  <ModelStatusBadge exists={allExist} size={totalSize} status={dl?.status} fileCount={m.files.length} existsCount={m.files.filter((f) => f.exists).length} />
+                  <DownloadButton exists={allExist} status={dl?.status} busy={busy.has(id)} onClick={() => void start(id)} />
                 </div>
               </ModelGroupCard>
             )
           })}
 
-          {/* 当前活跃下载 log_tail（紧凑） */}
-          {Object.values(catalog.downloads).filter(
-            (d) => d.status === 'running' || d.status === 'failed'
-          ).length > 0 && (
-            <details className="text-xs mt-2">
-              <summary className="cursor-pointer text-slate-400 hover:text-slate-200">
-                下载日志 (
-                {
-                  Object.values(catalog.downloads).filter(
-                    (d) => d.status === 'running' || d.status === 'failed'
-                  ).length
-                }
-                )
+          {/* 下载日志 */}
+          {Object.values(catalog.downloads).filter((d) => d.status === 'running' || d.status === 'failed').length > 0 && (
+            <details style={{ fontSize: 'var(--t-xs)' }}>
+              <summary style={{ cursor: 'pointer', color: 'var(--fg-tertiary)' }}>
+                下载日志 ({Object.values(catalog.downloads).filter((d) => d.status === 'running' || d.status === 'failed').length})
               </summary>
-              <div className="mt-1 space-y-2">
+              <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {Object.values(catalog.downloads).map((d) => (
-                  <div
-                    key={d.key}
-                    className="rounded border border-slate-700 bg-slate-950/40 p-2"
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <code className="font-mono text-slate-300">{d.key}</code>
-                      <span
-                        className={
-                          'text-[10px] px-1.5 py-0.5 rounded ' +
-                          (d.status === 'running'
-                            ? 'bg-amber-700/50 text-amber-200 animate-pulse'
-                            : d.status === 'done'
-                            ? 'bg-emerald-700/40 text-emerald-200'
-                            : d.status === 'failed'
-                            ? 'bg-red-700/50 text-red-200'
-                            : 'bg-slate-700/40 text-slate-300')
-                        }
-                      >
-                        {d.status}
-                      </span>
-                      {d.message && (
-                        <span className="text-red-300 truncate">
-                          {d.message}
-                        </span>
-                      )}
+                  <div key={d.key} style={{ borderRadius: 'var(--r-sm)', border: '1px solid var(--border-subtle)', background: 'var(--bg-sunken)', padding: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-secondary)' }}>{d.key}</code>
+                      <ModelStatusBadge exists={d.status === 'done'} size={0} status={d.status} />
+                      {d.message && <span style={{ color: 'var(--err)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.message}</span>}
                     </div>
-                    <pre className="text-[10px] font-mono text-slate-400 max-h-32 overflow-y-auto whitespace-pre-wrap">
+                    <pre style={{ fontSize: 'var(--t-2xs)', fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)', maxHeight: 128, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>
                       {d.log_tail.join('\n') || '(等待日志...)'}
                     </pre>
                   </div>
@@ -944,116 +741,63 @@ function ModelsSection() {
           )}
         </div>
       )}
-    </Section>
+    </SettingsSection>
   )
 }
 
-function ModelGroupCard({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}) {
+function ModelGroupCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded border border-slate-700 bg-slate-900/40 p-2.5">
-      <h4 className="text-xs font-semibold text-slate-200 mb-1">{title}</h4>
+    <div style={{ borderRadius: 'var(--r-sm)', border: '1px solid var(--border-subtle)', background: 'var(--bg-sunken)', padding: 10 }}>
+      <h4 style={{ fontSize: 'var(--t-xs)', fontWeight: 600, color: 'var(--fg-primary)', margin: '0 0 6px' }}>{title}</h4>
       {children}
     </div>
   )
 }
 
-function ModelStatusBadge({
-  exists,
-  size,
-  status,
-  fileCount,
-  existsCount,
-}: {
-  exists: boolean
-  size: number
-  status?: ModelDownloadStatus['status']
-  fileCount?: number
-  existsCount?: number
+function ModelStatusBadge({ exists, size, status, fileCount, existsCount }: {
+  exists: boolean; size: number; status?: ModelDownloadStatus['status']; fileCount?: number; existsCount?: number
 }) {
   if (status === 'running') {
-    return (
-      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-700/40 text-amber-200 animate-pulse">
-        下载中...
-      </span>
-    )
+    return <StatusLabel bg="var(--warn-soft)" fg="var(--warn)" text="下载中..." pulse />
   }
   if (status === 'failed') {
-    return (
-      <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-700/40 text-red-200">
-        失败
-      </span>
-    )
+    return <StatusLabel bg="var(--err-soft)" fg="var(--err)" text="失败" />
   }
   if (exists) {
-    return (
-      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-700/40 text-emerald-200 font-mono">
-        ✓ {fmtBytes(size)}
-        {fileCount !== undefined && ` (${existsCount}/${fileCount})`}
-      </span>
-    )
+    return <StatusLabel bg="var(--ok-soft)" fg="var(--ok)" text={`✓ ${fmtBytes(size)}${fileCount !== undefined ? ` (${existsCount}/${fileCount})` : ''}`} />
   }
   if (fileCount !== undefined && existsCount! > 0) {
-    return (
-      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-700/40 text-amber-200 font-mono">
-        部分 ({existsCount}/{fileCount})
-      </span>
-    )
+    return <StatusLabel bg="var(--warn-soft)" fg="var(--warn)" text={`部分 (${existsCount}/${fileCount})`} />
   }
+  return <StatusLabel bg="var(--bg-overlay)" fg="var(--fg-tertiary)" text="未下载" />
+}
+
+function StatusLabel({ bg, fg, text, pulse }: { bg: string; fg: string; text: string; pulse?: boolean }) {
   return (
-    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-400">
-      未下载
-    </span>
+    <span style={{
+      fontSize: 'var(--t-2xs)', padding: '2px 6px', borderRadius: 'var(--r-sm)',
+      background: bg, color: fg, fontFamily: 'var(--font-mono)',
+      ...(pulse ? { animation: 'pulse 1.5s infinite' } : {}),
+    }}>{text}</span>
   )
 }
 
-function DownloadButton({
-  exists,
-  status,
-  busy,
-  onClick,
-}: {
-  exists: boolean
-  status?: ModelDownloadStatus['status']
-  busy: boolean
-  onClick: () => void
+function DownloadButton({ exists, status, busy, onClick }: {
+  exists: boolean; status?: ModelDownloadStatus['status']; busy: boolean; onClick: () => void
 }) {
   const running = status === 'running' || busy
   if (running) {
-    return (
-      <button
-        disabled
-        className="text-xs px-2 py-1 rounded bg-slate-700 text-slate-400"
-      >
-        ...
-      </button>
-    )
+    return <button disabled className="btn btn-secondary btn-sm" style={{ opacity: 0.5 }}>...</button>
   }
   return (
-    <button
-      onClick={onClick}
-      className={
-        'text-xs px-2 py-1 rounded ' +
-        (exists
-          ? 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-          : 'bg-cyan-600 hover:bg-cyan-500 text-white')
-      }
-      title={exists ? '已下载，点击重新下载（会跳过已存在文件）' : '下载'}
-    >
+    <button onClick={onClick} className={exists ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm'}
+      title={exists ? '已下载，点击重新下载' : '下载'}>
       {exists ? '↻ 重下' : '⤓ 下载'}
     </button>
   )
 }
 
-
-// ---------------------------------------------------------------------------
-// PP8 — onnxruntime 运行时面板（CUDA / CPU 显示 + 一键切换）
-// ---------------------------------------------------------------------------
+// ── WD14 Runtime Panel ──────────────────────────────────────────────────────
 
 function WD14RuntimePanel() {
   const [rt, setRt] = useState<WD14Runtime | null>(null)
@@ -1071,52 +815,24 @@ function WD14RuntimePanel() {
     }
   }, [])
 
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
+  useEffect(() => { void refresh() }, [refresh])
 
   const install = async (target: 'auto' | 'gpu' | 'cpu') => {
-    const detail =
-      target === 'auto'
-        ? '将按 nvidia-smi 检测自动选 GPU/CPU 包'
-        : target === 'gpu'
-        ? '将卸载现有 onnxruntime 并安装 onnxruntime-gpu'
-        : '将卸载现有 onnxruntime-gpu 并安装 onnxruntime（CPU）'
-    if (
-      !confirm(
-        `${detail}。装包需要几分钟。\n\n⚠️ 注意：装完后必须**重启 Studio** 才能生效（onnxruntime 是 C 扩展，进程内不能热替换）。继续？`
-      )
-    )
-      return
+    const detail = target === 'auto' ? '将按 nvidia-smi 检测自动选 GPU/CPU 包'
+      : target === 'gpu' ? '将卸载现有 onnxruntime 并安装 onnxruntime-gpu'
+      : '将卸载现有 onnxruntime-gpu 并安装 onnxruntime（CPU）'
+    if (!confirm(`${detail}。装包需要几分钟。\n\n注意：装完后必须重启 Studio 才能生效。继续？`)) return
     setBusy(target)
     try {
       const result = await api.installWD14Runtime(target)
       setRt({
-        installed: result.installed,
-        version: result.version,
-        providers: result.providers,
-        cuda_available: result.cuda_available,
-        restart_required: result.restart_required,
-        cuda_load_error: result.cuda_load_error,
-        preload: result.preload,
-        cuda_detect: result.cuda_detect,
+        installed: result.installed, version: result.version, providers: result.providers,
+        cuda_available: result.cuda_available, restart_required: result.restart_required,
+        cuda_load_error: result.cuda_load_error, preload: result.preload, cuda_detect: result.cuda_detect,
       })
       const newPkg = result.installed_pkg ?? result.installed ?? '?'
       const newVer = result.installed_version ?? result.version ?? '?'
-      const cr = result.cuda_runtime
-      const cudaSuffix = cr
-        ? cr.error
-          ? `；CUDA runtime wheels 装失败（仍可手动 pip 装）`
-          : cr.installed.length > 0
-          ? `；附带装了 ${cr.installed.length} 个 CUDA runtime wheel`
-          : cr.platform_skip
-          ? ''
-          : ''
-        : ''
-      toast(
-        `已装 ${newPkg}==${newVer}${cudaSuffix}，请重启 Studio 让 EP 生效`,
-        cr?.error ? 'error' : 'success'
-      )
+      toast(`已装 ${newPkg}==${newVer}，请重启 Studio 让 EP 生效`, 'success')
     } catch (e) {
       toast(`装包失败: ${e}`, 'error')
     } finally {
@@ -1124,114 +840,54 @@ function WD14RuntimePanel() {
     }
   }
 
-  if (error) {
-    return (
-      <div className="text-xs text-red-300 font-mono">{error}</div>
-    )
-  }
-  if (!rt) {
-    return <div className="text-xs text-slate-500">加载 runtime 状态...</div>
-  }
+  if (error) return <div style={{ color: 'var(--err)', fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)' }}>{error}</div>
+  if (!rt) return <div style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>加载 runtime 状态...</div>
 
-  const epLabel = (rt.providers ?? [])
-    .map((p) => p.replace('ExecutionProvider', ''))
-    .join(' / ') || '(none)'
+  const epLabel = (rt.providers ?? []).map((p) => p.replace('ExecutionProvider', '')).join(' / ') || '(none)'
   const cuda = rt.cuda_detect ?? { available: false, driver_version: null, gpu_name: null }
-  const cudaInfo = cuda.available
-    ? `${cuda.gpu_name ?? '?'} (driver ${cuda.driver_version ?? '?'})`
-    : '未检测到 NVIDIA GPU'
+  const cudaInfo = cuda.available ? `${cuda.gpu_name ?? '?'} (driver ${cuda.driver_version ?? '?'})` : '未检测到 NVIDIA GPU'
   const mismatched = cuda.available && !rt.cuda_available
-  const restartRequired = !!rt.restart_required
+
+  const runtimeBox: React.CSSProperties = {
+    borderRadius: 'var(--r-sm)', border: '1px solid var(--border-subtle)',
+    background: 'var(--bg-sunken)', padding: 8,
+    display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--t-xs)',
+  }
 
   return (
-    <div className="rounded border border-slate-700 bg-slate-950/40 p-2 space-y-1.5 text-xs">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-slate-500 shrink-0">runtime:</span>
-        <code className="font-mono text-slate-200">
-          {rt.installed ?? '(未安装)'}
-          {rt.version ? `==${rt.version}` : ''}
-        </code>
-        <span
-          className={
-            'text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 ' +
-            (rt.cuda_available
-              ? 'bg-emerald-700/40 text-emerald-200'
-              : 'bg-amber-700/40 text-amber-200')
-          }
-        >
-          {rt.cuda_available ? 'CUDA' : 'CPU only'}
-        </span>
+    <div style={runtimeBox}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ color: 'var(--fg-tertiary)', flexShrink: 0 }}>runtime:</span>
+        <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)' }}>{rt.installed ?? '(未安装)'}{rt.version ? `==${rt.version}` : ''}</code>
+        <StatusLabel bg={rt.cuda_available ? 'var(--ok-soft)' : 'var(--warn-soft)'} fg={rt.cuda_available ? 'var(--ok)' : 'var(--warn)'} text={rt.cuda_available ? 'CUDA' : 'CPU only'} />
       </div>
-      <div className="text-slate-500">EP: <code className="text-slate-300 font-mono">{epLabel}</code></div>
-      <div className="text-slate-500">GPU 检测: <span className="text-slate-300">{cudaInfo}</span></div>
-      {restartRequired && (
-        <div className="rounded border border-red-700/60 bg-red-900/30 px-2 py-1.5 text-red-200 text-[11px] leading-relaxed">
-          🔁 已装新 onnxruntime 包，但当前进程仍在用旧的（C 扩展不能热替换）。
-          <strong className="text-red-100">请重启 Studio</strong> 让 EP 切换生效。
+      <div style={{ color: 'var(--fg-tertiary)' }}>EP: <code style={{ color: 'var(--fg-secondary)', fontFamily: 'var(--font-mono)' }}>{epLabel}</code></div>
+      <div style={{ color: 'var(--fg-tertiary)' }}>GPU 检测: <span style={{ color: 'var(--fg-secondary)' }}>{cudaInfo}</span></div>
+
+      {rt.restart_required && (
+        <div style={{ borderRadius: 'var(--r-sm)', border: '1px solid var(--err)', background: 'var(--err-soft)', padding: '6px 8px', color: 'var(--err)', fontSize: 'var(--t-2xs)' }}>
+          已装新 onnxruntime 包，但当前进程仍在用旧的。<strong>请重启 Studio</strong> 让 EP 切换生效。
         </div>
       )}
-      {!restartRequired && mismatched && (
-        <div className="text-amber-300 text-[11px] leading-relaxed">
-          ⚠️ 检测到 NVIDIA GPU 但 onnxruntime 只有 CPU EP — WD14 会跑得很慢。点下方「重装为 GPU 版」修复。
+      {!rt.restart_required && mismatched && (
+        <div style={{ color: 'var(--warn)', fontSize: 'var(--t-2xs)' }}>
+          检测到 NVIDIA GPU 但 onnxruntime 只有 CPU EP — WD14 会跑得很慢。点下方「重装为 GPU 版」修复。
         </div>
       )}
       {rt.cuda_load_error && (
-        <div className="rounded border border-red-700/60 bg-red-900/30 px-2 py-1.5 text-red-200 text-[11px] leading-relaxed space-y-1">
-          <div>
-            ⚠️ CUDA EP 加载失败，本次打标已降级到 CPU。常见原因：缺系统 CUDA runtime
-            （onnxruntime-gpu wheel 不带）。
-          </div>
-          <code className="block font-mono text-[10px] text-red-100/90 break-all whitespace-pre-wrap">
+        <div style={{ borderRadius: 'var(--r-sm)', border: '1px solid var(--err)', background: 'var(--err-soft)', padding: '6px 8px', fontSize: 'var(--t-2xs)', color: 'var(--err)' }}>
+          <div>CUDA EP 加载失败，已降级到 CPU。</div>
+          <code style={{ display: 'block', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-2xs)', color: 'var(--err)', wordBreak: 'break-all', whiteSpace: 'pre-wrap', marginTop: 4 }}>
             {rt.cuda_load_error}
           </code>
-          {rt.preload && rt.preload.applied && rt.preload.candidates === 0 && (
-            <div className="text-[10px] text-red-100/80">
-              提示：venv 里没装 torch CUDA wheel，无法借 PyTorch 自带 nvidia/* 库
-              兜底。可 `pip install torch --index-url https://download.pytorch.org/whl/cu121`
-              或系统装 CUDA 12 + cuDNN 9。
-            </div>
-          )}
-          {rt.preload && rt.preload.preloaded.length > 0 && (
-            <div className="text-[10px] text-red-100/80">
-              已预加载 {rt.preload.preloaded.length} 个 torch CUDA so 但仍失败 —
-              可能 onnxruntime 与 CUDA minor 版本不匹配。
-            </div>
-          )}
         </div>
       )}
-      <div className="flex gap-2 flex-wrap pt-1">
-        <button
-          onClick={() => install('auto')}
-          disabled={busy !== null}
-          className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 disabled:opacity-50"
-          title="按 nvidia-smi 检测自动选 GPU / CPU 包"
-        >
-          {busy === 'auto' ? '⏳ 装包中...' : '🔁 自动检测'}
-        </button>
-        <button
-          onClick={() => install('gpu')}
-          disabled={busy !== null}
-          className="px-2 py-1 rounded bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-50"
-          title="重装 onnxruntime-gpu (CUDA 12.x)"
-        >
-          {busy === 'gpu' ? '⏳ 装包中...' : '⚡ 重装为 GPU'}
-        </button>
-        <button
-          onClick={() => install('cpu')}
-          disabled={busy !== null}
-          className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 disabled:opacity-50"
-          title="重装 onnxruntime (CPU only)"
-        >
-          {busy === 'cpu' ? '⏳ 装包中...' : '🐢 重装为 CPU'}
-        </button>
-        <button
-          onClick={() => void refresh()}
-          disabled={busy !== null}
-          className="px-2 py-1 rounded text-slate-400 hover:text-slate-200 disabled:opacity-50"
-          title="重新读取 runtime 状态"
-        >
-          ↻
-        </button>
+
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingTop: 4 }}>
+        <button onClick={() => install('auto')} disabled={busy !== null} className="btn btn-secondary btn-sm">{busy === 'auto' ? '装包中...' : '自动检测'}</button>
+        <button onClick={() => install('gpu')} disabled={busy !== null} className="btn btn-primary btn-sm">{busy === 'gpu' ? '装包中...' : '重装为 GPU'}</button>
+        <button onClick={() => install('cpu')} disabled={busy !== null} className="btn btn-secondary btn-sm">{busy === 'cpu' ? '装包中...' : '重装为 CPU'}</button>
+        <button onClick={() => void refresh()} disabled={busy !== null} style={{ padding: '2px 8px', color: 'var(--fg-tertiary)', background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 'var(--r-sm)' }}>↻</button>
       </div>
     </div>
   )

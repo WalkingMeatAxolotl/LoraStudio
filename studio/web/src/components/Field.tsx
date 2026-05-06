@@ -14,15 +14,21 @@ interface Props {
   disabledHint?: string
 }
 
-const labelCls = 'text-sm font-medium text-slate-300 mb-1'
-const helpCls = 'text-xs text-slate-500 mt-1'
-const inputCls =
-  'w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-md ' +
-  'focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 ' +
-  'text-sm disabled:opacity-50 disabled:cursor-not-allowed'
+const labelStyle: React.CSSProperties = {
+  fontSize: 'var(--t-sm)', fontWeight: 500, color: 'var(--fg-secondary)', marginBottom: 4,
+}
+const helpStyle: React.CSSProperties = {
+  fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', marginTop: 4,
+}
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '5px 10px',
+  background: 'var(--bg-canvas)', border: '1px solid var(--border-default)',
+  borderRadius: 'var(--r-sm)', fontSize: 'var(--t-sm)',
+  color: 'var(--fg-primary)',
+}
 
 const renderHint = (text: string) => (
-  <span className="ml-2 text-[10px] text-amber-400/80 align-middle">
+  <span style={{ marginLeft: 8, fontSize: 'var(--t-2xs)', color: 'var(--warn)', verticalAlign: 'middle' }}>
     {text}
   </span>
 )
@@ -53,15 +59,14 @@ export default function Field({
           checked={Boolean(value)}
           onChange={(e) => onChange(e.target.checked)}
           disabled={disabled}
-          className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-800
-            text-cyan-500 focus:ring-cyan-500 disabled:opacity-50"
+          style={{ marginTop: 4, height: 16, width: 16, borderRadius: 'var(--r-sm)' }}
         />
         <span className="flex-1">
-          <div className="text-sm text-slate-200">
+          <div style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-primary)' }}>
             {label}
             {hintNode}
           </div>
-          {help && <div className={helpCls}>{help}</div>}
+          {help && <div style={helpStyle}>{help}</div>}
         </span>
       </label>
     )
@@ -71,7 +76,7 @@ export default function Field({
   if (kind === 'select') {
     return (
       <div className="py-1.5">
-        <div className={labelCls}>
+        <div style={labelStyle}>
           {label}
           {hintNode}
         </div>
@@ -79,7 +84,7 @@ export default function Field({
           value={String(value ?? '')}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
-          className={inputCls}
+          className="input" style={inputStyle}
         >
           {(prop.enum ?? []).map((opt) => (
             <option key={String(opt)} value={String(opt)}>
@@ -87,7 +92,7 @@ export default function Field({
             </option>
           ))}
         </select>
-        {help && <div className={helpCls}>{help}</div>}
+        {help && <div style={helpStyle}>{help}</div>}
       </div>
     )
   }
@@ -96,7 +101,7 @@ export default function Field({
   if (kind === 'textarea') {
     return (
       <div className="py-1.5">
-        <div className={labelCls}>
+        <div style={labelStyle}>
           {label}
           {hintNode}
         </div>
@@ -105,9 +110,9 @@ export default function Field({
           value={String(value ?? '')}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
-          className={inputCls + ' font-mono'}
+          className="input input-mono" style={inputStyle}
         />
-        {help && <div className={helpCls}>{help}</div>}
+        {help && <div style={helpStyle}>{help}</div>}
       </div>
     )
   }
@@ -118,7 +123,7 @@ export default function Field({
     const text = list.join('\n')
     return (
       <div className="py-1.5">
-        <div className={labelCls}>
+        <div style={labelStyle}>
           {label}（每行一项）
           {hintNode}
         </div>
@@ -133,9 +138,9 @@ export default function Field({
             onChange(arr)
           }}
           disabled={disabled}
-          className={inputCls + ' font-mono'}
+          className="input input-mono" style={inputStyle}
         />
-        {help && <div className={helpCls}>{help}</div>}
+        {help && <div style={helpStyle}>{help}</div>}
       </div>
     )
   }
@@ -241,7 +246,7 @@ function NumberField({
 
   return (
     <div className="py-1.5">
-      <div className={labelCls}>
+      <div style={labelStyle}>
         {label}
         {hintNode}
       </div>
@@ -259,9 +264,9 @@ function NumberField({
           }
         }}
         disabled={disabled}
-        className={inputCls}
+        className="input input-mono" style={inputStyle}
       />
-      {help && <div className={helpCls}>{help}</div>}
+      {help && <div style={helpStyle}>{help}</div>}
     </div>
   )
 }
@@ -283,10 +288,10 @@ function PathStringField({
   const text = value === null || value === undefined ? '' : String(value)
   return (
     <div className="py-1.5">
-      <div className={labelCls}>
+      <div style={labelStyle}>
         {label}
         {kind === 'path' && (
-          <span className="ml-2 text-xs text-slate-500">(path)</span>
+          <span style={{ marginLeft: 8, fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>(path)</span>
         )}
         {hintNode}
       </div>
@@ -296,20 +301,20 @@ function PathStringField({
           value={text}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
-          className={inputCls + (kind === 'path' ? ' font-mono' : '')}
+          className={'input' + (kind === 'path' ? ' input-mono' : '')} style={inputStyle}
         />
         {kind === 'path' && (
           <button
             type="button"
             onClick={() => setPicking(true)}
             disabled={disabled}
-            className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="btn btn-secondary btn-sm" style={{ flexShrink: 0, fontSize: 'var(--t-xs)' }}
           >
             浏览
           </button>
         )}
       </div>
-      {help && <div className={helpCls}>{help}</div>}
+      {help && <div style={helpStyle}>{help}</div>}
       {picking && !disabled && (
         <PathPicker
           initialPath={text || undefined}

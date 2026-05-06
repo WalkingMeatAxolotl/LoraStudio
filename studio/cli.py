@@ -52,15 +52,66 @@ def find_python() -> str:
     return sys.executable
 
 
+_NPM_MIRROR = "https://registry.npmmirror.com"
+_PIP_MIRROR = "https://mirrors.aliyun.com/pypi/simple/"
+
+
+def _npm_call(npm: str, args: list[str], cwd: str, timeout: int = 180) -> int:
+    """运行 npm 命令；超时则 kill 并返回 1。"""
+    proc = subprocess.Popen([npm] + args, cwd=cwd)
+    try:
+        return proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        return 1
+
+
 def npm_install_if_missing(npm: str) -> int:
-    if NODE_MODULES.exists():
+    # 检查关键 bin 而不只是目录，避免安装不完整时跳过重装
+    _bin = "eslint.cmd" if os.name == "nt" else "eslint"
+    if NODE_MODULES.exists() and (NODE_MODULES / ".bin" / _bin).exists():
         return 0
     try:
         rel = NODE_MODULES.relative_to(REPO_ROOT)
     except ValueError:
         rel = NODE_MODULES
-    print(f"[studio] {rel} 不存在，运行 npm install...")
-    return subprocess.call([npm, "install"], cwd=str(WEB_DIR))
+    print(f"[studio] {rel} 不完整或不存在，运行 npm install（3 分钟超时）...")
+    rc = _npm_call(npm, ["install"], str(WEB_DIR), timeout=180)
+    if rc != 0:
+        print(f"[studio] npm install 失败或超时，切换国内源 ({_NPM_MIRROR}) 重试...")
+        rc = subprocess.call(
+            [npm, "install", "--registry", _NPM_MIRROR],
+            cwd=str(WEB_DIR),
+        )
+    return rc
+
+
+def _pip_install(args: list[str]) -> int:
+    """运行 pip install；失败时切换阿里云镜像重试。"""
+    rc = subprocess.call([find_python(), "-m", "pip", "install"] + args)
+    if rc != 0:
+        print(f"[studio] pip install 失败，切换国内源 ({_PIP_MIRROR}) 重试...")
+        rc = subprocess.call(
+            [find_python(), "-m", "pip", "install"] + args
+            + ["-i", _PIP_MIRROR],
+        )
+    return rc
+
+
+def _ensure_python_deps() -> int:
+    """检查关键包（fastapi）是否安装，缺失时自动补装 requirements.txt。"""
+    req = REPO_ROOT / "requirements.txt"
+    if not req.exists():
+        return 0
+    try:
+        import importlib.util
+        if importlib.util.find_spec("fastapi") is not None:
+            return 0
+    except Exception:
+        pass
+    print("[studio] 检测到 fastapi 缺失，重新安装 Python 依赖（requirements.txt）...")
+    return _pip_install(["-r", str(req)])
 
 
 def npm_build(npm: str) -> int:
@@ -186,25 +237,61 @@ def _bootstrap_onnxruntime() -> None:
     """PP8 — 启动期检测 GPU 后按需装 onnxruntime / onnxruntime-gpu。
 
     requirements.txt 不写死它，避免用户机器 CUDA 与硬编码包不匹配踩坑。
-    失败不致命（log + 让用户从 Settings 页手动装）。
+
+    安装路径（onnxruntime 未装时）：
+    - 直接调 cli._pip_install()，终端实时可见进度，失败自动切国内镜像重试
+    - 失败不致命：打印警告后继续启动，WD14 打标不可用但其余功能正常
+
+    EP 检查路径（onnxruntime 已装时）：
+    - 委托 onnxruntime_setup.bootstrap()（仅做 GPU/EP 匹配警告，不重装）
     """
     try:
         from studio.services import onnxruntime_setup
-        state = onnxruntime_setup.bootstrap()
-        if state.get("error"):
-            print(f"[studio] onnxruntime 自动安装失败: {state['error']}", file=sys.stderr)
-        elif state.get("cuda_available"):
-            ver = state.get("version") or "?"
-            print(f"[studio] onnxruntime: {state.get('installed')}=={ver} (CUDA EP available)")
-        elif state.get("cuda_detect", {}).get("available"):
+
+        # ── 步骤 1：检查是否已安装（不 import .pyd，只读 dist-info）────────
+        rt = onnxruntime_setup.current_runtime()
+        if rt["installed"] is None:
+            # 未安装：用能显示进度且有镜像回退的 _pip_install() 安装
+            cuda = onnxruntime_setup.detect_cuda()
+            if cuda["available"]:
+                pkg = f"{onnxruntime_setup.GPU_PACKAGE}{onnxruntime_setup.GPU_VERSION_SPEC}"
+                gpu_hint = f"（检测到 NVIDIA GPU: {cuda.get('gpu_name', '?')}，装 GPU 版）"
+            else:
+                pkg = f"{onnxruntime_setup.CPU_PACKAGE}{onnxruntime_setup.CPU_VERSION_SPEC}"
+                gpu_hint = "（未检测到 NVIDIA GPU，装 CPU 版）"
+            print(f"[studio] ONNX Runtime 未安装，正在安装 {pkg} {gpu_hint}")
+            print("[studio] 提示：首次下载可能需要几分钟，进度会实时显示在下方...")
+            rc = _pip_install([pkg])
+            if rc != 0:
+                print(
+                    f"[studio] 警告：ONNX Runtime 安装失败（见上方输出）。\n"
+                    f"         WD14 打标功能暂不可用；其余功能正常。\n"
+                    f"         可稍后在 Settings → WD14 页面手动重装。",
+                    file=sys.stderr,
+                )
+                return
+            print(f"[studio] ONNX Runtime 安装完成：{pkg}")
+            # 刷新状态（供后续 EP 检查）
+            rt = onnxruntime_setup.current_runtime()
+
+        # ── 步骤 2：已装（或刚装完）→ 检查 GPU/EP 匹配，打印状态 ────────
+        cuda = onnxruntime_setup.detect_cuda()
+        ver = rt.get("version") or "?"
+        installed = rt.get("installed") or "?"
+        cuda_available = rt.get("cuda_available", False)
+
+        if cuda_available:
+            print(f"[studio] onnxruntime: {installed}=={ver}（CUDA EP 可用）")
+        elif cuda.get("available"):
             print(
                 f"[studio] 警告：检测到 NVIDIA GPU 但 onnxruntime 只有 CPU EP "
-                f"(installed={state.get('installed')})。WD14 会跑 CPU。"
-                f"去 Settings → WD14 点「重装为 GPU 版」。",
+                f"（installed={installed}）。WD14 打标会跑 CPU（较慢）。"
+                f"可在 Settings → WD14 点「重装为 GPU 版」。",
                 file=sys.stderr,
             )
         else:
-            print(f"[studio] onnxruntime: {state.get('installed')} (CPU only - no NVIDIA GPU detected)")
+            print(f"[studio] onnxruntime: {installed}=={ver}（CPU only，未检测到 NVIDIA GPU）")
+
     except Exception as exc:  # noqa: BLE001
         print(f"[studio] onnxruntime bootstrap 异常（已忽略）: {exc}", file=sys.stderr)
 
@@ -236,6 +323,9 @@ def _web_dist_is_stale() -> bool:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    rc = _ensure_python_deps()
+    if rc != 0:
+        return rc
     if not args.no_build:
         if not WEB_DIST.exists():
             print("[studio] studio/web/dist 不存在，先构建前端...")
@@ -258,6 +348,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_dev(args: argparse.Namespace) -> int:
+    rc = _ensure_python_deps()
+    if rc != 0:
+        return rc
     npm = find_npm()
     if not npm:
         print("[studio] 错误：找不到 npm", file=sys.stderr)

@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
+import Topbar from './components/Topbar'
+import { ProjectContext, ProjectSetterContext, type ProjectCtxValue } from './context/ProjectContext'
 import ProjectsPage from './pages/Projects'
 import QueuePage from './pages/Queue'
 import QueueDetailPage from './pages/QueueDetail'
@@ -29,11 +32,17 @@ function QueueDetailRedirect({ tab }: { tab: 'log' | 'monitor' }) {
 }
 
 export default function App() {
+  const [projectCtx, setProjectCtx] = useState<ProjectCtxValue | null>(null)
+
   return (
+    <ProjectContext.Provider value={projectCtx}>
+      <ProjectSetterContext.Provider value={setProjectCtx}>
     <BrowserRouter basename="/studio">
-      <div className="min-h-screen flex">
+      <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
         <Sidebar />
-        <main className="flex-1 px-4 py-4 overflow-auto h-screen min-w-0">
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <Topbar />
+        <main style={{ flex: 1, overflow: 'auto', background: 'var(--bg-canvas)' }}>
           <Routes>
             <Route path="/" element={<ProjectsPage />} />
             <Route path="/queue" element={<QueuePage />} />
@@ -76,9 +85,12 @@ export default function App() {
               element={<Navigate to="/tools/monitor" replace />}
             />
             <Route path="/datasets" element={<Navigate to="/" replace />} />
-          </Routes>
-        </main>
+            </Routes>
+          </main>
+        </div>
       </div>
     </BrowserRouter>
+      </ProjectSetterContext.Provider>
+    </ProjectContext.Provider>
   )
 }

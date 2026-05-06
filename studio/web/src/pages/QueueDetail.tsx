@@ -9,23 +9,20 @@ import {
 } from '../api/client'
 import { useToast } from '../components/Toast'
 import { useEventStream } from '../lib/useEventStream'
+import MonitorDashboard from '../components/MonitorDashboard'
 
 type Tab = 'overview' | 'log' | 'monitor' | 'outputs'
 
-const STATUS_STYLE: Record<TaskStatus, string> = {
-  pending: 'bg-slate-700 text-slate-300',
-  running: 'bg-cyan-600/30 text-cyan-300 animate-pulse',
-  done: 'bg-emerald-700/40 text-emerald-300',
-  failed: 'bg-red-700/40 text-red-300',
-  canceled: 'bg-slate-700/40 text-slate-400',
+const STATUS_BADGE: Record<TaskStatus, string> = {
+  pending: 'badge badge-neutral',
+  running: 'badge badge-accent',
+  done: 'badge badge-ok',
+  failed: 'badge badge-err',
+  canceled: 'badge badge-neutral',
 }
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
-  pending: '待运行',
-  running: '运行中',
-  done: '完成',
-  failed: '失败',
-  canceled: '已取消',
+  pending: '待运行', running: '运行中', done: '完成', failed: '失败', canceled: '已取消',
 }
 
 const TERMINAL: ReadonlyArray<TaskStatus> = ['done', 'failed', 'canceled']
@@ -40,11 +37,9 @@ function fmtDuration(start?: number | null, end?: number | null): string {
   const e = end ?? Date.now() / 1000
   const sec = Math.max(0, e - start)
   if (sec < 60) return `${sec.toFixed(0)}s`
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
+  const m = Math.floor(sec / 60); const s = Math.floor(sec % 60)
   if (m < 60) return `${m}m ${s}s`
-  const h = Math.floor(m / 60)
-  return `${h}h ${m % 60}m`
+  return `${Math.floor(m / 60)}h ${m % 60}m`
 }
 
 function fmtBytes(n: number): string {
@@ -54,6 +49,55 @@ function fmtBytes(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
+// ── StatCard ────────────────────────────────────────────────────────────────
+function StatCard({ label, value, sub, mono, large, tone }: {
+  label: string
+  value: string
+  sub?: string
+  mono?: boolean
+  large?: boolean
+  tone?: 'accent' | 'ok' | 'warn' | 'err' | 'neutral'
+}) {
+  const toneColor = tone ? `var(--${tone})` : 'var(--fg-primary)'
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 4,
+      padding: '14px 18px',
+      background: 'var(--bg-surface)',
+      borderRadius: 'var(--r-md)',
+      border: '1px solid var(--border-subtle)',
+    }}>
+      <span style={{
+        fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)',
+        fontFamily: 'var(--font-mono)', letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+      }}>
+        {label}
+      </span>
+      <span style={{
+        fontSize: large ? 'var(--t-3xl)' : 'var(--t-xl)',
+        fontWeight: 600,
+        fontFamily: mono ? 'var(--font-mono)' : 'var(--font-sans)',
+        fontVariantNumeric: 'tabular-nums',
+        letterSpacing: '-0.02em',
+        color: toneColor,
+        lineHeight: 1.1,
+      }}>
+        {value}
+      </span>
+      {sub && (
+        <span style={{
+          fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)',
+          fontFamily: 'var(--font-mono)',
+        }}>
+          {sub}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// ── Page ────────────────────────────────────────────────────────────────────
 export default function QueueDetailPage() {
   const { id } = useParams<{ id: string }>()
   const taskId = Number(id)
@@ -66,55 +110,36 @@ export default function QueueDetailPage() {
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window === 'undefined') return 'overview'
     const v = window.location.hash.replace(/^#/, '')
-    return (['overview', 'log', 'monitor', 'outputs'] as const).includes(
-      v as Tab
-    )
-      ? (v as Tab)
-      : 'overview'
+    return (['overview', 'log', 'monitor', 'outputs'] as const).includes(v as Tab) ? (v as Tab) : 'overview'
   })
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  // hash 同步当前 tab，方便分享 / 收藏 / 浏览器后退
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const h = `#${tab}`
-      if (window.location.hash !== h) {
-        window.history.replaceState(null, '', h)
-      }
+      if (window.location.hash !== h) window.history.replaceState(null, '', h)
     }
   }, [tab])
 
   const reload = useCallback(async () => {
     if (!Number.isFinite(taskId)) return
-    try {
-      const t = await api.getTask(taskId)
-      setTask(t)
-      setError(null)
-    } catch (e) {
-      setError(String(e))
-    }
+    try { const t = await api.getTask(taskId); setTask(t); setError(null) }
+    catch (e) { setError(String(e)) }
   }, [taskId])
 
-  useEffect(() => {
-    void reload()
-  }, [reload])
+  useEffect(() => { void reload() }, [reload])
 
   useEventStream((evt) => {
-    if (evt.type === 'task_state_changed' && evt.task_id === taskId) {
-      void reload()
-    }
+    if (evt.type === 'task_state_changed' && evt.task_id === taskId) void reload()
   })
 
-  // running 时刷新时长（每 2s 重渲染）
   useEffect(() => {
     if (task?.status !== 'running') return
     const tick = window.setInterval(() => setTask((t) => (t ? { ...t } : t)), 2000)
     return () => window.clearInterval(tick)
   }, [task?.status])
 
-  if (!Number.isFinite(taskId)) {
-    return <p className="text-red-400">无效任务 ID</p>
-  }
+  if (!Number.isFinite(taskId)) return <p style={{ color: 'var(--err)' }}>无效任务 ID</p>
 
   const status = task?.status
   const isLive = status === 'running' || status === 'pending'
@@ -123,99 +148,106 @@ export default function QueueDetailPage() {
   const cancel = async () => {
     if (!task) return
     setBusy(true)
-    try {
-      await api.cancelTask(task.id)
-      toast('已发送取消信号', 'success')
-      void reload()
-    } catch (e) {
-      toast(String(e), 'error')
-    } finally {
-      setBusy(false)
-    }
+    try { await api.cancelTask(task.id); toast('已发送取消信号', 'success'); void reload() }
+    catch (e) { toast(String(e), 'error') }
+    finally { setBusy(false) }
   }
 
   const retry = async () => {
     if (!task) return
     setBusy(true)
-    try {
-      const newTask = await api.retryTask(task.id)
-      toast(`重试已入队 #${newTask.id}`, 'success')
-      navigate(`/queue/${newTask.id}`)
-    } catch (e) {
-      toast(String(e), 'error')
-    } finally {
-      setBusy(false)
-    }
+    try { const newTask = await api.retryTask(task.id); toast(`重试已入队 #${newTask.id}`, 'success'); navigate(`/queue/${newTask.id}`) }
+    catch (e) { toast(String(e), 'error'); setBusy(false) }
+    finally { setBusy(true) }
   }
 
   const remove = async () => {
     if (!task) return
     setBusy(true)
-    try {
-      await api.deleteTask(task.id)
-      toast('已删除', 'success')
-      navigate('/queue')
-    } catch (e) {
-      toast(String(e), 'error')
-      setBusy(false)
-      setConfirmDelete(false)
-    }
+    try { await api.deleteTask(task.id); toast('已删除', 'success'); navigate('/queue') }
+    catch (e) { toast(String(e), 'error'); setBusy(false); setConfirmDelete(false) }
   }
 
+  const tabs: Array<{ key: Tab; label: string }> = [
+    { key: 'overview', label: '详情' },
+    { key: 'log',      label: '日志' },
+    { key: 'monitor',  label: '监控' },
+    { key: 'outputs',  label: '输出' },
+  ]
+
   return (
-    <div className="flex flex-col h-full min-h-0 w-full gap-2 overflow-hidden">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
       {/* Header */}
-      <header className="flex items-baseline gap-3 shrink-0">
-        <Link
-          to="/queue"
-          className="text-xs text-slate-400 hover:text-slate-200"
-        >
-          ← 队列
-        </Link>
-        <h1 className="text-base font-semibold">
-          任务 <span className="font-mono text-slate-500">#{taskId}</span>
-        </h1>
-        {task && (
-          <>
-            <span className="text-sm text-slate-300">{task.name}</span>
-            <code className="text-[11px] text-slate-500 font-mono">
-              {task.config_name}.yaml
-            </code>
-          </>
-        )}
-        {status && (
-          <span
-            className={
-              'px-2 py-0.5 rounded text-xs font-mono ' + STATUS_STYLE[status]
-            }
-          >
-            {STATUS_LABEL[status]}
-          </span>
-        )}
+      <header style={{
+        padding: '16px 24px',
+        borderBottom: '1px solid var(--border-subtle)',
+        display: 'flex', flexDirection: 'column', gap: 8,
+        flexShrink: 0, background: 'var(--bg-canvas)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Link to="/queue" className="btn btn-ghost btn-sm"
+            style={{ textDecoration: 'none' }}
+          >← 队列</Link>
+          <span style={{ color: 'var(--fg-tertiary)' }}>/</span>
+          <h1 style={{ margin: 0, fontSize: 'var(--t-xl)', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+            #{taskId}
+          </h1>
+          {task && (
+            <>
+              <span style={{ color: 'var(--fg-secondary)', fontSize: 'var(--t-md)' }}>{task.name}</span>
+              <code style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>{task.config_name}.yaml</code>
+            </>
+          )}
+          {status && (
+            <span className={STATUS_BADGE[status]}>
+              {status === 'running' && <span className="dot dot-running" />}
+              {STATUS_LABEL[status]}
+            </span>
+          )}
+        </div>
+
         {error && (
-          <span className="text-xs text-red-400 ml-2">{error}</span>
+          <div style={{
+            padding: '8px 12px', borderRadius: 'var(--r-md)',
+            background: 'var(--err-soft)', border: '1px solid var(--err)',
+            color: 'var(--err)', fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
+          }}>
+            {error}
+          </div>
+        )}
+
+        {/* Stat cards for running tasks */}
+        {task && task.status === 'running' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginTop: 4 }}>
+            <StatCard label="运行时长" value={fmtDuration(task.started_at, null)} mono large tone="accent" />
+            <StatCard label="开始时间" value={fmtTime(task.started_at)} mono />
+            <StatCard label="Config" value={task.config_name} mono />
+            <StatCard label="PID" value={task.pid ? String(task.pid) : '—'} mono />
+          </div>
         )}
       </header>
 
       {/* Tabs */}
-      <nav className="flex items-center gap-1 border-b border-slate-700 shrink-0 text-xs">
-        {(
-          [
-            ['overview', '📋 详情'],
-            ['log', '📜 日志'],
-            ['monitor', '📊 监控'],
-            ['outputs', '📦 输出'],
-          ] as const
-        ).map(([key, label]) => (
+      <nav style={{
+        display: 'flex', alignItems: 'center', gap: 0,
+        borderBottom: '1px solid var(--border-subtle)',
+        flexShrink: 0, padding: '0 24px',
+      }}>
+        {tabs.map(({ key, label }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={
-              'px-3 py-1.5 border-b-2 -mb-px transition-colors ' +
-              (tab === key
-                ? 'border-cyan-500 text-cyan-200'
-                : 'border-transparent text-slate-400 hover:text-slate-200')
-            }
+            style={{
+              padding: '8px 18px',
+              fontSize: 'var(--t-sm)',
+              fontWeight: tab === key ? 600 : 400,
+              border: 'none', background: 'transparent',
+              color: tab === key ? 'var(--accent)' : 'var(--fg-tertiary)',
+              borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
+              marginBottom: -1, cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => { if (tab !== key) { (e.currentTarget as HTMLElement).style.color = 'var(--fg-primary)'; (e.currentTarget as HTMLElement).style.borderBottomColor = 'var(--border-default)' } }}
+            onMouseLeave={(e) => { if (tab !== key) { (e.currentTarget as HTMLElement).style.color = 'var(--fg-tertiary)'; (e.currentTarget as HTMLElement).style.borderBottomColor = 'transparent' } }}
           >
             {label}
           </button>
@@ -223,54 +255,41 @@ export default function QueueDetailPage() {
       </nav>
 
       {/* Tab body */}
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {tab === 'overview' && task && <OverviewTab task={task} />}
         {tab === 'overview' && !task && (
-          <p className="text-slate-500 text-xs p-2">加载...</p>
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)' }}>
+            加载中...
+          </div>
         )}
-        {tab === 'log' && (
-          <LogTab taskId={taskId} status={status ?? null} />
-        )}
+        {tab === 'log' && <LogTab taskId={taskId} />}
         {tab === 'monitor' && <MonitorTab taskId={taskId} />}
-        {tab === 'outputs' && (
-          <OutputsTab taskId={taskId} taskName={task?.name ?? ''} />
-        )}
+        {tab === 'outputs' && <OutputsTab taskId={taskId} taskName={task?.name ?? ''} />}
       </div>
 
-      {/* Footer actions — 危险操作集中在这里，跟内容区视觉隔开 */}
-      <footer className="flex items-center gap-2 pt-2 border-t border-slate-700 shrink-0 text-xs">
-        <Link
-          to="/queue"
-          className="px-3 py-1.5 text-slate-400 hover:text-slate-200"
-        >
+      {/* Footer actions */}
+      <footer style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '10px 24px',
+        borderTop: '1px solid var(--border-subtle)', flexShrink: 0,
+        background: 'var(--bg-surface)',
+      }}>
+        <Link to="/queue" className="btn btn-ghost btn-sm" style={{ textDecoration: 'none' }}>
           ← 返回队列
         </Link>
-        <span className="flex-1" />
+        <span style={{ flex: 1 }} />
         {isLive && (
-          <button
-            onClick={cancel}
-            disabled={busy}
-            className="px-3 py-1.5 rounded bg-amber-700/60 hover:bg-amber-700 text-amber-100 disabled:opacity-50"
-          >
-            ✕ 取消任务
-          </button>
+          <button onClick={cancel} disabled={busy} className="btn btn-sm"
+            style={{ background: 'var(--warn-soft)', border: '1px solid var(--warn)', color: 'var(--warn)' }}
+          >取消任务</button>
         )}
         {isTerminal && (
           <>
-            <button
-              onClick={retry}
-              disabled={busy}
-              className="px-3 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-50"
-            >
-              🔁 重试
-            </button>
-            <button
-              onClick={() => setConfirmDelete(true)}
-              disabled={busy}
-              className="px-3 py-1.5 rounded bg-red-700/80 hover:bg-red-700 text-red-100 disabled:opacity-50"
-            >
-              🗑 删除记录
-            </button>
+            <button onClick={retry} disabled={busy} className="btn btn-primary btn-sm">重试</button>
+            <button onClick={() => setConfirmDelete(true)} disabled={busy}
+              className="btn btn-sm"
+              style={{ background: 'var(--err-soft)', border: '1px solid var(--err)', color: 'var(--err)' }}
+            >删除记录</button>
           </>
         )}
       </footer>
@@ -281,12 +300,10 @@ export default function QueueDetailPage() {
           message={
             <>
               将永久删除任务{' '}
-              <code className="text-slate-200">
-                #{task.id} {task.name}
-              </code>{' '}
+              <code style={{ color: 'var(--fg-primary)', fontFamily: 'var(--font-mono)' }}>#{task.id} {task.name}</code>{' '}
               的数据库记录。
               <br />
-              <span className="text-slate-400 text-[11px]">
+              <span style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-xs)' }}>
                 LoRA / 训练日志 / 监控状态文件不会被删，仍在磁盘上。
               </span>
             </>
@@ -302,135 +319,86 @@ export default function QueueDetailPage() {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Overview tab
-// ---------------------------------------------------------------------------
+// ── OverviewTab ─────────────────────────────────────────────────────────────
 
 function OverviewTab({ task }: { task: Task }) {
-  const rows: Array<[string, React.ReactNode]> = [
-    ['ID', <code key="id" className="font-mono">{task.id}</code>],
-    ['名称', task.name],
-    ['Config', <code key="cn" className="font-mono">{task.config_name}.yaml</code>],
-    [
-      '状态',
-      <span
-        key="st"
-        className={
-          'px-2 py-0.5 rounded text-xs font-mono ' + STATUS_STYLE[task.status]
-        }
-      >
-        {STATUS_LABEL[task.status]}
-      </span>,
-    ],
-    ['优先级', task.priority],
-    ['入队时间', fmtTime(task.created_at)],
-    ['开始时间', fmtTime(task.started_at)],
-    ['结束时间', fmtTime(task.finished_at)],
-    ['运行时长', fmtDuration(task.started_at, task.finished_at)],
-    ['退出码', task.exit_code ?? '—'],
-    ['PID', task.pid ?? '—'],
+  const items: Array<{ label: string; value: React.ReactNode; mono?: boolean }> = [
+    { label: 'ID',     value: <code style={{ fontFamily: 'var(--font-mono)' }}>{task.id}</code> },
+    { label: '名称',   value: task.name },
+    { label: 'Config', value: <code style={{ fontFamily: 'var(--font-mono)' }}>{task.config_name}.yaml</code> },
+    { label: '状态',   value: <span className={STATUS_BADGE[task.status]}>{task.status === 'running' && <span className="dot dot-running" />}{STATUS_LABEL[task.status]}</span> },
+    { label: '优先级', value: task.priority, mono: true },
+    { label: '入队时间', value: fmtTime(task.created_at) },
+    { label: '开始时间', value: fmtTime(task.started_at) },
+    { label: '结束时间', value: fmtTime(task.finished_at) },
+    { label: '运行时长', value: fmtDuration(task.started_at, task.finished_at), mono: true },
+    { label: '退出码',   value: task.exit_code ?? '—', mono: true },
+    { label: 'PID',     value: task.pid ?? '—', mono: true },
   ]
+
   if (task.project_id || task.version_id) {
-    rows.push([
-      '来源',
-      task.project_id && task.version_id ? (
-        <Link
-          to={`/projects/${task.project_id}/v/${task.version_id}/train`}
-          className="text-cyan-400 hover:underline font-mono"
-        >
-          项目 #{task.project_id} / v#{task.version_id}
-        </Link>
-      ) : (
-        '—'
-      ),
-    ])
+    items.push({
+      label: '来源',
+      value: task.project_id && task.version_id ? (
+        <Link to={`/projects/${task.project_id}/v/${task.version_id}/train`}
+          style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-sm)' }}
+        >项目 #{task.project_id} / v#{task.version_id}</Link>
+      ) : '—',
+    })
   }
   if (task.config_path) {
-    rows.push([
-      'Config 路径',
-      <code key="cp" className="font-mono break-all text-[11px]">
-        {task.config_path}
-      </code>,
-    ])
+    items.push({ label: 'Config 路径', value: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)', wordBreak: 'break-all' }}>{task.config_path}</code> })
   }
   if (task.monitor_state_path) {
-    rows.push([
-      '监控文件',
-      <code key="msp" className="font-mono break-all text-[11px]">
-        {task.monitor_state_path}
-      </code>,
-    ])
+    items.push({ label: '监控文件', value: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)', wordBreak: 'break-all' }}>{task.monitor_state_path}</code> })
   }
   if (task.error_msg) {
-    rows.push([
-      '错误',
-      <code
-        key="err"
-        className="font-mono break-all text-red-300 text-[11px]"
-      >
-        {task.error_msg}
-      </code>,
-    ])
+    items.push({ label: '错误', value: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)', wordBreak: 'break-all', color: 'var(--err)' }}>{task.error_msg}</code> })
   }
 
   return (
-    <div className="overflow-y-auto">
-      <table className="w-full text-xs">
-        <tbody>
-          {rows.map(([label, value]) => (
-            <tr key={label} className="border-b border-slate-800/60 last:border-0">
-              <th className="px-2 py-1.5 text-left font-normal text-slate-500 w-32 align-top">
-                {label}
-              </th>
-              <td className="px-2 py-1.5 text-slate-200 align-top">{value}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div style={{ overflowY: 'auto', padding: 20 }}>
+      <div className="card" style={{ padding: 0, overflow: 'hidden', maxWidth: 720 }}>
+        {items.map((row, i) => (
+          <div key={row.label} style={{
+            display: 'grid', gridTemplateColumns: '140px 1fr',
+            alignItems: 'center', gap: 12, padding: '10px 18px',
+            borderBottom: i < items.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+          }}>
+            <span style={{ fontSize: 'var(--t-sm)', color: 'var(--fg-tertiary)', fontWeight: 400 }}>
+              {row.label}
+            </span>
+            <span style={{
+              fontSize: 'var(--t-sm)', color: 'var(--fg-primary)',
+              fontFamily: row.mono ? 'var(--font-mono)' : 'inherit',
+            }}>
+              {row.value}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Log tab — 之前 pages/Log.tsx 的核心逻辑搬过来
-// ---------------------------------------------------------------------------
+// ── LogTab ──────────────────────────────────────────────────────────────────
 
-function LogTab({
-  taskId,
-  status: _status,
-}: {
-  taskId: number
-  status: TaskStatus | null
-}) {
+function LogTab({ taskId }: { taskId: number }) {
   const [content, setContent] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const preRef = useRef<HTMLPreElement>(null)
-  // SSE 增量回调用 ref 拿最新 content，避免重新订阅
   const contentRef = useRef('')
 
-  const setBoth = useCallback((s: string) => {
-    contentRef.current = s
-    setContent(s)
-  }, [])
+  const setBoth = useCallback((s: string) => { contentRef.current = s; setContent(s) }, [])
 
   const refresh = useCallback(async () => {
-    try {
-      const log = await api.getLog(taskId)
-      setBoth(log.content)
-      setError(null)
-    } catch (e) {
-      setError(String(e))
-    }
+    try { const log = await api.getLog(taskId); setBoth(log.content); setError(null) }
+    catch (e) { setError(String(e)) }
   }, [taskId, setBoth])
 
-  // 切 taskId：先清空，再拉 snapshot —— 避免上一个 task 的尾巴跟新 task 的 SSE 帧拼在一起
-  useEffect(() => {
-    setBoth('')
-    void refresh()
-  }, [taskId, refresh, setBoth])
+  useEffect(() => { setBoth(''); void refresh() }, [taskId, refresh, setBoth])
 
-  // PP6.4 — SSE：log 增量直接追加；状态变化时重拉 snapshot 兜底
   useEventStream((evt) => {
     if (evt.task_id !== taskId) return
     if (evt.type === 'task_log_appended') {
@@ -444,77 +412,55 @@ function LogTab({
   })
 
   useEffect(() => {
-    if (autoScroll && preRef.current) {
-      preRef.current.scrollTop = preRef.current.scrollHeight
-    }
+    if (autoScroll && preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight
   }, [content, autoScroll])
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex items-center gap-2 text-xs pb-2 shrink-0">
-        <label className="text-slate-400 flex items-center gap-1.5 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={autoScroll}
-            onChange={(e) => setAutoScroll(e.target.checked)}
-            className="h-3 w-3"
-          />
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, padding: 16 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12, fontSize: 'var(--t-xs)',
+        paddingBottom: 10, flexShrink: 0,
+      }}>
+        <label style={{ color: 'var(--fg-tertiary)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)}
+            style={{ width: 14, height: 14, accentColor: 'var(--accent)' }} />
           自动滚动
         </label>
-        <span className="flex-1" />
-        <button
-          onClick={() => void refresh()}
-          className="text-slate-400 hover:text-slate-200"
-        >
-          刷新
-        </button>
+        <span style={{ flex: 1 }} />
+        <button onClick={() => void refresh()} className="btn btn-ghost btn-sm">刷新</button>
       </div>
       {error && (
-        <div className="mb-2 p-2 rounded bg-red-900/40 border border-red-700 text-red-300 text-xs font-mono">
-          {error}
-        </div>
+        <div style={{
+          marginBottom: 10, padding: 10, borderRadius: 'var(--r-md)',
+          background: 'var(--err-soft)', border: '1px solid var(--err)',
+          color: 'var(--err)', fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
+        }}>{error}</div>
       )}
-      <pre
-        ref={preRef}
-        className="flex-1 min-h-0 overflow-auto bg-black/60 border border-slate-800 rounded p-3 text-xs font-mono text-slate-300 whitespace-pre-wrap break-all"
-      >
-        {content || <span className="text-slate-600">（尚无日志）</span>}
+      <pre ref={preRef} style={{
+        flex: 1, minHeight: 0, overflow: 'auto',
+        background: 'var(--bg-sunken)', border: '1px solid var(--border-subtle)',
+        borderRadius: 'var(--r-md)', padding: 14,
+        fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
+        color: 'var(--fg-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+        margin: 0, lineHeight: 1.6,
+      }}>
+        {content || <span style={{ color: 'var(--fg-tertiary)' }}>（尚无日志）</span>}
       </pre>
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Monitor tab — iframe 嵌 monitor_smooth.html
-// ---------------------------------------------------------------------------
+// ── MonitorTab ──────────────────────────────────────────────────────────────
 
 function MonitorTab({ taskId }: { taskId: number }) {
   return (
-    <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex items-center gap-2 text-xs pb-2 shrink-0">
-        <span className="text-slate-500">嵌入 monitor_smooth.html</span>
-        <span className="flex-1" />
-        <a
-          href={`/monitor_smooth.html?task_id=${taskId}`}
-          target="_blank"
-          rel="noopener"
-          className="text-slate-400 hover:text-cyan-400"
-        >
-          独立窗口打开 ↗
-        </a>
-      </div>
-      <iframe
-        src={`/monitor_smooth.html?task_id=${taskId}`}
-        title={`monitor-task-${taskId}`}
-        className="flex-1 w-full border border-slate-800 rounded bg-slate-950"
-      />
+    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <MonitorDashboard taskId={taskId} />
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Outputs tab — 之前 OutputsModal 的逻辑搬过来
-// ---------------------------------------------------------------------------
+// ── OutputsTab ──────────────────────────────────────────────────────────────
 
 function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) {
   const { toast } = useToast()
@@ -526,230 +472,157 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
 
   useEffect(() => {
     let alive = true
-    void api
-      .getTaskOutputs(taskId)
-      .then((r) => alive && setData(r))
-      .catch((e) => alive && setError(String(e)))
-    return () => {
-      alive = false
-    }
+    void api.getTaskOutputs(taskId).then((r) => alive && setData(r)).catch((e) => alive && setError(String(e)))
+    return () => { alive = false }
   }, [taskId, refreshKey])
 
-  const sortedFiles = useMemo(
-    () =>
-      data
-        ? [...data.files].sort((a, b) => b.mtime - a.mtime)
-        : [],
-    [data]
-  )
+  const sortedFiles = useMemo(() => data ? [...data.files].sort((a, b) => b.mtime - a.mtime) : [], [data])
 
   const openFolder = async () => {
     setBusy(true)
-    try {
-      const r = await api.openTaskFolder(taskId)
-      toast(`已打开 ${r.opened}`, 'success')
-    } catch (e) {
-      toast(String(e), 'error')
-    } finally {
-      setBusy(false)
-    }
+    try { const r = await api.openTaskFolder(taskId); toast(`已打开 ${r.opened}`, 'success') }
+    catch (e) { toast(String(e), 'error') }
+    finally { setBusy(false) }
   }
 
   const handleDownloadZip = async () => {
     if (zipping) return
     setZipping(true)
     try {
-      // task.name 在 PP6.3 起就是 `{slug}_{label}`，与 LoRA ckpt 命名一致；
-      // 老任务（PP1 之前）name 不规范时回落到 task_{id}。
       const safe = taskName && /^[A-Za-z0-9_.-]+$/.test(taskName)
       const zipName = safe ? `${taskName}_outputs.zip` : `task_${taskId}_outputs.zip`
       await downloadBlob(api.taskOutputsZipUrl(taskId), zipName)
-    } catch (e) {
-      toast(`下载失败: ${e}`, 'error')
-    } finally {
-      setZipping(false)
-    }
+    } catch (e) { toast(`下载失败: ${e}`, 'error') }
+    finally { setZipping(false) }
   }
 
   const copyPath = async () => {
     if (!data?.output_dir) return
-    try {
-      await navigator.clipboard.writeText(data.output_dir)
-      toast('路径已复制', 'success')
-    } catch {
-      toast('复制失败（浏览器拒绝）', 'error')
-    }
+    try { await navigator.clipboard.writeText(data.output_dir); toast('路径已复制', 'success') }
+    catch { toast('复制失败（浏览器拒绝）', 'error') }
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-2">
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, padding: 16, gap: 10 }}>
       {data?.output_dir ? (
-        <div className="flex items-center gap-2 text-xs shrink-0 border-b border-slate-800 pb-2">
-          <span className="text-slate-500 shrink-0">目录</span>
-          <code className="flex-1 min-w-0 truncate text-slate-200 font-mono">
-            {data.output_dir}
-          </code>
-          <button
-            onClick={copyPath}
-            className="px-2 py-0.5 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 shrink-0"
-            title="复制路径"
-          >
-            复制
-          </button>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--t-xs)',
+          flexShrink: 0, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 10,
+        }}>
+          <span style={{ color: 'var(--fg-tertiary)', flexShrink: 0 }}>目录</span>
+          <code style={{
+            flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap', color: 'var(--fg-primary)', fontFamily: 'var(--font-mono)',
+          }}>{data.output_dir}</code>
+          <button onClick={copyPath} className="btn btn-ghost btn-sm">复制</button>
           {data.supports_open_folder ? (
-            <button
-              onClick={openFolder}
-              disabled={busy || !data.exists}
-              className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 disabled:opacity-50 shrink-0"
-              title="在文件管理器打开"
-            >
-              📁 打开
-            </button>
+            <button onClick={openFolder} disabled={busy || !data.exists}
+              className="btn btn-secondary btn-sm"
+            >打开</button>
           ) : (
-            <span
-              className="text-[10px] text-slate-500 shrink-0"
-              title="服务端不在本机，远程打开文件夹无意义"
-            >
-              （远程，无法打开）
-            </span>
+            <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', flexShrink: 0 }}>（远程）</span>
           )}
-          <button
-            onClick={() => setRefreshKey((k) => k + 1)}
-            className="text-slate-400 hover:text-slate-200 shrink-0"
-          >
-            刷新
-          </button>
+          <button onClick={() => setRefreshKey((k) => k + 1)} className="btn btn-ghost btn-sm">刷新</button>
           {data.exists && data.files.length > 0 && (
-            <button
-              onClick={handleDownloadZip}
-              disabled={zipping}
-              className="px-2 py-0.5 rounded bg-cyan-700 hover:bg-cyan-600 text-white shrink-0 disabled:opacity-50"
-              title={zipping ? '后端打包中...' : '打包 output 目录里全部文件为 zip 下载'}
-            >
-              {zipping ? '⏳ 打包中...' : '⤓ 全量 zip'}
+            <button onClick={handleDownloadZip} disabled={zipping} className="btn btn-primary btn-sm">
+              {zipping ? '打包中...' : '下载全部'}
             </button>
           )}
         </div>
       ) : (
-        <p className="text-slate-500 text-xs shrink-0">
-          该任务没有 project / version 关联，找不到 output 目录
-        </p>
+        <div style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)', flexShrink: 0, padding: '8px 0' }}>
+          该任务没有 project / version 关联，找不到输出目录
+        </div>
       )}
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {error ? (
-          <p className="text-red-300 font-mono text-xs">{error}</p>
+          <div style={{ padding: 10, borderRadius: 'var(--r-md)', background: 'var(--err-soft)', border: '1px solid var(--err)', color: 'var(--err)', fontFamily: 'var(--font-mono)', fontSize: 'var(--t-xs)' }}>{error}</div>
         ) : !data ? (
-          <p className="text-slate-500 text-xs">加载...</p>
+          <div style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)', textAlign: 'center', padding: 20 }}>加载中...</div>
         ) : !data.exists ? (
-          <p className="text-amber-300 text-xs">目录不存在</p>
+          <div style={{ color: 'var(--warn)', fontSize: 'var(--t-sm)', textAlign: 'center', padding: 20 }}>目录不存在</div>
         ) : sortedFiles.length === 0 ? (
-          <p className="text-slate-500 text-xs">目录为空</p>
+          <div style={{ color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)', textAlign: 'center', padding: 20 }}>目录为空</div>
         ) : (
-          <table className="w-full text-xs">
-            <thead className="text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-900">
-              <tr>
-                <th className="px-2 py-1 text-left font-normal">文件</th>
-                <th className="px-2 py-1 text-right font-normal">大小</th>
-                <th className="px-2 py-1 text-right font-normal">修改时间</th>
-                <th className="px-2 py-1 text-right font-normal">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedFiles.map((f) => (
-                <tr
-                  key={f.name}
-                  className="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30"
-                >
-                  <td className="px-2 py-1.5">
-                    <code className="font-mono text-slate-200">{f.name}</code>
-                    {f.is_lora && (
-                      <span className="ml-2 text-[10px] px-1 py-0.5 rounded bg-emerald-700/40 text-emerald-200">
-                        LoRA
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-2 py-1.5 text-right text-slate-400 font-mono">
-                    {fmtBytes(f.size)}
-                  </td>
-                  <td className="px-2 py-1.5 text-right text-slate-500 font-mono text-[11px]">
-                    {fmtTime(f.mtime)}
-                  </td>
-                  <td className="px-2 py-1.5 text-right">
-                    <a
-                      href={api.taskOutputDownloadUrl(taskId, f.name)}
-                      download={f.name}
-                      className="text-cyan-400 hover:text-cyan-300"
-                    >
-                      ↓ 下载
-                    </a>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 100px 160px 80px',
+              gap: 8, padding: '8px 16px', fontSize: 'var(--t-xs)',
+              color: 'var(--fg-tertiary)', borderBottom: '1px solid var(--border-subtle)',
+              fontFamily: 'var(--font-mono)',
+            }}>
+              <span>文件</span>
+              <span style={{ textAlign: 'right' }}>大小</span>
+              <span style={{ textAlign: 'right' }}>修改时间</span>
+              <span style={{ textAlign: 'right' }}></span>
+            </div>
+            {sortedFiles.map((f) => (
+              <div key={f.name} style={{
+                display: 'grid', gridTemplateColumns: '1fr 100px 160px 80px',
+                gap: 8, padding: '8px 16px', alignItems: 'center',
+                borderBottom: '1px solid var(--border-subtle)',
+                fontSize: 'var(--t-xs)',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <code style={{
+                    fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{f.name}</code>
+                  {f.is_lora && <span className="badge badge-ok">LoRA</span>}
+                </div>
+                <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)' }}>{fmtBytes(f.size)}</span>
+                <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)' }}>{fmtTime(f.mtime)}</span>
+                <span style={{ textAlign: 'right' }}>
+                  <a href={api.taskOutputDownloadUrl(taskId, f.name)} download={f.name}
+                    style={{ color: 'var(--accent)', textDecoration: 'none', fontSize: 'var(--t-xs)' }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
+                  >下载</a>
+                </span>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Confirm dialog — 替代 native window.confirm，破坏性操作专用
-// ---------------------------------------------------------------------------
+// ── ConfirmDialog ───────────────────────────────────────────────────────────
 
 function ConfirmDialog({
-  title,
-  message,
-  confirmLabel = '确认',
-  cancelLabel = '取消',
-  danger = false,
-  busy = false,
-  onConfirm,
-  onCancel,
+  title, message, confirmLabel = '确认', cancelLabel = '取消', danger = false, busy = false,
+  onConfirm, onCancel,
 }: {
-  title: string
-  message: React.ReactNode
-  confirmLabel?: string
-  cancelLabel?: string
-  danger?: boolean
-  busy?: boolean
-  onConfirm: () => void
-  onCancel: () => void
+  title: string; message: React.ReactNode; confirmLabel?: string; cancelLabel?: string
+  danger?: boolean; busy?: boolean; onConfirm: () => void; onCancel: () => void
 }) {
   return (
-    <div
-      onClick={onCancel}
-      className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="bg-slate-900 border border-slate-700 rounded-lg shadow-2xl w-full max-w-md"
-      >
-        <header className="px-4 py-3 border-b border-slate-700">
-          <h3 className="text-sm font-semibold text-slate-200">{title}</h3>
+    <div onClick={onCancel} style={{
+      position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.6)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 'var(--r-lg)',
+        boxShadow: 'var(--sh-xl)',
+        width: '100%', maxWidth: 420,
+      }}>
+        <header style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <h3 style={{ margin: 0, fontSize: 'var(--t-md)', fontWeight: 600, color: 'var(--fg-primary)' }}>{title}</h3>
         </header>
-        <div className="px-4 py-3 text-xs text-slate-300">{message}</div>
-        <footer className="px-4 py-3 border-t border-slate-700 flex items-center gap-2 justify-end text-xs">
-          <button
-            onClick={onCancel}
-            disabled={busy}
-            className="px-3 py-1.5 rounded text-slate-400 hover:text-slate-200 disabled:opacity-50"
-          >
-            {cancelLabel}
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={busy}
-            className={
-              'px-3 py-1.5 rounded text-white disabled:opacity-50 ' +
-              (danger
-                ? 'bg-red-700 hover:bg-red-600'
-                : 'bg-cyan-600 hover:bg-cyan-500')
-            }
-          >
-            {busy ? '...' : confirmLabel}
-          </button>
+        <div style={{ padding: '14px 18px', fontSize: 'var(--t-sm)', color: 'var(--fg-secondary)' }}>{message}</div>
+        <footer style={{ padding: '12px 18px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} disabled={busy} className="btn btn-ghost btn-sm">{cancelLabel}</button>
+          <button onClick={onConfirm} disabled={busy}
+            className={danger ? 'btn btn-sm' : 'btn btn-primary btn-sm'}
+            style={danger ? { background: 'var(--err)', border: '1px solid var(--err)', color: 'var(--err-fg)' } : {}}
+          >{busy ? '...' : confirmLabel}</button>
         </footer>
       </div>
     </div>

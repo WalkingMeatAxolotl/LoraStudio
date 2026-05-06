@@ -28,9 +28,16 @@ else
     echo "[studio] 未发现 venv，正在创建 venv/ 并安装依赖（首次运行，可能需要几分钟）..."
     "$BOOTSTRAP_PY" -m venv venv || { echo "studio.sh: 创建 venv 失败" >&2; exit 1; }
     PYTHON="venv/bin/python"
-    "$PYTHON" -m pip install --upgrade pip || { echo "studio.sh: 升级 pip 失败" >&2; exit 1; }
+    "$PYTHON" -m pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ \
+        || { echo "studio.sh: 升级 pip 失败" >&2; exit 1; }
     if [ -f requirements.txt ]; then
-        "$PYTHON" -m pip install -r requirements.txt || { echo "studio.sh: pip install -r requirements.txt 失败" >&2; exit 1; }
+        echo "[studio] 安装 Python 依赖（如网络慢会自动切换国内源，可能需要几分钟）..."
+        if ! "$PYTHON" -m pip install -r requirements.txt; then
+            echo "[studio] pip install 失败，切换阿里云镜像重试..."
+            "$PYTHON" -m pip install -r requirements.txt \
+                -i https://mirrors.aliyun.com/pypi/simple/ \
+                || { echo "studio.sh: pip install 失败" >&2; exit 1; }
+        fi
     else
         echo "studio.sh: 找不到 requirements.txt，跳过依赖安装" >&2
     fi
@@ -38,3 +45,9 @@ fi
 
 echo "studio.sh: using $PYTHON"
 "$PYTHON" -m studio "$@"
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo "[studio] 退出码 $EXIT_CODE，请检查上方错误信息。"
+fi
+exit $EXIT_CODE

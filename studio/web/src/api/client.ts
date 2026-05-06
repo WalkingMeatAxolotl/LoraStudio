@@ -503,6 +503,22 @@ export interface LogResponse {
   size: number
 }
 
+/** /api/state — per-task monitor state written by the training process */
+export interface MonitorState {
+  step?: number
+  total_steps?: number
+  epoch?: number
+  total_epochs?: number
+  speed?: number          // it/s
+  start_time?: number     // unix seconds
+  losses?: Array<{ step: number; loss: number }>
+  lr_history?: Array<{ step: number; lr: number }>
+  samples?: Array<{ path: string; step?: number }>
+  config?: Record<string, string | number | boolean>
+  vram_used_gb?: number
+  vram_total_gb?: number
+}
+
 export interface TaskOutputFile {
   name: string
   size: number
@@ -1079,6 +1095,10 @@ export const api = {
       body: JSON.stringify({ ordered_ids: orderedIds }),
     }),
   getLog: (id: number) => req<LogResponse>(`/api/logs/${id}`),
+  getMonitorState: (taskId: number, maxPoints = 1500) =>
+    req<MonitorState>(`/api/state?task_id=${taskId}&max_points=${maxPoints}&_=${Date.now()}`),
+  sampleImageUrl: (filename: string, taskId: number) =>
+    `/samples/${filename}?task_id=${taskId}`,
 
   // Queue import / export ---------------------------------------------
   exportQueue: (ids?: number[]) => {

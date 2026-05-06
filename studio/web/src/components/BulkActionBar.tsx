@@ -1,30 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
+import TagAutocomplete from './TagAutocomplete'
 import { useToast } from './Toast'
 
 type ScopeKind = 'selected' | 'all'
 type Op = 'add' | 'remove' | 'replace' | 'dedupe'
 
 interface Props {
-  /** 当前缓存（key → tags），只读。 */
   cache: Map<string, string[]>
-  /** 选中的 keys。 */
   selectedKeys: string[]
-  /** 操作完成后把 (key → newTags) 的更新合并回缓存。 */
   onApply: (updates: Map<string, string[]>) => void
-  /** 自动补全候选（top tags）。 */
   tagSuggestions?: string[]
   defaultScope?: ScopeKind
-  /** 清空选择（外部给的 callback）。 */
   onClearSelection?: () => void
+  // filter/select controls (moved from sidebar)
+  filterTag: string
+  onFilterTagChange: (v: string) => void
+  totalCount: number
+  filteredCount: number
+  onSelectAll: () => void
 }
 
 export default function BulkActionBar({
-  cache,
-  selectedKeys,
-  onApply,
-  tagSuggestions = [],
-  defaultScope = 'selected',
-  onClearSelection,
+  cache, selectedKeys, onApply,
+  tagSuggestions = [], defaultScope = 'selected', onClearSelection,
+  filterTag, onFilterTagChange, totalCount, filteredCount, onSelectAll,
 }: Props) {
   const { toast } = useToast()
   const [openOp, setOpenOp] = useState<Op | null>(null)
@@ -35,16 +34,11 @@ export default function BulkActionBar({
   const [position, setPosition] = useState<'front' | 'back'>('front')
 
   const closePopover = () => {
-    setOpenOp(null)
-    setTagsInput('')
-    setOldTag('')
-    setNewTag('')
+    setOpenOp(null); setTagsInput(''); setOldTag(''); setNewTag('')
   }
 
-  const targetKeys = (): string[] => {
-    if (scope === 'selected') return selectedKeys
-    return Array.from(cache.keys())
-  }
+  const targetKeys = (): string[] =>
+    scope === 'selected' ? selectedKeys : Array.from(cache.keys())
 
   const parseTags = (raw: string): string[] =>
     raw.split(/[,，\n]/).map((t) => t.trim()).filter(Boolean)
@@ -52,25 +46,20 @@ export default function BulkActionBar({
   const apply = (op: Op) => {
     const keys = targetKeys()
     if (scope === 'selected' && keys.length === 0) {
-      toast('当前没有选中文件', 'error')
-      return
+      toast('当前没有选中文件', 'error'); return
     }
     const updates = new Map<string, string[]>()
 
     if (op === 'add' || op === 'remove') {
       const ts = parseTags(tagsInput)
-      if (ts.length === 0) {
-        toast('请输入至少一个 tag', 'error')
-        return
-      }
+      if (ts.length === 0) { toast('请输入至少一个 tag', 'error'); return }
       for (const k of keys) {
         const cur = cache.get(k) ?? []
         if (op === 'add') {
           const have = new Set(cur)
           const toAdd = ts.filter((t) => !have.has(t))
           if (toAdd.length === 0) continue
-          const next = position === 'front' ? [...toAdd, ...cur] : [...cur, ...toAdd]
-          updates.set(k, next)
+          updates.set(k, position === 'front' ? [...toAdd, ...cur] : [...cur, ...toAdd])
         } else {
           const drop = new Set(ts)
           const next = cur.filter((t) => !drop.has(t))
@@ -78,12 +67,8 @@ export default function BulkActionBar({
         }
       }
     } else if (op === 'replace') {
-      const o = oldTag.trim()
-      const n = newTag.trim()
-      if (!o || !n) {
-        toast('replace 需要 old / new', 'error')
-        return
-      }
+      const o = oldTag.trim(); const n = newTag.trim()
+      if (!o || !n) { toast('replace 需要 old / new', 'error'); return }
       for (const k of keys) {
         const cur = cache.get(k) ?? []
         if (!cur.includes(o)) continue
@@ -92,90 +77,138 @@ export default function BulkActionBar({
         for (const t of cur) {
           const out = t === o ? n : t
           if (seen.has(out)) continue
-          seen.add(out)
-          next.push(out)
+          seen.add(out); next.push(out)
         }
         updates.set(k, next)
       }
     } else if (op === 'dedupe') {
       for (const k of keys) {
         const cur = cache.get(k) ?? []
-        const seen = new Set<string>()
-        const next: string[] = []
-        for (const t of cur) {
-          if (seen.has(t)) continue
-          seen.add(t)
-          next.push(t)
-        }
+        const seen = new Set<string>(); const next: string[] = []
+        for (const t of cur) { if (seen.has(t)) continue; seen.add(t); next.push(t) }
         if (next.length !== cur.length) updates.set(k, next)
       }
     }
 
-    if (updates.size === 0) {
-      toast(`${op}：无改动`, 'success')
-      closePopover()
-      return
-    }
+    if (updates.size === 0) { toast(`${op}：无改动`, 'success'); closePopover(); return }
     onApply(updates)
     toast(`${op} 完成（${updates.size} 张待保存）`, 'success')
     closePopover()
   }
 
-  const scopeLabel =
-    scope === 'selected' ? `选中 ${selectedKeys.length}` : `全部 ${cache.size}`
   const isSelected = scope === 'selected'
   const opDisabled = isSelected && selectedKeys.length === 0
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-800/80 backdrop-blur px-3 py-2 flex flex-col gap-2 text-xs shrink-0">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-slate-400">范围</span>
+    <div style={{
+      borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+      background: 'var(--bg-surface)', padding: '8px 12px',
+      display: 'flex', flexDirection: 'column', gap: 6,
+      fontSize: 'var(--t-xs)', flexShrink: 0,
+    }}>
+      {/* Main row: filter + select + bulk ops */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        {/* Filter section */}
+        <TagAutocomplete
+          value={filterTag}
+          onChange={onFilterTagChange}
+          suggestions={tagSuggestions}
+          placeholder="搜索 tag（精确）"
+          style={{ width: 180 }}
+        />
+        {filterTag && (
+          <button
+            onClick={() => onFilterTagChange('')}
+            className="btn btn-ghost btn-sm"
+            style={{ padding: '2px 6px' }}
+          >
+            ✕
+          </button>
+        )}
+        <span style={{
+          color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)',
+          fontSize: 'var(--t-xs)', minWidth: 40,
+        }}>
+          {filterTag ? `${filteredCount}/${totalCount}` : totalCount}
+        </span>
+
+        <span style={{ color: 'var(--border-default)' }}>|</span>
+
+        {/* Selection section */}
+        <button
+          onClick={onSelectAll}
+          disabled={filteredCount === 0}
+          className="btn btn-ghost btn-sm"
+        >
+          全选
+        </button>
+        <button
+          onClick={onClearSelection}
+          disabled={selectedKeys.length === 0}
+          className="btn btn-ghost btn-sm"
+        >
+          清空 ({selectedKeys.length})
+        </button>
+
+        <span style={{ color: 'var(--border-default)' }}>|</span>
+
+        {/* Scope + bulk ops section */}
+        <span style={{ color: 'var(--fg-tertiary)' }}>范围</span>
         <select
           value={scope}
           onChange={(e) => setScope(e.target.value as ScopeKind)}
-          className="px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-xs"
+          className="input"
+          style={{ fontSize: 'var(--t-xs)', padding: '2px 8px' }}
         >
           <option value="selected">当前选中（{selectedKeys.length}）</option>
           <option value="all">全部图片</option>
         </select>
 
-        <span className="text-slate-700">|</span>
-        <BarBtn label="+ 加 tag" disabled={opDisabled} active={openOp === 'add'} onClick={() => setOpenOp(openOp === 'add' ? null : 'add')} />
-        <BarBtn label="- 删 tag" disabled={opDisabled} active={openOp === 'remove'} onClick={() => setOpenOp(openOp === 'remove' ? null : 'remove')} />
-        <BarBtn label="↔ replace" disabled={opDisabled} active={openOp === 'replace'} onClick={() => setOpenOp(openOp === 'replace' ? null : 'replace')} />
-        <BarBtn label="dedupe" disabled={opDisabled} onClick={() => apply('dedupe')} />
+        <span style={{ color: 'var(--border-default)' }}>|</span>
 
-        <span className="flex-1" />
-        <span className="text-slate-500">{scopeLabel}</span>
-        {onClearSelection && selectedKeys.length > 0 && (
-          <button
-            onClick={onClearSelection}
-            className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
-          >
-            ✕ 清空
-          </button>
+        <OpBtn label="+ 加 tag" active={openOp === 'add'} disabled={opDisabled}
+          onClick={() => setOpenOp(openOp === 'add' ? null : 'add')} />
+        <OpBtn label="- 删 tag" active={openOp === 'remove'} disabled={opDisabled}
+          onClick={() => setOpenOp(openOp === 'remove' ? null : 'remove')} />
+        <OpBtn label="↔ replace" active={openOp === 'replace'} disabled={opDisabled}
+          onClick={() => setOpenOp(openOp === 'replace' ? null : 'replace')} />
+        <OpBtn label="dedupe" disabled={opDisabled} onClick={() => apply('dedupe')} />
+
+        <span style={{ flex: 1 }} />
+
+        {selectedKeys.length > 0 && (
+          <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
+            已选 {selectedKeys.length} 张
+          </span>
         )}
       </div>
 
+      {/* Hint row */}
+      <div style={{ color: 'var(--fg-tertiary)', fontSize: '11px' }}>
+        alt+点击 = 查看大图并编辑 · 普通点击 = 多选
+      </div>
+
+      {/* Popover row */}
       {openOp && openOp !== 'dedupe' && (
         <div
-          className="rounded border border-slate-700 bg-slate-900/80 px-2 py-1.5 flex flex-wrap items-center gap-2"
+          style={{
+            borderRadius: 'var(--r-sm)', border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-sunken)', padding: '6px 10px',
+            display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6,
+          }}
           role="dialog"
           aria-label={`bulk-${openOp}`}
         >
           {(openOp === 'add' || openOp === 'remove') && (
-            <TagsField
-              value={tagsInput}
-              onChange={setTagsInput}
-              placeholder="tag1, tag2 (逗号分隔)"
-              suggestions={tagSuggestions}
-            />
+            <TagsField value={tagsInput} onChange={setTagsInput}
+              placeholder="tag1, tag2 (逗号分隔)" suggestions={tagSuggestions} />
           )}
           {openOp === 'add' && (
             <select
               value={position}
               onChange={(e) => setPosition(e.target.value as 'front' | 'back')}
-              className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs"
+              className="input"
+              style={{ fontSize: 'var(--t-xs)', padding: '2px 6px' }}
             >
               <option value="front">插到开头</option>
               <option value="back">追加到末尾</option>
@@ -184,40 +217,45 @@ export default function BulkActionBar({
           {openOp === 'replace' && (
             <>
               <TagsField value={oldTag} onChange={setOldTag} placeholder="old" suggestions={tagSuggestions} />
-              <span className="text-slate-500">→</span>
+              <span style={{ color: 'var(--fg-tertiary)' }}>→</span>
               <TagsField value={newTag} onChange={setNewTag} placeholder="new" suggestions={tagSuggestions} />
             </>
           )}
-          <button
-            onClick={() => apply(openOp)}
-            className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-xs"
-          >
-            执行
-          </button>
-          <button
-            onClick={closePopover}
-            className="px-2 py-1 rounded text-slate-500 hover:text-slate-200 text-xs ml-auto"
-            aria-label="关闭"
-          >
-            ✕
-          </button>
+          <button onClick={() => apply(openOp)} className="btn btn-primary btn-sm">执行</button>
+          <button onClick={closePopover} className="btn btn-ghost btn-sm" aria-label="关闭">✕</button>
         </div>
       )}
     </div>
   )
 }
 
-function BarBtn({ label, onClick, disabled, active }: { label: string; onClick: () => void; disabled?: boolean; active?: boolean }) {
+function OpBtn({ label, onClick, disabled, active }: {
+  label: string; onClick: () => void; disabled?: boolean; active?: boolean
+}) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className={
-        'px-2 py-0.5 rounded ' +
-        (active
-          ? 'bg-cyan-600 text-white'
-          : 'bg-slate-700 hover:bg-slate-600 text-slate-200 disabled:bg-slate-800 disabled:text-slate-500')
-      }
+      style={{
+        padding: '2px 8px', borderRadius: 'var(--r-sm)',
+        background: active ? 'var(--accent)' : 'var(--bg-overlay)',
+        border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
+        color: active ? 'var(--accent-fg)' : 'var(--fg-secondary)',
+        fontSize: 'var(--t-xs)', cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.4 : 1,
+      }}
+      onMouseEnter={(e) => {
+        if (!disabled && !active) {
+          (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'
+          ;(e.currentTarget as HTMLElement).style.color = 'var(--fg-primary)'
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!disabled && !active) {
+          (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)'
+          ;(e.currentTarget as HTMLElement).style.color = 'var(--fg-secondary)'
+        }
+      }}
     >
       {label}
     </button>
@@ -225,10 +263,7 @@ function BarBtn({ label, onClick, disabled, active }: { label: string; onClick: 
 }
 
 interface TagsFieldProps {
-  value: string
-  onChange: (v: string) => void
-  placeholder: string
-  suggestions: string[]
+  value: string; onChange: (v: string) => void; placeholder: string; suggestions: string[]
 }
 
 function TagsField({ value, onChange, placeholder, suggestions }: TagsFieldProps) {
@@ -240,9 +275,7 @@ function TagsField({ value, onChange, placeholder, suggestions }: TagsFieldProps
     return (m ? m[1] : value).trim().toLowerCase()
   })()
   const matches = tail
-    ? suggestions
-        .filter((s) => s.toLowerCase().includes(tail) && s.toLowerCase() !== tail)
-        .slice(0, 8)
+    ? suggestions.filter((s) => s.toLowerCase().includes(tail) && s.toLowerCase() !== tail).slice(0, 8)
     : []
 
   useEffect(() => {
@@ -255,35 +288,40 @@ function TagsField({ value, onChange, placeholder, suggestions }: TagsFieldProps
 
   const pick = (s: string) => {
     const head = value.replace(/([^,，\n]*)$/, '')
-    onChange(head + s)
-    setOpen(false)
+    onChange(head + s); setOpen(false)
   }
 
   return (
-    <div className="relative" ref={ref}>
+    <div style={{ position: 'relative' }} ref={ref}>
       <input
         value={value}
-        onChange={(e) => {
-          onChange(e.target.value)
-          setOpen(true)
-        }}
+        onChange={(e) => { onChange(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
         placeholder={placeholder}
-        className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs w-56"
+        className="input input-mono"
+        style={{ fontSize: 'var(--t-xs)', width: 180 }}
       />
       {open && matches.length > 0 && (
         <ul
-          className="absolute left-0 top-full mt-0.5 z-20 bg-slate-900 border border-slate-700 rounded shadow-lg max-h-44 overflow-y-auto min-w-[200px]"
+          style={{
+            position: 'absolute', left: 0, top: '100%', marginTop: 2, zIndex: 30,
+            background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--r-sm)', boxShadow: 'var(--sh-lg)',
+            maxHeight: 180, overflowY: 'auto', minWidth: 200,
+            listStyle: 'none', padding: '4px 0', margin: 0,
+          }}
           role="listbox"
         >
           {matches.map((s) => (
             <li
               key={s}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                pick(s)
+              onMouseDown={(e) => { e.preventDefault(); pick(s) }}
+              style={{
+                padding: '4px 10px', fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
+                color: 'var(--fg-primary)', cursor: 'pointer',
               }}
-              className="px-2 py-1 text-xs font-mono text-slate-200 hover:bg-slate-700 cursor-pointer"
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
             >
               {s}
             </li>

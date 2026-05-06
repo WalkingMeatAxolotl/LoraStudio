@@ -9,7 +9,7 @@ import {
 import BulkActionBar from '../../../components/BulkActionBar'
 import ImageGrid, { applySelection } from '../../../components/ImageGrid'
 import SaveBar from '../../../components/SaveBar'
-import TagAutocomplete from '../../../components/TagAutocomplete'
+import StepShell from '../../../components/StepShell'
 import TagEditor from '../../../components/TagEditor'
 import TagStatsPanel from '../../../components/TagStatsPanel'
 import { useToast } from '../../../components/Toast'
@@ -20,8 +20,6 @@ interface Ctx {
   activeVersion: Version | null
   reload: () => Promise<void>
 }
-
-const SCROLL_BOX = 'flex-1 min-h-0 overflow-y-auto pr-1'
 
 const keyOf = (folder: string, name: string) => `${folder}/${name}`
 
@@ -42,11 +40,10 @@ export default function TagEditPage() {
   const { toast } = useToast()
   const versionId = activeVersion?.id ?? null
 
-  // 缓存模型：所有图片的 caption 全在内存
   const [cache, setCache] = useState<Map<string, string[]>>(new Map())
   const [initial, setInitial] = useState<Map<string, string[]>>(new Map())
   const [meta, setMeta] = useState<Map<string, CaptionMeta>>(new Map())
-  const [keys, setKeys] = useState<string[]>([]) // 保持原始顺序
+  const [keys, setKeys] = useState<string[]>([])
 
   const [activeKey, setActiveKey] = useState<string>('')
   const [sel, setSel] = useState<Set<string>>(new Set())
@@ -66,39 +63,28 @@ export default function TagEditPage() {
         m.set(k, { folder: it.folder, name: it.name, format: it.format })
         ks.push(k)
       }
-      setCache(c)
-      setInitial(new Map(c))
-      setMeta(m)
-      setKeys(ks)
-    } catch (e) {
-      toast(String(e), 'error')
-    }
+      setCache(c); setInitial(new Map(c)); setMeta(m); setKeys(ks)
+    } catch (e) { toast(String(e), 'error') }
   }, [project.id, versionId, toast])
 
-  useEffect(() => {
-    void reloadCache()
-  }, [reloadCache])
+  useEffect(() => { void reloadCache() }, [reloadCache])
 
-  // SSE：打标 job 完成 → 重拉
   useEventStream((evt) => {
     if (
       evt.type === 'version_state_changed' &&
       versionId != null &&
       evt.version_id === versionId
     ) {
-      void reloadCache()
-      void reload()
+      void reloadCache(); void reload()
     } else if (
       evt.type === 'job_state_changed' &&
       evt.project_id === project.id &&
       (evt.status === 'done' || evt.status === 'failed')
     ) {
-      void reloadCache()
-      void reload()
+      void reloadCache(); void reload()
     }
   })
 
-  // dirty 检测
   const dirtyKeys = useMemo(() => {
     const out: string[] = []
     for (const k of keys) {
@@ -110,18 +96,13 @@ export default function TagEditPage() {
   }, [cache, initial, keys])
   const dirty = dirtyKeys.length > 0
 
-  // beforeunload 阻止丢失改动
   useEffect(() => {
     if (!dirty) return
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault()
-      e.returnValue = ''
-    }
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
   }, [dirty])
 
-  // filter「含 tag」：直接基于 cache
   const filteredKeys = useMemo(() => {
     const f = filterTag.trim()
     if (!f) return keys
@@ -137,13 +118,7 @@ export default function TagEditPage() {
           name: k,
           thumbUrl:
             activeVersion != null
-              ? api.versionThumbUrl(
-                  project.id,
-                  activeVersion.id,
-                  'train',
-                  m.name,
-                  m.folder
-                )
+              ? api.versionThumbUrl(project.id, activeVersion.id, 'train', m.name, m.folder)
               : '',
           meta: tags.slice(0, 5).join(', '),
         }
@@ -151,7 +126,6 @@ export default function TagEditPage() {
     [filteredKeys, meta, cache, project.id, activeVersion]
   )
 
-  // 选中（在当前 filteredKeys 范围内）
   const selectedKeys = useMemo(
     () => filteredKeys.filter((k) => sel.has(k)),
     [filteredKeys, sel]
@@ -159,7 +133,6 @@ export default function TagEditPage() {
   const navKeys = selectedKeys.length > 0 ? selectedKeys : filteredKeys
   const activeIndex = activeKey ? navKeys.indexOf(activeKey) : -1
 
-  // 自动补全候选 = cache 里出现过的所有 tag
   const tagSuggestions = useMemo(() => {
     const set = new Set<string>()
     for (const tags of cache.values()) for (const t of tags) set.add(t)
@@ -172,26 +145,20 @@ export default function TagEditPage() {
       for (const k of keys) {
         if ((cache.get(k) ?? []).includes(tag)) matched.add(k)
       }
-      setSel(matched)
-      setAnchor(null)
+      setSel(matched); setAnchor(null)
       toast(`已选含「${tag}」的 ${matched.size} 张`, 'success')
     },
     [keys, cache, toast]
   )
 
   if (!activeVersion) {
-    return <p className="text-slate-500">请先选择 / 创建一个版本</p>
+    return <p style={{ color: 'var(--fg-tertiary)', padding: 24 }}>请先选择 / 创建一个版本</p>
   }
 
-  // 普通点击 = 多选 toggle（含 shift 区间）；alt+click = 单图查看
   const handleClick = (key: string, e: React.MouseEvent) => {
-    if (e.altKey) {
-      setActiveKey(key)
-      return
-    }
+    if (e.altKey) { setActiveKey(key); return }
     const r = applySelection(sel, key, e, filteredKeys, anchor)
-    setSel(r.next)
-    setAnchor(r.anchor)
+    setSel(r.next); setAnchor(r.anchor)
   }
 
   const navActive = (delta: number) => {
@@ -201,17 +168,13 @@ export default function TagEditPage() {
     setActiveKey(navKeys[next])
   }
 
-  // 单图编辑：chip 增减 / textarea 失焦直接写入缓存
   const updateActiveTags = (tags: string[]) => {
     if (!activeKey) return
     setCache((prev) => {
-      const next = new Map(prev)
-      next.set(activeKey, [...tags])
-      return next
+      const next = new Map(prev); next.set(activeKey, [...tags]); return next
     })
   }
 
-  // 批量操作 → 合并 updates 进 cache
   const applyBulkUpdates = (updates: Map<string, string[]>) => {
     setCache((prev) => {
       const next = new Map(prev)
@@ -220,7 +183,6 @@ export default function TagEditPage() {
     })
   }
 
-  // 顶栏「保存」 = 把 dirtyKeys commit 到后端（自动备份）
   const onSave = async () => {
     if (!dirty || versionId == null) return
     const items: CommitItem[] = dirtyKeys.map((k) => {
@@ -229,19 +191,13 @@ export default function TagEditPage() {
     })
     try {
       const r = await api.commitCaptions(project.id, versionId, items)
-      // 更新 initial = 当前 cache
       setInitial(new Map(cache))
       toast(`已保存 ${r.written} 张，还原点 ${r.snapshot.id}`, 'success')
       void reload()
-    } catch (e) {
-      toast(String(e), 'error')
-    }
+    } catch (e) { toast(String(e), 'error') }
   }
 
-  const onAfterRestore = async () => {
-    await reloadCache()
-    await reload()
-  }
+  const onAfterRestore = async () => { await reloadCache(); await reload() }
 
   const stats = activeVersion.stats
   const trainTotal = stats?.train_image_count ?? 0
@@ -251,195 +207,147 @@ export default function TagEditPage() {
   const activeMeta = activeKey ? meta.get(activeKey) : undefined
   const activeFolder = activeMeta?.folder ?? ''
   const activeName = activeMeta?.name ?? ''
-  const activeFormat = activeMeta?.format ?? 'none'
   const activeTags = activeKey ? cache.get(activeKey) ?? [] : []
 
+  const isEditing = Boolean(activeKey)
+
   return (
-    <div className="flex flex-col h-full w-full gap-2">
-      {/* 顶栏 1：标题 + 进度 + 保存 */}
-      <header className="flex items-center gap-2 flex-wrap shrink-0">
-        <h2 className="text-base font-semibold">④ 标签编辑</h2>
-        {stats && (
-          <span
-            className={
-              'text-xs px-1.5 py-0.5 rounded ' +
-              (allTagged
-                ? 'bg-emerald-700/40 text-emerald-200'
-                : 'bg-slate-700/60 text-slate-300')
-            }
-          >
-            {taggedTotal}/{trainTotal} 已打标
-          </span>
-        )}
-        <span className="text-xs text-slate-500">
-          编辑只改本地缓存 · 「保存」一键写盘并自动生成还原点
-        </span>
-        <span className="flex-1" />
-        <SaveBar
-          pid={project.id}
-          vid={activeVersion.id}
-          dirtyCount={dirtyKeys.length}
-          onSave={onSave}
-          onAfterRestore={onAfterRestore}
-        />
-      </header>
+    <StepShell
+      idx={4}
+      title="标签编辑"
+      subtitle="批量编辑标签 · 暂存本地 · 保存后写盘"
+      actions={
+        <>
+          {stats && (
+            <span className={allTagged ? 'badge badge-ok' : 'badge badge-neutral'}>
+              {taggedTotal}/{trainTotal} 已打标
+            </span>
+          )}
+          <SaveBar
+            pid={project.id}
+            vid={activeVersion.id}
+            dirtyCount={dirtyKeys.length}
+            onSave={onSave}
+            onAfterRestore={onAfterRestore}
+          />
+        </>
+      }
+    >
+      {/*
+       * 统一布局：右侧面板宽度在两种模式下恒定（flex: 0 0 32%），
+       * BulkActionBar 始终在右侧面板内，切换模式时不改变宽度 → 无抖动。
+       *
+       * 普通模式:   [图片网格 flex:1] [右侧面板 32%]
+       * 编辑模式:   [大图预览 flex:1] [图片网格 flex:1.5] [右侧面板 32%]
+       */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 10 }}>
 
-      {/* 顶栏 2：批量操作 */}
-      <BulkActionBar
-        cache={cache}
-        selectedKeys={selectedKeys}
-        onApply={applyBulkUpdates}
-        tagSuggestions={tagSuggestions}
-        defaultScope="selected"
-        onClearSelection={() => setSel(new Set())}
-      />
-
-      {/* 主体：左 40%（grid + stats）+ 右 60%（单图编辑） */}
-      <div className="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-2 flex-1 min-h-0">
-        <div className="grid grid-rows-[3fr_2fr] gap-2 min-h-0 min-w-0">
-          {/* 全部图片 */}
-          <section className="rounded-lg border border-slate-700 bg-slate-800/30 flex flex-col min-h-0 overflow-hidden">
-            <header className="px-2 py-1.5 border-b border-slate-700 flex flex-col gap-1.5 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-100">🖼 全部图片</span>
-                <span className="text-slate-500">
-                  {filterTag
-                    ? `${filteredKeys.length}/${keys.length}`
-                    : `${keys.length}`}
-                </span>
-                <span
-                  className="text-[10px] text-slate-500"
-                  title="普通点击 = 多选切换；alt+点击 = 单图查看"
-                >
-                  alt+点击=查看
-                </span>
-                <span className="flex-1" />
-                <button
-                  onClick={() => setSel(new Set(filteredKeys))}
-                  disabled={filteredKeys.length === 0}
-                  className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
-                >
-                  全选
-                </button>
-                <button
-                  onClick={() => setSel(new Set())}
-                  disabled={sel.size === 0}
-                  className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
-                >
-                  清空
-                </button>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-slate-500">🔍</span>
-                <TagAutocomplete
-                  value={filterTag}
-                  onChange={setFilterTag}
-                  suggestions={tagSuggestions}
-                  placeholder="含 tag（精确）"
-                  className="flex-1"
-                />
-                {filterTag && (
-                  <button
-                    onClick={() => setFilterTag('')}
-                    className="px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-300"
-                    aria-label="清除 filter"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            </header>
-            <div className={`${SCROLL_BOX} p-2`}>
-              <ImageGrid
-                items={captionItems}
-                selected={sel}
-                onSelect={handleClick}
-                ariaLabel="tag-edit-grid"
-                emptyHint={
-                  filterTag
-                    ? `没有图含「${filterTag}」`
-                    : '还没有图。先「② 筛选」拷过来 + 「③ 打标」生成 caption。'
-                }
+        {/* ── 大图预览（仅编辑模式）── */}
+        {isEditing && (
+          <section style={{
+            flex: 1,
+            borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
+            minWidth: 0, overflow: 'hidden',
+          }}>
+            {/* 文件名 header */}
+            <div style={{
+              padding: '8px 12px', borderBottom: '1px solid var(--border-subtle)',
+              flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)' }}>单图编辑</span>
+              <code style={{
+                flex: 1, minWidth: 0, fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
+                color: 'var(--fg-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {activeFolder}/{activeName}
+              </code>
+            </div>
+            {/* 图片区：position:relative + absolute img 保证可靠填充 */}
+            <div style={{
+              flex: 1, position: 'relative', background: 'var(--bg-sunken)',
+            }}>
+              <img
+                key={activeKey}
+                src={api.versionThumbUrl(project.id, activeVersion.id, 'train', activeName, activeFolder, 800)}
+                alt={activeName}
+                style={{
+                  position: 'absolute', inset: 8,
+                  width: 'calc(100% - 16px)', height: 'calc(100% - 16px)',
+                  objectFit: 'contain', borderRadius: 'var(--r-sm)',
+                }}
               />
             </div>
           </section>
+        )}
 
-          {/* tag 统计 */}
-          <div className="min-h-0 min-w-0 flex">
+        {/* ── 图片网格（始终显示）── */}
+        <section style={{
+          flex: isEditing ? 1.5 : 1,
+          borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+          background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
+          minWidth: 0, overflow: 'hidden',
+        }}>
+          {/* 只有 inner div 可滚动，外层 section overflow:hidden 防整页滚 */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+            <ImageGrid
+              items={captionItems}
+              selected={sel}
+              onSelect={handleClick}
+              ariaLabel="tag-edit-grid"
+              emptyHint={filterTag ? `没有图含「${filterTag}」` : '还没有图。请先在筛选和打标步骤完成操作。'}
+            />
+          </div>
+        </section>
+
+        {/* ── 右侧面板：宽度恒定，BulkActionBar 永远在这里 ── */}
+        <div style={{
+          flex: '0 0 32%', display: 'flex', flexDirection: 'column', gap: 10,
+          minWidth: 0,
+        }}>
+          <BulkActionBar
+            cache={cache}
+            selectedKeys={selectedKeys}
+            onApply={applyBulkUpdates}
+            tagSuggestions={tagSuggestions}
+            defaultScope="selected"
+            onClearSelection={() => setSel(new Set())}
+            filterTag={filterTag}
+            onFilterTagChange={setFilterTag}
+            totalCount={keys.length}
+            filteredCount={filteredKeys.length}
+            onSelectAll={() => setSel(new Set(filteredKeys))}
+          />
+
+          {isEditing ? (
+            /* 标签编辑器 */
+            <section style={{
+              flex: 1,
+              borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
+              background: 'var(--bg-surface)', padding: 10,
+              display: 'flex', flexDirection: 'column', gap: 8,
+              minHeight: 0, overflow: 'hidden',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                <button onClick={() => navActive(-1)} disabled={navKeys.length === 0} aria-label="上一张" className="btn btn-secondary btn-sm">◀</button>
+                <span style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', flex: 1, textAlign: 'center' }}>
+                  {activeIndex >= 0 ? `${activeIndex + 1} / ${navKeys.length}` : `– / ${navKeys.length}`}
+                </span>
+                <button onClick={() => navActive(1)} disabled={navKeys.length === 0} aria-label="下一张" className="btn btn-secondary btn-sm">▶</button>
+                <button onClick={() => setActiveKey('')} className="btn btn-ghost btn-sm" aria-label="关闭编辑" style={{ marginLeft: 4 }}>✕</button>
+              </div>
+              <TagEditor tags={activeTags} onChange={updateActiveTags} />
+            </section>
+          ) : (
+            /* 标签统计面板 */
             <TagStatsPanel
               cache={cache}
               selectedKeys={selectedKeys}
               onPickTag={handlePickTag}
             />
-          </div>
-        </div>
-
-        {/* 右栏：单图编辑（图 + 切换 + 编辑） */}
-        <section className="rounded-lg border border-slate-700 bg-slate-800/40 p-3 min-h-0 min-w-0 flex flex-col">
-          <h3 className="text-sm font-semibold text-slate-100 mb-2 shrink-0 flex items-center gap-2 flex-wrap">
-            <span>📝 单图编辑</span>
-            {activeName && (
-              <code className="text-xs font-mono text-slate-400 truncate">
-                {activeFolder}/{activeName}
-              </code>
-            )}
-            {activeName && (
-              <span className="text-[10px] text-slate-500">.{activeFormat}</span>
-            )}
-          </h3>
-          {activeName ? (
-            <div className="grid grid-rows-[3fr_auto_2fr] gap-2 flex-1 min-h-0">
-              <div className="bg-black/40 rounded flex items-center justify-center min-h-0">
-                <img
-                  src={api.versionThumbUrl(
-                    project.id,
-                    activeVersion.id,
-                    'train',
-                    activeName,
-                    activeFolder,
-                    768
-                  )}
-                  alt={activeName}
-                  className="max-w-full max-h-full object-contain"
-                />
-              </div>
-              <div className="flex items-center justify-center gap-2 text-xs shrink-0">
-                <button
-                  onClick={() => navActive(-1)}
-                  disabled={navKeys.length === 0}
-                  aria-label="上一张"
-                  className="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
-                >
-                  ◀
-                </button>
-                <span className="text-[11px] text-slate-400 tabular-nums w-32 text-center">
-                  {activeIndex >= 0
-                    ? `${activeIndex + 1} / ${navKeys.length}`
-                    : `– / ${navKeys.length}`}
-                  <span className="text-slate-600 ml-1">
-                    {selectedKeys.length > 0 ? '(选中)' : '(全部)'}
-                  </span>
-                </span>
-                <button
-                  onClick={() => navActive(1)}
-                  disabled={navKeys.length === 0}
-                  aria-label="下一张"
-                  className="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
-                >
-                  ▶
-                </button>
-              </div>
-              <div className="flex flex-col min-h-0">
-                <TagEditor tags={activeTags} onChange={updateActiveTags} />
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs text-slate-500">
-              alt + 点击左侧任一图查看 / 编辑标签（普通点击是多选）
-            </p>
           )}
-        </section>
+        </div>
       </div>
-    </div>
+    </StepShell>
   )
 }

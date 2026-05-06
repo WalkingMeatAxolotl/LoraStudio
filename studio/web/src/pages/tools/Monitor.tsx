@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type HealthResponse, type Task } from '../../api/client'
+import MonitorDashboard from '../../components/MonitorDashboard'
 
-/** PP6.1 — 工具 / 监控：自动锁当前 running task；下拉切换历史任务。
- *
- * 默认：URL 没 ?task_id → 选 running 的；没有 running → 选最近一次完成的；
- * 都没有 → 显示空 monitor（iframe 仍能加载，state 全空）。
- */
 export default function MonitorPage() {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -17,7 +13,6 @@ export default function MonitorPage() {
     api.listQueue().then(setTasks).catch(() => setTasks([]))
   }, [])
 
-  // 自动锁定：running > 最近 done/failed/canceled
   const defaultTaskId = useMemo<number | null>(() => {
     const running = tasks.find((t) => t.status === 'running')
     if (running) return running.id
@@ -32,33 +27,55 @@ export default function MonitorPage() {
   }, [defaultTaskId, taskId])
 
   const ok = !error && health?.status === 'ok'
-  const iframeSrc = taskId
-    ? `/monitor_smooth.html?task_id=${taskId}`
-    : '/monitor_smooth.html'
+  const selectedTask = tasks.find((t) => t.id === taskId)
 
   return (
-    <div className="flex flex-col h-full gap-3">
-      <section className="rounded-xl border border-slate-700 bg-slate-800/40 px-5 py-3 flex items-center gap-3 flex-wrap">
-        <span
-          className={`inline-block w-2 h-2 rounded-full ${
-            ok ? 'bg-emerald-400' : 'bg-red-400'
-          }`}
-        />
-        <span className={ok ? 'text-emerald-400' : 'text-red-400'}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+      {/* 顶部状态栏 */}
+      <section style={{
+        borderRadius: 'var(--r-md)',
+        border: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)',
+        padding: '10px 16px',
+        display: 'flex', alignItems: 'center', gap: 12,
+        fontSize: 'var(--t-xs)', flexShrink: 0, flexWrap: 'wrap',
+        margin: '0 0 12px 0',
+      }}>
+        {/* 健康指示 */}
+        <span style={{
+          display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+          background: ok ? 'var(--ok)' : 'var(--err)',
+          boxShadow: ok ? '0 0 6px var(--ok)' : '0 0 6px var(--err)',
+        }} />
+        <span style={{
+          fontWeight: 600,
+          color: ok ? 'var(--ok)' : 'var(--err)',
+          fontFamily: 'var(--font-mono)',
+        }}>
           {error ? 'offline' : health?.status ?? '...'}
         </span>
         {health && (
-          <span className="text-slate-500 text-sm">v{health.version}</span>
+          <span style={{ color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>
+            v{health.version}
+          </span>
         )}
 
-        <span className="text-slate-700">|</span>
-        <label className="text-xs text-slate-400">任务</label>
+        <span style={{ color: 'var(--border-subtle)' }}>|</span>
+
+        {/* 任务选择 */}
+        <span style={{ color: 'var(--fg-tertiary)' }}>任务</span>
         <select
           value={taskId ?? ''}
-          onChange={(e) =>
-            setTaskId(e.target.value === '' ? null : Number(e.target.value))
-          }
-          className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs"
+          onChange={(e) => setTaskId(e.target.value === '' ? null : Number(e.target.value))}
+          style={{
+            padding: '4px 10px',
+            borderRadius: 'var(--r-sm)',
+            background: 'var(--bg-sunken)',
+            border: '1px solid var(--border-subtle)',
+            fontSize: 'var(--t-xs)',
+            color: 'var(--fg-primary)',
+            outline: 'none',
+          }}
         >
           <option value="">（最新 running，没有则显示空）</option>
           {tasks.map((t) => (
@@ -68,23 +85,56 @@ export default function MonitorPage() {
           ))}
         </select>
 
-        <span className="flex-1" />
-        <a
-          href={iframeSrc}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-slate-400 hover:text-slate-200"
-        >
-          独立窗口打开 ↗
-        </a>
+        {selectedTask && (
+          <>
+            <span style={{ color: 'var(--border-subtle)' }}>|</span>
+            <span className={statusBadge(selectedTask.status)}>
+              {statusLabel(selectedTask.status)}
+            </span>
+          </>
+        )}
+
+        <span style={{ flex: 1 }} />
       </section>
 
-      <iframe
-        key={iframeSrc} /* 切换 task 时强制重新加载 */
-        src={iframeSrc}
-        title="Anima Training Monitor"
-        className="flex-1 w-full rounded-xl border border-slate-700 bg-black/30 min-h-0"
-      />
+      {/* 监控主体 */}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {taskId !== null ? (
+          <MonitorDashboard taskId={taskId} />
+        ) : (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            height: '100%', color: 'var(--fg-tertiary)', fontSize: 'var(--t-sm)',
+            flexDirection: 'column', gap: 8,
+          }}>
+            <span style={{ fontSize: 'var(--t-xl)' }}>📊</span>
+            <span>暂无训练任务</span>
+            <span style={{ fontSize: 'var(--t-xs)' }}>启动训练后将自动显示监控数据</span>
+          </div>
+        )}
+      </div>
     </div>
   )
+}
+
+function statusBadge(status: string): string {
+  switch (status) {
+    case 'running': return 'badge badge-accent'
+    case 'pending': return 'badge badge-neutral'
+    case 'done': return 'badge badge-ok'
+    case 'failed': return 'badge badge-err'
+    case 'canceled': return 'badge badge-neutral'
+    default: return 'badge badge-neutral'
+  }
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case 'running': return '运行中'
+    case 'pending': return '排队中'
+    case 'done': return '已完成'
+    case 'failed': return '失败'
+    case 'canceled': return '已取消'
+    default: return status
+  }
 }
