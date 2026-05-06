@@ -10,8 +10,10 @@ interface Props {
   onChange: (v: unknown) => void
   /** disabled 状态（自动控制字段灰显 readonly）。 */
   disabled?: boolean
-  /** 自定义 disabled 徽章文字；不传则用默认「自动 · 项目控制」。 */
-  disabledHint?: string
+  /** 字段标签后的小徽章（如「自动 · 全局设置」/「自动 · 项目设置」）。
+   * 与 disabled 解耦：可以让字段保持可编辑只挂个徽章作信息提示，也可以
+   * 配合 disabled 来表达「这字段被自动填且不让你改」。 */
+  hint?: string
 }
 
 // input 覆盖 .input 默认值（更紧凑；背景用 canvas 而不是 surface）
@@ -28,14 +30,13 @@ const FieldHint = ({ text }: { text: string }) => (
 
 /** 单个表单字段，按 control kind 分发渲染。 */
 export default function Field({
-  name, prop, value, onChange, disabled = false, disabledHint,
+  name, prop, value, onChange, disabled = false, hint,
 }: Props) {
   const kind = controlKind(prop)
   const label = fieldLabel(name)
   const help = prop.description
-  const hintNode = disabled
-    ? <FieldHint text={disabledHint ?? '自动 · 项目控制'} />
-    : null
+  const hintText = hint ?? (disabled ? '自动 · 项目控制' : null)
+  const hintNode = hintText ? <FieldHint text={hintText} /> : null
   void name
 
   // bool ----------------------------------------------------------------

@@ -101,6 +101,15 @@ export default function TrainPage() {
     for (const f of GLOBAL_MODEL_FIELDS) h[f] = '自动 · 全局设置'
     return h
   }, [])
+  // 项目特定字段（data_dir / reg_data_dir / output_dir 等）：值由项目预填，但
+  // 不锁定，挂「自动 · 项目设置」徽章让用户知道这是预填的，不是预设里来的。
+  const autoHints = useMemo(() => {
+    const h: Record<string, string> = {}
+    for (const f of configResp?.project_specific_fields ?? []) {
+      if (!GLOBAL_MODEL_FIELDS.includes(f)) h[f] = '自动 · 项目设置'
+    }
+    return h
+  }, [configResp?.project_specific_fields])
 
   const dirty = useMemo(() => {
     if (!config) return false
@@ -376,6 +385,7 @@ export default function TrainPage() {
                   onChange={setConfig}
                   disabledFields={disabledFields}
                   disabledHints={disabledHints}
+                  autoHints={autoHints}
                 />
               </section>
             ) : (
