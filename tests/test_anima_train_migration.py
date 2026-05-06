@@ -48,6 +48,28 @@ def test_legacy_cli_aliases_still_work(at, monkeypatch: pytest.MonkeyPatch) -> N
     assert args.learning_rate == 5e-5
 
 
+def test_args_has_t5_tokenizer_path_not_legacy_t5_tokenizer(
+    at, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """回归：args 字段名是 t5_tokenizer_path，绝不能再出现 args.t5_tokenizer。
+
+    Why: anima_train.py 路径解析阶段曾写成
+    `getattr(args, "t5_tokenizer", "")`，访问已迁移走的旧名，恒返回 ""，
+    把 yaml/CLI 填好的 t5_tokenizer_path 覆盖成空，导致 T5Tokenizer 静默
+    fallback 到联网下载 google/t5-v1_1-xxl —— 离线/弱网环境直接挂。
+    """
+    monkeypatch.setattr(sys, "argv", [
+        "anima_train.py",
+        "--t5-tokenizer", "/x/t5",
+    ])
+    args = at.parse_args()
+    assert args.t5_tokenizer_path == "/x/t5"
+    assert not hasattr(args, "t5_tokenizer"), (
+        "args 不应有 t5_tokenizer 属性 —— schema 字段是 t5_tokenizer_path，"
+        "任何 getattr(args, 't5_tokenizer', ...) 都会拿到默认值并清空路径"
+    )
+
+
 def test_cli_only_flags_present(at, monkeypatch: pytest.MonkeyPatch) -> None:
     """schema 之外的 CLI-only 开关必须保留。"""
     monkeypatch.setattr(sys, "argv", [

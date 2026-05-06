@@ -1870,7 +1870,7 @@ def main():
     args.transformer_path = resolve_path_best_effort(args.transformer_path, bases)
     args.vae_path = resolve_path_best_effort(args.vae_path, bases)
     args.text_encoder_path = resolve_path_best_effort(args.text_encoder_path, bases)
-    args.t5_tokenizer_path = resolve_path_best_effort(getattr(args, "t5_tokenizer", ""), bases)
+    args.t5_tokenizer_path = resolve_path_best_effort(args.t5_tokenizer_path, bases)
     args.data_dir = resolve_path_best_effort(args.data_dir, bases)
     reg_data_dir = getattr(args, "reg_data_dir", "") or ""
     if reg_data_dir:
