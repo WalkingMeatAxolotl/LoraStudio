@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, type Task, type TaskStatus } from '../api/client'
+import { api, type MonitorState, type Task, type TaskStatus } from '../api/client'
 import StepShell from '../components/StepShell'
 import { useToast } from '../components/Toast'
 import { useEventStream } from '../lib/useEventStream'
@@ -91,6 +91,11 @@ export default function QueuePage() {
   const reloadTimer = useRef<number | null>(null)
   const { toast } = useToast()
   const navigate = useNavigate()
+  // 给「运行中」那一行的进度条用：拉当前 running task 的 monitor state，
+  // 用 step / total_steps 算实际百分比。Topbar 胶囊也用同一个数据源，俩地方
+  // 会显示一致。
+  const [monitor, setMonitor] = useState<MonitorState | null>(null)
+  const [monitorTaskId, setMonitorTaskId] = useState<number | null>(null)
 
   const reload = useCallback(async () => {
     try { setTasks(await api.listQueue()); setError(null) }
@@ -113,6 +118,36 @@ export default function QueuePage() {
     const tick = window.setInterval(() => setTasks((ts) => [...ts]), 2000)
     return () => window.clearInterval(tick)
   }, [tasks])
+
+  // ── 拉运行中任务的 monitor state，给进度条用 ──
+  // 当前最多一个 running（队列串行）。拉 monitor.step / total_steps 比 elapsed
+  // 时长精确得多，跟 Topbar 胶囊数据源一致。
+  const runningTaskId = useMemo(
+    () => tasks.find((t) => t.status === 'running')?.id ?? null,
+    [tasks],
+  )
+  useEffect(() => {
+    if (!runningTaskId) {
+      setMonitor(null)
+      setMonitorTaskId(null)
+      return
+    }
+    let cancelled = false
+    const fetchOnce = async () => {
+      try {
+        const m = await api.getMonitorState(runningTaskId)
+        if (!cancelled) {
+          setMonitor(m)
+          setMonitorTaskId(runningTaskId)
+        }
+      } catch {
+        if (!cancelled) setMonitor(null)
+      }
+    }
+    void fetchOnce()
+    const timer = window.setInterval(() => void fetchOnce(), 3000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [runningTaskId])
 
   const clearDone = async () => {
     const done = tasks.filter((t) => t.status === 'done')
@@ -278,10 +313,38 @@ export default function QueuePage() {
                       {isRunning ? (
                         <div className="flex flex-col gap-0.5">
                           <span className="font-mono text-fg-tertiary text-xs">
-                            {fmtDuration(t.started_at, null)}
+                            {(() => {
+                              // monitor 在这一行任务上有 step/total → 显示 step；
+                              // 否则 fallback 时长（采样阶段或非训练任务）。
+                              if (
+                                monitorTaskId === t.id &&
+                                monitor?.step != null &&
+                                monitor.total_steps != null &&
+                                monitor.total_steps > 0
+                              ) {
+                                return `step ${monitor.step.toLocaleString()} / ${monitor.total_steps.toLocaleString()}`
+                              }
+                              return fmtDuration(t.started_at, null)
+                            })()}
                           </span>
                           <div className="h-1 bg-overlay rounded-sm overflow-hidden">
-                            <div className="h-full bg-accent rounded-sm" style={{ width: '42%' }} />
+                            {(() => {
+                              const haveSteps =
+                                monitorTaskId === t.id &&
+                                monitor?.step != null &&
+                                monitor.total_steps != null &&
+                                monitor.total_steps > 0
+                              if (haveSteps) {
+                                const pct = Math.max(
+                                  0,
+                                  Math.min(100, (monitor!.step! / monitor!.total_steps!) * 100),
+                                )
+                                return <div className="h-full bg-accent rounded-sm" style={{ width: `${pct}%` }} />
+                              }
+                              // 没拿到 step（采样 baseline / 非训练 / 还没起来）→ 显示
+                              // 不定进度的细动画条，不假装百分比。
+                              return <div className="h-full bg-accent/40 rounded-sm animate-pulse" style={{ width: '20%' }} />
+                            })()}
                           </div>
                         </div>
                       ) : t.error_msg ? (
