@@ -110,7 +110,7 @@ function VersionPanel({ collapsed }: { collapsed: boolean }) {
   }
 
   return (
-    <div className="mx-1 rounded-md border border-subtle bg-overlay px-2 pt-2 pb-1.5 flex flex-col gap-1">
+    <div className="rounded-md border border-subtle bg-overlay px-2 pt-2 pb-1.5 flex flex-col gap-1">
       {/* Project name header */}
       <div className="px-0.5">
         <div className="font-semibold text-fg-primary text-sm">
@@ -197,12 +197,12 @@ function ProjectStepperNav({ pid, activeVid, currentStep, stage, collapsed }: {
 
   const linkCls = (active: boolean) => [
     'flex items-center gap-2.5 rounded-md text-sm no-underline transition-colors',
-    collapsed ? 'py-[7px] px-0 justify-center' : 'py-[7px] px-2.5 justify-start',
+    collapsed ? 'py-[7px] px-0 justify-center' : 'py-[7px] px-3 justify-start',
     active ? 'bg-surface text-fg-primary font-semibold shadow-sm' : 'text-fg-secondary font-normal hover:bg-overlay',
   ].join(' ')
 
   return (
-    <div className="flex flex-col gap-px px-1">
+    <div className="flex flex-col gap-px">
       {/* 概览 */}
       <Link
         to={`/projects/${pid}`}
