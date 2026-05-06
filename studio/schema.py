@@ -7,9 +7,10 @@
 
 约定：每个字段通过 `json_schema_extra={"group", "control", "show_when"?}`
 携带 UI 元信息。前端按 `group` 分区，按 `show_when` 做条件显示。
-"""
-from __future__ import annotations
 
+注意：不使用 `from __future__ import annotations`——Pydantic v2 + Python 3.12+
+在延迟求值模式下会将 typing._SpecialForm 当成 schema key，触发 AttributeError。
+"""
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
