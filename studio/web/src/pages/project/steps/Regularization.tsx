@@ -48,6 +48,9 @@ export default function RegularizationPage() {
 
   const [reg, setReg] = useState<RegStatus | null>(null)
   const [trainTags, setTrainTags] = useState<RegTagCount[]>([])
+  // excluded 既包含 train top-tag 上点掉的，也包含「自定义排除」输入框加的（这部分
+  // 在 train top-tag 列表里查不到）。后端不存这份选择，切页面回来需要按
+  // (project, version) 在 localStorage 恢复，不然用户加的自定义 tag 看着就丢了。
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
   const [autoTag, setAutoTag] = useState(true)
   const [apiSource, setApiSource] = useState<'gelbooru' | 'danbooru'>('gelbooru')
@@ -92,6 +95,36 @@ export default function RegularizationPage() {
     void refreshReg()
     void refreshTrainTags()
   }, [refreshReg, refreshTrainTags])
+
+  // 把 excluded 持久化到 localStorage（按 project + version 隔离），切页面回来也在。
+  // 切 version / 进入页面时先 seed 一次；之后随 setExcluded 变化自动保存。
+  const excludedStorageKey = vid
+    ? `studio.reg.excluded.${project.id}.${vid}`
+    : null
+  useEffect(() => {
+    if (!excludedStorageKey) return
+    try {
+      const raw = localStorage.getItem(excludedStorageKey)
+      if (!raw) {
+        setExcluded(new Set())
+        return
+      }
+      const arr = JSON.parse(raw)
+      if (Array.isArray(arr)) {
+        setExcluded(new Set(arr.filter((x): x is string => typeof x === 'string')))
+      } else {
+        setExcluded(new Set())
+      }
+    } catch {
+      setExcluded(new Set())
+    }
+  }, [excludedStorageKey])
+  useEffect(() => {
+    if (!excludedStorageKey) return
+    try {
+      localStorage.setItem(excludedStorageKey, JSON.stringify(Array.from(excluded)))
+    } catch { /* quota / privacy mode：丢就丢，不打扰用户 */ }
+  }, [excludedStorageKey, excluded])
 
   // 刷新 / 进入页面时回放最近一次 reg_build job：锁回 jid + 回放历史日志
   useEffect(() => {
