@@ -5,6 +5,7 @@ import {
   type ConfigData,
   type PresetSummary,
   type ProjectDetail,
+  type RegStatus,
   type SchemaResponse,
   type Version,
   type VersionConfigResponse,
@@ -36,6 +37,7 @@ export default function TrainPage() {
   const [presets, setPresets] = useState<PresetSummary[]>([])
   const [configResp, setConfigResp] = useState<VersionConfigResponse | null>(null)
   const [config, setConfig] = useState<ConfigData | null>(null)
+  const [reg, setReg] = useState<RegStatus | null>(null)
   const [busy, setBusy] = useState(false)
 
   /** 已保存的 config JSON 快照，用于可靠判断是否 dirty */
@@ -69,6 +71,12 @@ export default function TrainPage() {
   useEffect(() => {
     void refreshConfig()
   }, [refreshConfig])
+
+  // 拉 reg 状态用于显示「训练集 + 正则」分布
+  useEffect(() => {
+    if (!vid) return
+    api.getRegStatus(project.id, vid).then(setReg).catch(() => setReg(null))
+  }, [project.id, vid])
 
   // 全局模型路径仍然灰显 readonly（值来自 Settings.models 配置；version 维度
   // 改了没意义）。PP10.4 起项目特定字段（data_dir 等）改成可编辑：fork preset
@@ -404,15 +412,11 @@ export default function TrainPage() {
           )}
         </div>
 
-        {/* 右栏：训练估算 + 操作面板 */}
-        <TrainEstimatePanel
-          configResp={configResp}
-          config={config}
-          busy={busy}
-          dirty={dirty}
-          onSave={onSaveConfig}
-          onEnqueue={onEnqueue}
+        {/* 右栏：训练集 + 正则集分布 */}
+        <DatasetStatsPanel
           activeVersion={activeVersion}
+          reg={reg}
+          config={config}
         />
       </div>
     </div>
@@ -420,123 +424,220 @@ export default function TrainPage() {
   )
 }
 
-/** 训练估算右侧栏面板 */
-function TrainEstimatePanel({
-  configResp,
-  config,
-  busy,
-  dirty,
-  onSave,
-  onEnqueue,
+/** Kohya 风格文件夹名「N_label」→ {repeat=N, label}。无前缀数字默认 1。 */
+function parseFolderRepeat(name: string): { repeat: number; label: string } {
+  const m = name.match(/^(\d+)_(.*)$/)
+  if (m) return { repeat: parseInt(m[1], 10), label: m[2] }
+  return { repeat: 1, label: name }
+}
+
+/** reg.files 形如 `5_concept/12345.png` —— 按首段文件夹聚合计数。 */
+function aggregateRegFolders(files: string[]): Array<{ name: string; image_count: number }> {
+  const m = new Map<string, number>()
+  for (const f of files) {
+    const idx = f.indexOf('/')
+    if (idx < 0) continue
+    const folder = f.slice(0, idx)
+    m.set(folder, (m.get(folder) ?? 0) + 1)
+  }
+  return Array.from(m.entries())
+    .map(([name, image_count]) => ({ name, image_count }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** 训练集 + 正则集分布右栏面板。
+ *
+ * 显示每个 repeat 文件夹（Kohya 风格 N_label）的 raw 图数 + 有效图数（repeat × imgs），
+ * train / reg 分两块汇总，最后给出有效图数总和——这是 anima_train 单 epoch 的实际样本数。
+ */
+function DatasetStatsPanel({
   activeVersion,
+  reg,
+  config,
 }: {
-  configResp: VersionConfigResponse | null
-  config: ConfigData | null
-  busy: boolean
-  dirty: boolean
-  onSave: () => void
-  onEnqueue: () => void
   activeVersion: Version | null
+  reg: RegStatus | null
+  config: ConfigData | null
 }) {
-  const hasConfig = configResp?.has_config ?? false
-  const configName = activeVersion?.config_name ?? null
+  const trainFolders = activeVersion?.stats?.train_folders ?? []
+  const regFolders = useMemo(
+    () => (reg && reg.exists ? aggregateRegFolders(reg.files) : []),
+    [reg]
+  )
+
+  const trainEffective = trainFolders.reduce(
+    (s, f) => s + parseFolderRepeat(f.name).repeat * f.image_count,
+    0,
+  )
+  const regEffective = regFolders.reduce(
+    (s, f) => s + parseFolderRepeat(f.name).repeat * f.image_count,
+    0,
+  )
+  const totalEffective = trainEffective + regEffective
+
+  // 单 epoch 优化器步数估算（与 sd-scripts max_train_steps 同语义）。
+  // 不算 AR bucketing 损失（每桶最后一 batch 可能不满），相同 AR 数据集误差 < 5%。
+  // schema 字段：batch_size / grad_accum / epochs / max_steps（max_steps=0 表示不限）。
+  const bs = Number(config?.batch_size) || 1
+  const ga = Number(config?.grad_accum) || 1
+  const epochs = Number(config?.epochs) || 0
+  const maxSteps = Number(config?.max_steps) || 0
+  const stepsPerEpoch = totalEffective > 0
+    ? Math.ceil(totalEffective / (bs * ga))
+    : null
+  const naturalTotal = stepsPerEpoch !== null && epochs > 0
+    ? stepsPerEpoch * epochs
+    : null
+  const finalTotal = naturalTotal !== null && maxSteps > 0
+    ? Math.min(maxSteps, naturalTotal)
+    : naturalTotal
+  const maxStepsTruncates =
+    maxSteps > 0 && naturalTotal !== null && maxSteps < naturalTotal
 
   return (
     <div className="flex flex-col gap-3" style={{ minWidth: 0 }}>
-      {/* 操作卡片 */}
       <div style={{
         borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
         background: 'var(--bg-surface)', padding: '10px 12px',
       }}>
         <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
-          <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--ok)', flexShrink: 0 }} />
-          <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>操作</span>
+          <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
+          <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>训练集参数</span>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button
-            onClick={onSave}
-            disabled={busy || !dirty}
-            className="btn btn-secondary btn-sm"
-            style={{ width: '100%' }}
-          >
-            {dirty ? '保存配置' : '已保存'}
-          </button>
-          <button
-            onClick={onEnqueue}
-            disabled={busy || !hasConfig}
-            className="btn btn-primary"
-            style={{ width: '100%' }}
-          >
-            开始训练
-          </button>
-        </div>
-      </div>
 
-      {/* 状态卡片 */}
-      <div style={{
-        borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-surface)', padding: '10px 12px',
-      }}>
-        <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
-          <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: hasConfig ? 'var(--ok)' : 'var(--fg-tertiary)', flexShrink: 0 }} />
-          <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>状态</span>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 'var(--t-xs)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <span style={{ color: 'var(--fg-tertiary)' }}>预设</span>
-            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)', fontWeight: 500 }}>
-              {configName ?? '—'}
-            </span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <span style={{ color: 'var(--fg-tertiary)' }}>配置状态</span>
-            <span style={{
-              fontFamily: 'var(--font-mono)',
-              color: hasConfig ? (dirty ? 'var(--warn)' : 'var(--ok)') : 'var(--fg-tertiary)',
-              fontWeight: 500,
-            }}>
-              {!hasConfig ? '未配置' : dirty ? '未保存' : '已保存'}
-            </span>
-          </div>
-        </div>
-      </div>
+        <FolderSection
+          title="train/"
+          folders={trainFolders}
+          effective={trainEffective}
+          empty="无训练图"
+        />
 
-      {/* 训练关键参数卡片 */}
-      {hasConfig && config && (
+        <div style={{ height: 8 }} />
+
+        <FolderSection
+          title="reg/"
+          folders={regFolders}
+          effective={regEffective}
+          empty={reg && !reg.exists ? '未生成' : '无正则图'}
+        />
+
+        {/* 总计 + 步数估算（不含 AR bucketing 误差） */}
         <div style={{
-          borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)',
-          background: 'var(--bg-surface)', padding: '10px 12px',
+          marginTop: 10, paddingTop: 8,
+          borderTop: '1px solid var(--border-subtle)',
+          display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--t-xs)',
         }}>
-          <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
-            <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
-            <span className="caption" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 'var(--t-xs)' }}>关键参数</span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 'var(--t-xs)' }}>
-            <StatLine label="训练集图片" value={activeVersion?.stats?.train_image_count ?? 0} />
-            <StatLine label="repeats" value={config.num_repeats} />
-            <StatLine label="batch size" value={config.batch_size} />
-            <StatLine label="梯度累积" value={config.gradient_accumulation_steps} />
-            {(() => {
-              const imgs = activeVersion?.stats?.train_image_count ?? 0
-              const reps = Number(config.num_repeats) || 0
-              const bs = Number(config.batch_size) || 1
-              const ga = Number(config.gradient_accumulation_steps) || 1
-              const steps = imgs > 0 && reps > 0 ? Math.ceil(imgs * reps / (bs * ga)) : null
-              return steps !== null ? (
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-                  borderTop: '1px solid var(--border-subtle)', paddingTop: 6, marginTop: 2,
-                }}>
-                  <span style={{ color: 'var(--fg-secondary)', fontWeight: 500 }}>≈ 总梯度步数</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)', fontWeight: 600 }}>
-                    {steps}
-                  </span>
-                </div>
-              ) : null
-            })()}
-          </div>
+          <Row label="有效样本/epoch" value={String(totalEffective)} bold />
+          {stepsPerEpoch !== null && (
+            <Row
+              label={`÷ batch × ga (${bs} × ${ga})`}
+              value={`≈ ${stepsPerEpoch} 步/epoch`}
+              dim
+            />
+          )}
+          {naturalTotal !== null && (
+            <Row
+              label={`× epochs (${epochs})`}
+              value={`≈ ${naturalTotal} 步`}
+              dim
+            />
+          )}
+          {finalTotal !== null && (
+            <Row
+              label={maxStepsTruncates ? `max_steps 上限 ${maxSteps}` : '总步数'}
+              value={`≈ ${finalTotal}`}
+              bold
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FolderSection({
+  title,
+  folders,
+  effective,
+  empty,
+}: {
+  title: string
+  folders: Array<{ name: string; image_count: number }>
+  effective: number
+  empty: string
+}) {
+  return (
+    <div>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        fontSize: 'var(--t-xs)', marginBottom: 4,
+      }}>
+        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-secondary)', fontWeight: 500 }}>
+          {title}
+        </span>
+        {folders.length > 0 && (
+          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)' }}>
+            ∑ {effective}
+          </span>
+        )}
+      </div>
+      {folders.length === 0 ? (
+        <div style={{ fontSize: 'var(--t-xs)', color: 'var(--fg-tertiary)', paddingLeft: 4 }}>
+          {empty}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {folders.map((f) => {
+            const { repeat, label } = parseFolderRepeat(f.name)
+            const eff = repeat * f.image_count
+            return (
+              <div
+                key={f.name}
+                style={{
+                  display: 'flex', alignItems: 'baseline', gap: 6,
+                  fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
+                  color: 'var(--fg-secondary)',
+                  paddingLeft: 4,
+                }}
+                title={`${f.name}：${repeat} repeat × ${f.image_count} 图 = ${eff}`}
+              >
+                <span style={{ color: 'var(--fg-tertiary)' }}>{label}</span>
+                <span style={{ flex: 1, borderBottom: '1px dotted var(--border-subtle)', alignSelf: 'end', marginBottom: 4 }} />
+                <span>
+                  <span style={{ color: 'var(--accent)' }}>{repeat}</span>
+                  <span style={{ color: 'var(--fg-tertiary)' }}> × </span>
+                  <span style={{ color: 'var(--fg-primary)' }}>{f.image_count}</span>
+                  <span style={{ color: 'var(--fg-tertiary)' }}> = </span>
+                  <span style={{ color: 'var(--fg-primary)', fontWeight: 600 }}>{eff}</span>
+                </span>
+              </div>
+            )
+          })}
         </div>
       )}
+    </div>
+  )
+}
+
+function Row({
+  label,
+  value,
+  bold,
+  dim,
+}: {
+  label: string
+  value: string
+  bold?: boolean
+  dim?: boolean
+}) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+      <span style={{ color: dim ? 'var(--fg-tertiary)' : 'var(--fg-secondary)' }}>{label}</span>
+      <span style={{
+        fontFamily: 'var(--font-mono)',
+        color: bold ? 'var(--accent)' : dim ? 'var(--fg-tertiary)' : 'var(--fg-primary)',
+        fontWeight: bold ? 700 : 500,
+      }}>{value}</span>
     </div>
   )
 }
@@ -576,18 +677,3 @@ function ConfigSkeleton() {
   )
 }
 
-function StatLine({
-  label,
-  value,
-}: {
-  label: string
-  value: unknown
-}) {
-  const v = value === null || value === undefined ? '—' : String(value)
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-      <span style={{ color: 'var(--fg-tertiary)' }}>{label}</span>
-      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)', fontWeight: 500 }}>{v}</span>
-    </div>
-  )
-}
