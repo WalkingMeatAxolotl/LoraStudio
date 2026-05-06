@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useProjectCtx } from '../context/ProjectContext'
 import { api, type MonitorState, type Task } from '../api/client'
@@ -6,7 +6,7 @@ import { useEventStream, type StudioEvent } from '../lib/useEventStream'
 import CommandPalette from './CommandPalette'
 
 const SearchIcon = (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
   </svg>
 )
@@ -87,7 +87,9 @@ function useBreadcrumbs(): Crumb[] {
 export default function Topbar() {
   const crumbs = useBreadcrumbs()
   const navigate = useNavigate()
+  const ctx = useProjectCtx()
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const searchBtnRef = useRef<HTMLButtonElement>(null)
 
   // 队列详细状态
   const [runningTask, setRunningTask] = useState<Task | null>(null)
@@ -104,7 +106,6 @@ export default function Topbar() {
       setRunningTask(firstRunning)
       setPendingCount(pending.length)
 
-      // 有运行中任务时，拉取 MonitorState
       if (firstRunning) {
         try {
           const ms = await api.getMonitorState(firstRunning.id)
@@ -120,12 +121,9 @@ export default function Topbar() {
     }
   }, [])
 
-  // 初次加载 + 定时刷新
   useEffect(() => {
     let cancelled = false
     void refreshQueue()
-
-    // 有 running 任务时更快轮询（3s），否则慢轮询（10s）
     const interval = runningTask ? 3000 : 10000
     const timer = setInterval(() => {
       if (cancelled) return
@@ -134,14 +132,13 @@ export default function Topbar() {
     return () => { cancelled = true; clearInterval(timer) }
   }, [refreshQueue, runningTask])
 
-  // SSE 事件监听
   useEventStream((evt: StudioEvent) => {
     if (evt.type === 'task_state_changed') {
       void refreshQueue()
     }
   })
 
-  // ⌘K / Ctrl+K 快捷键
+  // ⌘K / Ctrl+K
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -157,7 +154,6 @@ export default function Topbar() {
   const progress = (() => {
     if (!monitor || !runningTask) return null
 
-    // 有 step → 训练进度
     if (monitor.step != null && monitor.total_steps != null && monitor.total_steps > 0) {
       const pct = Math.round((monitor.step / monitor.total_steps) * 100)
       let eta = ''
@@ -168,13 +164,11 @@ export default function Topbar() {
       return { pct, current: monitor.step, total: monitor.total_steps, eta, unit: 'step' as const }
     }
 
-    // 有 epoch → epoch 进度
     if (monitor.epoch != null && monitor.total_epochs != null && monitor.total_epochs > 0) {
       const pct = Math.round((monitor.epoch / monitor.total_epochs) * 100)
       return { pct, current: monitor.epoch, total: monitor.total_epochs, unit: 'epoch' as const }
     }
 
-    // 有 started_at 但无 step → 显示运行时间，无百分比
     if (monitor.start_time) {
       const elapsed = formatElapsed(monitor.start_time)
       return { currentUnit: `运行 ${elapsed}` } as const
@@ -182,17 +176,34 @@ export default function Topbar() {
 
     return null
   })()
-  const progressBarW = progress && 'pct' in progress ? `${Math.min(100, (progress as { pct: number }).pct)}%` : '0%'
+
+  // ── 训练胶囊文本 ──
+  const projectLabel = (ctx && runningTask?.project_id != null && runningTask.project_id === ctx.project.id)
+    ? ctx.project.title
+    : null
+  const configName = runningTask ? (runningTask.config_name || runningTask.name || '—') : ''
+  const taskLabel = projectLabel ? `${projectLabel} / ${configName}` : configName
+
+  const progressSuffix = (() => {
+    if (!progress) return runningTask?.started_at ? ` · 运行 ${formatElapsed(runningTask.started_at)}` : ''
+    if ('pct' in progress) {
+      const p = progress as { current: number; total: number; unit: string; eta?: string }
+      const nums = `${p.current.toLocaleString()} / ${p.total.toLocaleString()}`
+      return ` · ${p.unit} ${nums}${p.eta ? ` ${p.eta}` : ''}`
+    }
+    if ('currentUnit' in progress) return ` · ${(progress as { currentUnit: string }).currentUnit}`
+    return ''
+  })()
 
   // ── 渲染 ──
   return (
     <>
       <header
-        className="flex items-center gap-4 border-b border-subtle bg-canvas shrink-0 px-5"
+        className="flex items-center gap-3 border-b border-subtle bg-canvas shrink-0 px-5"
         style={{ height: 'var(--topbar-h)' }}
       >
         {/* breadcrumb */}
-        <div className="flex items-center gap-2 min-w-0" style={{ flex: runningTask ? '0 1 auto' : 1 }}>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
           {crumbs.map((b, i) => (
             <span key={i} className="flex items-center gap-2">
               {i > 0 && <span className="text-fg-tertiary select-none">/</span>}
@@ -206,68 +217,9 @@ export default function Topbar() {
           ))}
         </div>
 
-        {/* 队列进度（运行中任务） */}
-        {runningTask && (
-          <button
-            onClick={() => navigate(`/queue/${runningTask.id}`)}
-            className="flex items-center gap-2 px-2.5 py-1 rounded border border-subtle bg-surface cursor-pointer hover:border-bold transition-colors min-w-0 shrink"
-            title={`任务 #${runningTask.id}: ${runningTask.config_name}`}
-          >
-            {/* 脉冲点 */}
-            <span className="dot dot-running shrink-0" />
-
-            {/* 名称 */}
-            <span className="text-xs font-mono text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap">
-              #{runningTask.id} · {runningTask.config_name || runningTask.name || '—'}
-            </span>
-
-            {/* 进度条 */}
-            {progress && 'pct' in progress ? (
-              <div className="flex items-center gap-1.5">
-                <div className="w-16 h-1.5 rounded-full bg-sunken overflow-hidden shrink-0">
-                  <div
-                    className="h-full rounded-full bg-accent transition-[width] duration-500"
-                    style={{ width: progressBarW }}
-                  />
-                </div>
-                <span className="text-2xs font-mono text-fg-tertiary whitespace-nowrap">
-                  {progress.pct}% {progress.unit} {progress.current}/{progress.total}
-                  {progress.eta ? <span className="ml-1 text-fg-secondary">{progress.eta}</span> : null}
-                </span>
-              </div>
-            ) : progress && 'currentUnit' in progress ? (
-              <span className="text-2xs font-mono text-fg-tertiary">{progress.currentUnit}</span>
-            ) : (
-              <span className="text-2xs font-mono text-fg-tertiary whitespace-nowrap">
-                {runningTask.started_at ? `运行 ${formatElapsed(runningTask.started_at)}` : '准备中…'}
-              </span>
-            )}
-          </button>
-        )}
-
-        {/* 排队数量（无运行中） */}
-        {!runningTask && pendingCount > 0 && (
-          <button
-            onClick={() => navigate('/queue')}
-            className="flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-mono text-fg-primary bg-warn-soft border-none cursor-pointer hover:bg-warn/20 transition-colors shrink-0"
-          >
-            {QueueIcon}
-            <span>{pendingCount} 排队中</span>
-          </button>
-        )}
-
-        {/* 运行 + 排队数量 */}
-        {runningTask && pendingCount > 0 && (
-          <span className="text-2xs text-fg-tertiary font-mono whitespace-nowrap shrink-0">
-            +{pendingCount} 排队
-          </span>
-        )}
-
-        {/* 弹性空白 */}
-        <span className="flex-1 min-w-0" />
-
         {/* 搜索按钮 */}
         <button
+          ref={searchBtnRef}
           onClick={() => setPaletteOpen(true)}
           className="flex items-center gap-2 text-fg-tertiary text-sm bg-surface border border-dim rounded-md cursor-pointer min-w-[200px] py-[5px] pl-3 pr-[10px] hover:border-bold transition-colors shrink-0"
         >
@@ -275,9 +227,38 @@ export default function Topbar() {
           <span className="flex-1 text-left">跳转 / 搜索…</span>
           <span className="kbd">⌘K</span>
         </button>
+
+        {/* 运行中训练胶囊 */}
+        {runningTask && (
+          <button
+            onClick={() => navigate(`/queue/${runningTask.id}`)}
+            className="flex items-center gap-2 px-3 py-[5px] rounded-md border border-warn bg-warn-soft cursor-pointer hover:bg-warn/10 transition-colors shrink-0 max-w-xs"
+            title={`任务 #${runningTask.id}`}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-warn animate-pulse shrink-0" />
+            <span className="text-xs font-mono text-warn overflow-hidden text-ellipsis whitespace-nowrap">
+              训练中 · {taskLabel}{progressSuffix}
+            </span>
+          </button>
+        )}
+
+        {/* 排队（无运行中时） */}
+        {!runningTask && pendingCount > 0 && (
+          <button
+            onClick={() => navigate('/queue')}
+            className="flex items-center gap-1.5 px-2.5 py-[5px] rounded-md text-xs font-mono text-warn bg-warn-soft border border-warn cursor-pointer hover:bg-warn/10 transition-colors shrink-0"
+          >
+            {QueueIcon}
+            <span>{pendingCount} 排队中</span>
+          </button>
+        )}
       </header>
 
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        anchorEl={searchBtnRef.current}
+      />
     </>
   )
 }
