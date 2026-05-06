@@ -41,62 +41,32 @@ export default function PathPicker({
 
   return (
     <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 50,
-        background: 'rgba(0,0,0,0.5)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center"
       onClick={onClose}
     >
       <div
-        style={{
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border-default)',
-          borderRadius: 'var(--r-lg)',
-          boxShadow: 'var(--sh-xl)',
-          width: 640,
-          maxHeight: '80vh',
-          display: 'flex', flexDirection: 'column',
-          overflow: 'hidden',
-        }}
+        className="bg-elevated border border-dim rounded-lg shadow-xl w-[640px] max-h-[80vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <header style={{
-          padding: '12px 16px',
-          borderBottom: '1px solid var(--border-subtle)',
-          display: 'flex', alignItems: 'center', gap: 8,
-          flexShrink: 0,
-        }}>
-          <h3 style={{ margin: 0, fontSize: 'var(--t-sm)', fontWeight: 600, flex: 1, color: 'var(--fg-primary)' }}>
+        <header className="px-4 py-3 border-b border-subtle flex items-center gap-2 shrink-0">
+          <h3 className="m-0 text-sm font-semibold flex-1 text-fg-primary">
             选择路径
           </h3>
           <button
             onClick={onClose}
-            style={{
-              padding: '2px 6px', background: 'transparent', border: 'none',
-              color: 'var(--fg-tertiary)', cursor: 'pointer', fontSize: 'var(--t-md)',
-              borderRadius: 'var(--r-sm)',
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+            className="btn btn-ghost btn-sm"
           >
             ✕
           </button>
         </header>
 
         {/* Path bar */}
-        <div style={{
-          padding: '8px 12px',
-          borderBottom: '1px solid var(--border-subtle)',
-          display: 'flex', alignItems: 'center', gap: 6,
-          flexShrink: 0, background: 'var(--bg-sunken)',
-        }}>
+        <div className="px-3 py-2 border-b border-subtle flex items-center gap-1.5 shrink-0 bg-sunken">
           {data?.parent && (
             <button
               onClick={() => void load(data.parent!)}
-              className="btn btn-ghost btn-sm"
-              style={{ flexShrink: 0 }}
+              className="btn btn-ghost btn-sm shrink-0"
             >
               ← 上级
             </button>
@@ -106,13 +76,12 @@ export default function PathPicker({
             value={path}
             onChange={(e) => setPath(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void load(path)}
-            className="input input-mono"
-            style={{ flex: 1, padding: '4px 8px', fontSize: 'var(--t-xs)' }}
+            className="input input-mono flex-1"
+            style={{ padding: '4px 8px', fontSize: 'var(--t-xs)' }}
           />
           <button
             onClick={() => void load(path)}
-            className="btn btn-secondary btn-sm"
-            style={{ flexShrink: 0 }}
+            className="btn btn-secondary btn-sm shrink-0"
           >
             前往
           </button>
@@ -120,18 +89,13 @@ export default function PathPicker({
 
         {/* Error */}
         {error && (
-          <div style={{
-            padding: '8px 14px',
-            color: 'var(--err)', fontSize: 'var(--t-xs)', fontFamily: 'var(--font-mono)',
-            background: 'var(--err-soft)', borderBottom: '1px solid var(--err)',
-            flexShrink: 0,
-          }}>
+          <div className="px-3.5 py-2 text-err text-xs font-mono bg-err-soft border-b border-err shrink-0">
             {error}
           </div>
         )}
 
         {/* File list */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div className="flex-1 overflow-y-auto">
           {data?.entries.map((e) => {
             const childPath =
               data.path.replace(/[/\\]+$/, '') +
@@ -142,31 +106,19 @@ export default function PathPicker({
             return (
               <div
                 key={e.name}
-                style={{
-                  padding: '8px 14px',
-                  borderBottom: '1px solid var(--border-subtle)',
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  cursor: 'default',
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-overlay)' }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-                className="file-row"
+                className="px-3.5 py-2 border-b border-subtle flex items-center gap-2.5 cursor-default hover:bg-overlay transition-colors"
               >
-                <span style={{ color: 'var(--fg-tertiary)', width: 16, textAlign: 'center', flexShrink: 0 }}>
+                <span className="text-fg-tertiary w-4 text-center shrink-0">
                   {e.type === 'dir' ? '📁' : '📄'}
                 </span>
-                <span style={{
-                  flex: 1, fontSize: 'var(--t-sm)', fontFamily: 'var(--font-mono)',
-                  color: 'var(--fg-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
+                <span className="flex-1 text-sm font-mono text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap">
                   {e.name}
                 </span>
-                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                <div className="flex gap-1 shrink-0">
                   {enterable && (
                     <button
                       onClick={() => void load(childPath)}
                       className="btn btn-ghost btn-sm"
-                      style={{ fontSize: 'var(--t-xs)' }}
                     >
                       打开
                     </button>
@@ -175,7 +127,6 @@ export default function PathPicker({
                     <button
                       onClick={() => onPick(childPath)}
                       className="btn btn-primary btn-sm"
-                      style={{ fontSize: 'var(--t-xs)' }}
                     >
                       选这个
                     </button>
@@ -187,12 +138,7 @@ export default function PathPicker({
         </div>
 
         {/* Footer */}
-        <footer style={{
-          padding: '10px 14px',
-          borderTop: '1px solid var(--border-subtle)',
-          display: 'flex', justifyContent: 'flex-end', gap: 8,
-          flexShrink: 0, background: 'var(--bg-surface)',
-        }}>
+        <footer className="px-3.5 py-2.5 border-t border-subtle flex justify-end gap-2 shrink-0 bg-surface">
           <button onClick={onClose} className="btn btn-secondary btn-sm">取消</button>
           <button onClick={() => onPick(path)} className="btn btn-primary btn-sm">
             选择当前目录
