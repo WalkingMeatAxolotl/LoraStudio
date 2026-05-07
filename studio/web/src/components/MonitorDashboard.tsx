@@ -271,24 +271,28 @@ export default function MonitorDashboard({ taskId }: { taskId: number }) {
     }
   }, [taskId])
 
+  // mount 时拉一次冷启动；之后 SSE 推送（monitor_state_updated 带全量 state
+  // payload）。SSE 重连后 onOpen 也补一次冷启动防漏事件。删了原来的 5s 轮询
+  // fallback——SSE 通了就够用，断了 EventSource 自动重连 + onOpen 触发重 fetch。
   useEffect(() => {
     void load()
-    // Poll every 5s as fallback
-    const t = window.setInterval(() => void load(), 5000)
-    return () => window.clearInterval(t)
   }, [load])
 
-  useEventStream((evt) => {
-    if (evt.type === 'monitor_state_updated' && String(evt.task_id) === String(taskId)) {
-      if (evt.state) {
-        setState(evt.state as MonitorState)
-        setConnected(true)
-        lastUpdateRef.current = Date.now()
-      } else {
-        void load()
+  useEventStream(
+    (evt) => {
+      if (evt.type === 'monitor_state_updated' && String(evt.task_id) === String(taskId)) {
+        if (evt.state) {
+          setState(evt.state as MonitorState)
+          setConnected(true)
+          lastUpdateRef.current = Date.now()
+        } else {
+          // 兜底：极少数情况 SSE 不带 state（旧 backend 行为），退回 fetch
+          void load()
+        }
       }
-    }
-  })
+    },
+    { onOpen: () => void load() },
+  )
 
   // Derived stats
   const losses = useMemo(() => state?.losses ?? [], [state?.losses])

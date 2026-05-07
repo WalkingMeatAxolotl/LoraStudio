@@ -103,15 +103,26 @@ export default function QueuePage() {
     finally { setLoaded(true) }
   }, [])
 
-  useEventStream((evt) => {
-    if (evt.type !== 'task_state_changed') return
-    if (reloadTimer.current) return
-    reloadTimer.current = window.setTimeout(() => {
-      reloadTimer.current = null; void reload()
-    }, 100)
-  })
+  useEventStream(
+    (evt) => {
+      if (evt.type === 'task_state_changed') {
+        if (reloadTimer.current) return
+        reloadTimer.current = window.setTimeout(() => {
+          reloadTimer.current = null; void reload()
+        }, 100)
+      } else if (evt.type === 'monitor_state_updated' && evt.state) {
+        // SSE payload 里已带全量 state，直接 setState，不再 fetch。
+        setMonitor(evt.state as MonitorState)
+        setMonitorTaskId(Number(evt.task_id))
+      }
+    },
+    { onOpen: () => void reload() },
+  )
 
   useEffect(() => { void reload() }, [reload])
+  // 2s 时钟 tick：仅触发 re-render 让「23m ago」「elapsed 40m」之类的相对时间
+  // 字段更新；不发任何 API。spread tasks 触发组件 re-render，下游 derived 状态
+  // 跟着更新。
   useEffect(() => {
     const hasRunning = tasks.some((t) => t.status === 'running')
     if (!hasRunning) return
@@ -119,34 +130,18 @@ export default function QueuePage() {
     return () => window.clearInterval(tick)
   }, [tasks])
 
-  // ── 拉运行中任务的 monitor state，给进度条用 ──
-  // 当前最多一个 running（队列串行）。拉 monitor.step / total_steps 比 elapsed
-  // 时长精确得多，跟 Topbar 胶囊数据源一致。
+  // 当前 running 任务的 id，给 monitor 进度条 / 状态卡片用。
   const runningTaskId = useMemo(
     () => tasks.find((t) => t.status === 'running')?.id ?? null,
     [tasks],
   )
+  // running task 切换时清掉 stale monitor state（避免进度条短暂显示上一个
+  // 任务的进度）；新任务的真实 monitor 数据由 SSE monitor_state_updated 推过来。
   useEffect(() => {
     if (!runningTaskId) {
       setMonitor(null)
       setMonitorTaskId(null)
-      return
     }
-    let cancelled = false
-    const fetchOnce = async () => {
-      try {
-        const m = await api.getMonitorState(runningTaskId)
-        if (!cancelled) {
-          setMonitor(m)
-          setMonitorTaskId(runningTaskId)
-        }
-      } catch {
-        if (!cancelled) setMonitor(null)
-      }
-    }
-    void fetchOnce()
-    const timer = window.setInterval(() => void fetchOnce(), 3000)
-    return () => { cancelled = true; window.clearInterval(timer) }
   }, [runningTaskId])
 
   const clearDone = async () => {

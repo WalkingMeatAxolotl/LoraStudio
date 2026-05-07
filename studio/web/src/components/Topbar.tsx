@@ -121,27 +121,30 @@ export default function Topbar() {
     }
   }, [])
 
-  // 用 id 不用 task object：refreshQueue 每次 setRunningTask(firstRunning)
-  // 都是新对象引用（同 id 不同 ref），如果 deps 直接放 runningTask 会触发
-  // useEffect 重跑 → 立刻 refresh → 又是新对象 → 死循环（实测 7 次/秒）。
-  // 用 id 是基本类型，只在 task 真切换（开始 / 完成 / 取消）时才 effect 重跑。
-  const runningTaskId = runningTask?.id ?? null
+  // 队列状态走 SSE：mount 拉一次冷启动，之后只在 task_state_changed /
+  // monitor_state_updated 事件来时更新。SSE 重连后 onOpen 也补一次冷启动
+  // 防漏事件。不再轮询（之前 3-10s setInterval 在 1 个 running task 下会
+  // 攒成每秒 7+ 请求的死循环 bug，根因是 useEffect deps 用了 Task 对象）。
   useEffect(() => {
-    let cancelled = false
     void refreshQueue()
-    const interval = runningTaskId ? 3000 : 10000
-    const timer = setInterval(() => {
-      if (cancelled) return
-      void refreshQueue()
-    }, interval)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [refreshQueue, runningTaskId])
+  }, [refreshQueue])
 
-  useEventStream((evt: StudioEvent) => {
-    if (evt.type === 'task_state_changed') {
-      void refreshQueue()
-    }
-  })
+  useEventStream(
+    (evt: StudioEvent) => {
+      if (evt.type === 'task_state_changed') {
+        void refreshQueue()
+      } else if (
+        evt.type === 'monitor_state_updated' &&
+        runningTask &&
+        String(evt.task_id) === String(runningTask.id) &&
+        evt.state
+      ) {
+        // 后端 SSE 已经把 state 全量塞 payload 里，直接 setState，不再 fetch
+        setMonitor(evt.state as MonitorState)
+      }
+    },
+    { onOpen: () => void refreshQueue() },
+  )
 
   // ⌘K / Ctrl+K
   useEffect(() => {
