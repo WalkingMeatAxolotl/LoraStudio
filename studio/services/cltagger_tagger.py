@@ -49,7 +49,7 @@ class CLTagger:
                 base[k] = v
         return secrets.CLTaggerConfig(**base)
 
-    def _resolve_model_files(self) -> tuple[Path, Path]:
+    def _local_model_files_status(self) -> tuple[Path, Path, bool]:
         cfg = self._cfg()
         base = (
             Path(cfg.local_dir)
@@ -59,17 +59,25 @@ class CLTagger:
         model_path = base / cfg.model_path
         mapping_path = base / cfg.tag_mapping_path
         if model_path.exists() and mapping_path.exists():
-            return model_path, mapping_path
+            return model_path, mapping_path, True
         if cfg.local_dir:
-            # 兼容用户把 local_dir 直接指到 cl_tagger_1_02/ 子目录。
             flat_model = base / Path(cfg.model_path).name
             flat_mapping = base / Path(cfg.tag_mapping_path).name
             if flat_model.exists() and flat_mapping.exists():
-                return flat_model, flat_mapping
+                return flat_model, flat_mapping, True
+        return model_path, mapping_path, False
+
+    def _resolve_model_files(self) -> tuple[Path, Path]:
+        cfg = self._cfg()
+        model_path, mapping_path, ok = self._local_model_files_status()
+        if ok:
+            return model_path, mapping_path
+        if cfg.local_dir:
             raise FileNotFoundError(
                 "local_dir 缺少 CLTagger 模型文件或 tag_mapping.json: "
                 f"{model_path} / {mapping_path}"
             )
+        base = model_path.parents[len(Path(cfg.model_path).parts) - 1]
         model_downloader.download_cltagger(base, cfg, on_log=logger.info)
         if not model_path.exists() or not mapping_path.exists():
             raise FileNotFoundError(
@@ -80,9 +88,16 @@ class CLTagger:
 
     def is_available(self) -> tuple[bool, str]:
         try:
-            model_path, _ = self._resolve_model_files()
+            model_path, mapping_path, ok = self._local_model_files_status()
         except Exception as exc:  # noqa: BLE001
             return False, str(exc)
+        if not ok:
+            if self._cfg().local_dir:
+                return False, (
+                    "local_dir 缺少 CLTagger 模型文件或 tag_mapping.json: "
+                    f"{model_path} / {mapping_path}"
+                )
+            return False, f"需下载模型: {model_path.parent.name}"
         return True, f"模型: {model_path.parent.name}"
 
     def prepare(self) -> None:

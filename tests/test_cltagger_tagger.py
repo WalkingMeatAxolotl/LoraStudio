@@ -52,6 +52,23 @@ def test_resolve_local_dir_flat_files(isolated_secrets: Path) -> None:
     assert mapping_path == model_dir / "tag_mapping.json"
 
 
+def test_is_available_does_not_download_when_model_missing(
+    isolated_secrets: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called = {"download": False}
+
+    def _boom(*args, **kwargs):
+        called["download"] = True
+        raise AssertionError("download should not run in is_available")
+
+    monkeypatch.setattr(cltagger_tagger.model_downloader, "download_cltagger", _boom)
+    t = cltagger_tagger.CLTagger()
+    ok, msg = t.is_available()
+    assert ok is False
+    assert "需下载模型" in msg
+    assert called["download"] is False
+
+
 def test_postprocess_uses_character_threshold_and_optional_categories(
     isolated_secrets: Path,
 ) -> None:
