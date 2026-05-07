@@ -121,16 +121,21 @@ export default function Topbar() {
     }
   }, [])
 
+  // 用 id 不用 task object：refreshQueue 每次 setRunningTask(firstRunning)
+  // 都是新对象引用（同 id 不同 ref），如果 deps 直接放 runningTask 会触发
+  // useEffect 重跑 → 立刻 refresh → 又是新对象 → 死循环（实测 7 次/秒）。
+  // 用 id 是基本类型，只在 task 真切换（开始 / 完成 / 取消）时才 effect 重跑。
+  const runningTaskId = runningTask?.id ?? null
   useEffect(() => {
     let cancelled = false
     void refreshQueue()
-    const interval = runningTask ? 3000 : 10000
+    const interval = runningTaskId ? 3000 : 10000
     const timer = setInterval(() => {
       if (cancelled) return
       void refreshQueue()
     }, interval)
     return () => { cancelled = true; clearInterval(timer) }
-  }, [refreshQueue, runningTask])
+  }, [refreshQueue, runningTaskId])
 
   useEventStream((evt: StudioEvent) => {
     if (evt.type === 'task_state_changed') {
