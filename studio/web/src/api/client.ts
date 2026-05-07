@@ -1137,6 +1137,11 @@ export const api = {
 
 // Generate (独立图片生成) -------------------------------------------------------
 
+export interface LoraEntry {
+  path: string
+  scale: number
+}
+
 export interface GenerateRequest {
   prompts: string[]
   negative_prompt?: string
@@ -1148,7 +1153,7 @@ export interface GenerateRequest {
   scheduler?: string
   count?: number
   seed?: number
-  lora_path?: string
+  lora_configs?: LoraEntry[]
   mixed_precision?: string
   xformers?: boolean
 }

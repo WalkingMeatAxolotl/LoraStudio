@@ -1743,6 +1743,11 @@ def version_thumb(
 # ---------------------------------------------------------------------------
 
 
+class _LoraEntry(BaseModel):
+    path: str
+    scale: float = 1.0
+
+
 class GenerateRequest(BaseModel):
     prompts: list[str] = ["newest, safe, 1girl, masterpiece, best quality"]
     negative_prompt: str = ""
@@ -1754,7 +1759,7 @@ class GenerateRequest(BaseModel):
     scheduler: str = "simple"
     count: int = 1
     seed: int = 0
-    lora_path: str = ""
+    lora_configs: list[_LoraEntry] = []
     mixed_precision: str = "bf16"
     xformers: bool = False
 
@@ -1798,7 +1803,7 @@ def enqueue_generate(body: GenerateRequest) -> dict[str, Any]:
         scheduler=body.scheduler,
         count=body.count,
         seed=body.seed,
-        lora_path=body.lora_path,
+        lora_configs=[lc.model_dump() for lc in body.lora_configs],
         mixed_precision=body.mixed_precision,
         xformers=body.xformers,
     )

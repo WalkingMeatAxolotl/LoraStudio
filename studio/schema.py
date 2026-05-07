@@ -429,8 +429,11 @@ class GenerateConfig(BaseModel):
     count: int = Field(1, ge=1, le=32, description="每个 prompt 生成张数")
     seed: int = Field(0, description="随机种子（0=随机）")
 
-    # 可选 LoRA
-    lora_path: str = Field("", description="LoRA 权重路径（留空=不加载）")
+    # 可选 LoRA（支持多个，叠加合并）
+    lora_configs: list[dict] = Field(
+        default_factory=list,
+        description="LoRA 配置列表，每项 {path: str, scale: float}",
+    )
 
     # 运行时
     output_dir: str = Field("", description="输出目录（由服务端填充）")

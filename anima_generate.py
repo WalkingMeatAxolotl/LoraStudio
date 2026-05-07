@@ -46,6 +46,39 @@ def _read_lora_meta(lora_path: str) -> dict:
         return {}
 
 
+def load_loras(model, lora_configs: list[dict], device: str, dtype) -> None:
+    """加载并合并多个 LoRA（按 scale 加权叠加权重）。"""
+    valid = [c for c in lora_configs if c.get("path") and Path(c["path"]).exists()]
+    if not valid:
+        return
+
+    from safetensors import safe_open
+
+    merged: dict = {}
+    first_meta: dict = {}
+    for lora_cfg in valid:
+        path = lora_cfg["path"]
+        scale = float(lora_cfg.get("scale", 1.0))
+        meta = _read_lora_meta(path)
+        if not first_meta:
+            first_meta = meta
+        with safe_open(path, framework="pt", device="cpu") as f:
+            for k in f.keys():
+                t = f.get_tensor(k).to(device=device, dtype=dtype) * scale
+                merged[k] = merged[k] + t if k in merged else t
+
+    if not merged:
+        return
+
+    algo = first_meta.get("algo", "lokr")
+    factor = int(first_meta.get("factor", 8))
+    from utils.lycoris_adapter import AnimaLycorisAdapter
+    injector = AnimaLycorisAdapter(algo=algo, rank=32, alpha=32.0, factor=factor)
+    injector.inject(model)
+    injector.load_state_dict(merged, strict=False)
+    logger.info(f"已加载 {len(valid)} 个 LoRA")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -71,7 +104,7 @@ def main() -> None:
     scheduler: str = cfg.get("scheduler", "simple")
     count: int = max(1, int(cfg.get("count", 1)))
     base_seed: int = int(cfg.get("seed", 0))
-    lora_path: str = cfg.get("lora_path", "")
+    lora_configs: list[dict] = cfg.get("lora_configs", [])
     mixed_precision: str = cfg.get("mixed_precision", "bf16")
     xformers: bool = bool(cfg.get("xformers", False))
 
@@ -124,17 +157,8 @@ def main() -> None:
         text_encoder_path, t5_tokenizer_path or None, device, dtype
     )
 
-    # 可选 LoRA
-    if lora_path and Path(lora_path).exists():
-        logger.info(f"加载 LoRA: {lora_path}")
-        lora_meta = _read_lora_meta(lora_path)
-        algo = lora_meta.get("algo", "lokr")
-        factor = int(lora_meta.get("factor", 8))
-        from utils.lycoris_adapter import AnimaLycorisAdapter
-        injector = AnimaLycorisAdapter(algo=algo, rank=32, alpha=32.0, factor=factor)
-        injector.inject(model)
-        injector.load(lora_path)
-        logger.info("LoRA 加载完成")
+    # 可选 LoRA（支持多个）
+    load_loras(model, lora_configs, device, dtype)
 
     model.eval()
 
