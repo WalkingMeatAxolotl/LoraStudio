@@ -121,22 +121,30 @@ export default function Topbar() {
     }
   }, [])
 
+  // 队列状态走 SSE：mount 拉一次冷启动，之后只在 task_state_changed /
+  // monitor_state_updated 事件来时更新。SSE 重连后 onOpen 也补一次冷启动
+  // 防漏事件。不再轮询（之前 3-10s setInterval 在 1 个 running task 下会
+  // 攒成每秒 7+ 请求的死循环 bug，根因是 useEffect deps 用了 Task 对象）。
   useEffect(() => {
-    let cancelled = false
     void refreshQueue()
-    const interval = runningTask ? 3000 : 10000
-    const timer = setInterval(() => {
-      if (cancelled) return
-      void refreshQueue()
-    }, interval)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [refreshQueue, runningTask])
+  }, [refreshQueue])
 
-  useEventStream((evt: StudioEvent) => {
-    if (evt.type === 'task_state_changed') {
-      void refreshQueue()
-    }
-  })
+  useEventStream(
+    (evt: StudioEvent) => {
+      if (evt.type === 'task_state_changed') {
+        void refreshQueue()
+      } else if (
+        evt.type === 'monitor_state_updated' &&
+        runningTask &&
+        String(evt.task_id) === String(runningTask.id) &&
+        evt.state
+      ) {
+        // 后端 SSE 已经把 state 全量塞 payload 里，直接 setState，不再 fetch
+        setMonitor(evt.state as MonitorState)
+      }
+    },
+    { onOpen: () => void refreshQueue() },
+  )
 
   // ⌘K / Ctrl+K
   useEffect(() => {
