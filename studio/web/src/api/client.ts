@@ -218,12 +218,51 @@ export interface AnimaVaeCatalog extends ModelFileStatus {
 }
 
 export interface ModelDirCatalog {
-  id: 'qwen3' | 't5_tokenizer' | 'cltagger'
+  id: 'qwen3' | 't5_tokenizer'
   name: string
   description: string
   repo: string
   target_dir: string
   files: Array<{ name: string; exists: boolean; size: number; mtime: number }>
+}
+
+export interface WD14VariantInfo {
+  model_id: string
+  is_current: boolean
+  target_path: string
+  exists: boolean
+  size: number
+  files: Array<{ name: string; exists: boolean; size: number; mtime: number }>
+}
+
+export interface WD14Catalog {
+  id: 'wd14'
+  name: string
+  description: string
+  repo: string
+  current_model_id: string
+  variants: WD14VariantInfo[]
+}
+
+export interface CLTaggerVariantInfo {
+  label: string
+  model_path: string
+  tag_mapping_path: string
+  is_current: boolean
+  exists: boolean
+  size: number
+  files: Array<{ name: string; exists: boolean; size: number; mtime: number }>
+}
+
+export interface CLTaggerCatalog {
+  id: 'cltagger'
+  name: string
+  description: string
+  repo: string
+  target_dir: string
+  current_model_path: string
+  current_tag_mapping_path: string
+  variants: CLTaggerVariantInfo[]
 }
 
 export interface ModelDownloadStatus {
@@ -241,7 +280,8 @@ export interface ModelsCatalog {
   anima_vae: AnimaVaeCatalog
   qwen3: ModelDirCatalog
   t5_tokenizer: ModelDirCatalog
-  cltagger: ModelDirCatalog
+  wd14: WD14Catalog
+  cltagger: CLTaggerCatalog
   downloads: Record<string, ModelDownloadStatus>
 }
 

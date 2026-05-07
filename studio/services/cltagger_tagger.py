@@ -15,7 +15,7 @@ from PIL import Image, ImageOps
 
 from .. import secrets
 from . import model_downloader
-from .onnx_tagger_base import OnnxTaggerBase, safe_dir_name
+from .onnx_tagger_base import OnnxTaggerBase
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class CLTagger(OnnxTaggerBase):
         cfg = self._cfg()
         if cfg.local_dir:
             return Path(cfg.local_dir)
-        return model_downloader.models_root() / "cltagger" / safe_dir_name(cfg.model_id)
+        return model_downloader.cltagger_target_root(model_downloader.models_root(), cfg.model_id)
 
     def _local_model_files_status(self) -> tuple[Path, Path, bool]:
         cfg = self._cfg()

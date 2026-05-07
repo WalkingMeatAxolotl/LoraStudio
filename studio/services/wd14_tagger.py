@@ -17,8 +17,8 @@ import numpy as np
 from PIL import Image, ImageOps
 
 from .. import secrets
-from ..paths import REPO_ROOT
-from .onnx_tagger_base import OnnxTaggerBase, safe_dir_name
+from . import model_downloader
+from .onnx_tagger_base import OnnxTaggerBase
 
 
 class WD14Tagger(OnnxTaggerBase):
@@ -58,7 +58,7 @@ class WD14Tagger(OnnxTaggerBase):
             d = Path(cfg.local_dir)
             ok = (d / "model.onnx").exists() and (d / "selected_tags.csv").exists()
             return d, ok
-        d = REPO_ROOT / "models" / "wd14" / safe_dir_name(cfg.model_id)
+        d = model_downloader.wd14_target_dir(model_downloader.models_root(), cfg.model_id)
         ok = (d / "model.onnx").exists() and (d / "selected_tags.csv").exists()
         return d, ok
 
@@ -71,7 +71,7 @@ class WD14Tagger(OnnxTaggerBase):
                     f"local_dir 缺少 model.onnx 或 selected_tags.csv: {d}"
                 )
             return d
-        default = REPO_ROOT / "models" / "wd14" / safe_dir_name(cfg.model_id)
+        default = model_downloader.wd14_target_dir(model_downloader.models_root(), cfg.model_id)
         if (default / "model.onnx").exists() and (default / "selected_tags.csv").exists():
             return default
         return self._download_model(cfg.model_id, default)

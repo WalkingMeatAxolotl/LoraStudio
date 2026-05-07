@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   api,
   DEFAULT_WD14_MODELS,
+  type CLTaggerVariantInfo,
   type ModelDownloadStatus,
   type ModelsCatalog,
   type Secrets,
@@ -101,6 +102,11 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [tab, setTab] = useState<Tab>(getStoredTab)
+  // Models catalog hoisted here so 打标 tab 的 WD14/CLTagger 卡片和 训练 tab
+  // 的 ModelsSection 共用一份数据 + 一个 SSE 订阅。
+  const [catalog, setCatalog] = useState<ModelsCatalog | null>(null)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+  const [downloadBusy, setDownloadBusy] = useState<Set<string>>(new Set())
   const { toast } = useToast()
 
   const switchTab = (next: Tab) => {
@@ -111,6 +117,36 @@ export default function SettingsPage() {
       /* ignore localStorage errors */
     }
   }
+
+  const reloadCatalog = useCallback(async () => {
+    try {
+      const c = await api.getModelsCatalog()
+      setCatalog(c)
+      setCatalogError(null)
+    } catch (e) {
+      setCatalogError(String(e))
+    }
+  }, [])
+
+  useEffect(() => { void reloadCatalog() }, [reloadCatalog])
+
+  useEventStream((evt) => {
+    if (evt.type === 'model_download_changed') { void reloadCatalog() }
+  })
+
+  const startDownload = useCallback(async (model_id: string, variant?: string) => {
+    const key = variant ? `${model_id}:${variant}` : model_id
+    setDownloadBusy((s) => new Set(s).add(key))
+    try {
+      await api.startModelDownload({ model_id, variant })
+      toast(`开始下载 ${key}`, 'success')
+      await reloadCatalog()
+    } catch (e) {
+      toast(String(e), 'error')
+    } finally {
+      setDownloadBusy((s) => { const n = new Set(s); n.delete(key); return n })
+    }
+  }, [reloadCatalog, toast])
 
   useEffect(() => {
     api
@@ -147,6 +183,8 @@ export default function SettingsPage() {
       const next = await api.updateSecrets(patch)
       setServer(next)
       setDraft(next)
+      // 候选 model_ids 改了之后，catalog 里的 wd14 variants 需要刷新
+      void reloadCatalog()
       toast('已保存', 'success')
     } catch (e) {
       setError(String(e))
@@ -331,23 +369,15 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection title="WD14">
-        <SettingsField label="model_id (当前选用)">
-          <select
-            value={draft.wd14.model_id}
-            onChange={(e) => update('wd14', 'model_id', e.target.value)}
-            className={textInputClass}          >
-            {(draft.wd14.model_ids.length > 0 ? draft.wd14.model_ids : [...DEFAULT_WD14_MODELS]).map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </SettingsField>
-        <SettingsField label="候选模型 (model_ids)">
-          <ModelIdsEditor
-            ids={draft.wd14.model_ids}
-            currentId={draft.wd14.model_id}
-            onChange={(next) => update('wd14', 'model_ids', next)}
-          />
-        </SettingsField>
+        <WD14ModelCard
+          catalog={catalog}
+          busy={downloadBusy}
+          start={startDownload}
+          currentModelId={draft.wd14.model_id}
+          onSelectModelId={(id) => update('wd14', 'model_id', id)}
+          candidates={draft.wd14.model_ids}
+          onCandidatesChange={(next) => update('wd14', 'model_ids', next)}
+        />
         <SettingsField label="local_dir (留空 = 自动 HF 下载)">
           <input
             type="text"
@@ -387,27 +417,19 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection title="CLTagger">
-        <SettingsField label="model_id">
-          <input
-            type="text"
-            value={draft.cltagger.model_id}
-            onChange={(e) => update('cltagger', 'model_id', e.target.value)}
-            className={textInputClass}                                  />
-        </SettingsField>
-        <SettingsField label="model_path">
-          <input
-            type="text"
-            value={draft.cltagger.model_path}
-            onChange={(e) => update('cltagger', 'model_path', e.target.value)}
-            className={textInputClass}                                  />
-        </SettingsField>
-        <SettingsField label="tag_mapping_path">
-          <input
-            type="text"
-            value={draft.cltagger.tag_mapping_path}
-            onChange={(e) => update('cltagger', 'tag_mapping_path', e.target.value)}
-            className={textInputClass}                                  />
-        </SettingsField>
+        <CLTaggerModelCard
+          catalog={catalog}
+          busy={downloadBusy}
+          start={startDownload}
+          currentModelPath={draft.cltagger.model_path}
+          currentTagMappingPath={draft.cltagger.tag_mapping_path}
+          onSelectVariant={(v: CLTaggerVariantInfo) => {
+            update('cltagger', 'model_path', v.model_path)
+            update('cltagger', 'tag_mapping_path', v.tag_mapping_path)
+          }}
+          modelId={draft.cltagger.model_id}
+          onModelIdChange={(id) => update('cltagger', 'model_id', id)}
+        />
         <SettingsField label="local_dir (留空 = 自动 HF 下载)">
           <input
             type="text"
@@ -479,7 +501,13 @@ export default function SettingsPage() {
         </SettingsField>
       </SettingsSection>
 
-      <ModelsSection />
+      <ModelsSection
+        catalog={catalog}
+        busy={downloadBusy}
+        start={startDownload}
+        reloadCatalog={reloadCatalog}
+        catalogError={catalogError}
+      />
       </>)}
 
       {tab === 'appearance' && (
@@ -590,6 +618,148 @@ function ModelIdsEditor({ ids, currentId, onChange }: {
   )
 }
 
+// ── WD14 / CLTagger Model Cards（打标 tab 内嵌的模型管理器） ─────────────────
+
+function WD14ModelCard({
+  catalog, busy, start,
+  currentModelId, onSelectModelId,
+  candidates, onCandidatesChange,
+}: {
+  catalog: ModelsCatalog | null
+  busy: Set<string>
+  start: (model_id: string, variant?: string) => Promise<void>
+  currentModelId: string
+  onSelectModelId: (id: string) => void
+  candidates: string[]
+  onCandidatesChange: (next: string[]) => void
+}) {
+  const [advOpen, setAdvOpen] = useState(false)
+  const wd14 = catalog?.wd14
+  if (!wd14) {
+    return <p className="text-fg-tertiary text-xs">加载模型清单...</p>
+  }
+  return (
+    <ModelGroupCard title={wd14.name + '（候选模型）'}>
+      <p className="text-xs text-fg-tertiary m-0">
+        {wd14.description} · 选中作为当前 model_id；下载缺的版本。
+      </p>
+      <ul className="list-none m-0 p-0 flex flex-col gap-1">
+        {wd14.variants.map((v) => {
+          const key = `wd14:${v.model_id}`
+          const dl = catalog.downloads[key]
+          const isSel = v.model_id === currentModelId
+          return (
+            <li key={v.model_id} className={`flex items-center gap-2 text-xs px-1.5 py-1 rounded-sm ${
+              isSel ? 'bg-accent-soft border border-accent' : 'bg-transparent border border-transparent'
+            }`}>
+              <input type="radio" name="wd14_variant" checked={isSel}
+                onChange={() => onSelectModelId(v.model_id)}
+                className="shrink-0"
+                style={{ accentColor: 'var(--accent)' }}
+                title="选作 WD14 当前 model_id"
+              />
+              <code className="font-mono text-fg-primary flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{v.model_id}</code>
+              <ModelStatusBadge
+                exists={v.exists} size={v.size} status={dl?.status}
+                fileCount={v.files.length}
+                existsCount={v.files.filter((f) => f.exists).length}
+              />
+              <DownloadButton
+                exists={v.exists} status={dl?.status} busy={busy.has(key)}
+                onClick={() => void start('wd14', v.model_id)}
+              />
+            </li>
+          )
+        })}
+      </ul>
+      <button type="button" onClick={() => setAdvOpen(!advOpen)}
+        className="btn btn-ghost btn-sm text-xs text-fg-tertiary self-start">
+        {advOpen ? '▾' : '▸'} 候选编辑（添加/删除自定义 model_id）
+      </button>
+      {advOpen && (
+        <ModelIdsEditor
+          ids={candidates} currentId={currentModelId}
+          onChange={onCandidatesChange}
+        />
+      )}
+    </ModelGroupCard>
+  )
+}
+
+function CLTaggerModelCard({
+  catalog, busy, start,
+  currentModelPath, currentTagMappingPath, onSelectVariant,
+  modelId, onModelIdChange,
+}: {
+  catalog: ModelsCatalog | null
+  busy: Set<string>
+  start: (model_id: string, variant?: string) => Promise<void>
+  currentModelPath: string
+  currentTagMappingPath: string
+  onSelectVariant: (v: CLTaggerVariantInfo) => void
+  modelId: string
+  onModelIdChange: (id: string) => void
+}) {
+  const [advOpen, setAdvOpen] = useState(false)
+  const cl = catalog?.cltagger
+  if (!cl) {
+    return <p className="text-fg-tertiary text-xs">加载模型清单...</p>
+  }
+  return (
+    <ModelGroupCard title={cl.name + '（版本）'}>
+      <p className="text-xs text-fg-tertiary m-0">
+        {cl.description} · <code>{cl.repo}</code>
+      </p>
+      <ul className="list-none m-0 p-0 flex flex-col gap-1">
+        {cl.variants.map((v) => {
+          const key = `cltagger:${v.label}`
+          const dl = catalog.downloads[key]
+          const isSel =
+            v.model_path === currentModelPath &&
+            v.tag_mapping_path === currentTagMappingPath
+          return (
+            <li key={v.label} className={`flex items-center gap-2 text-xs px-1.5 py-1 rounded-sm ${
+              isSel ? 'bg-accent-soft border border-accent' : 'bg-transparent border border-transparent'
+            }`}>
+              <input type="radio" name="cltagger_variant" checked={isSel}
+                onChange={() => onSelectVariant(v)}
+                className="shrink-0"
+                style={{ accentColor: 'var(--accent)' }}
+                title="选作 CLTagger 当前版本"
+              />
+              <code className="font-mono text-fg-primary flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{v.label}</code>
+              <ModelStatusBadge
+                exists={v.exists} size={v.size} status={dl?.status}
+                fileCount={v.files.length}
+                existsCount={v.files.filter((f) => f.exists).length}
+              />
+              <DownloadButton
+                exists={v.exists} status={dl?.status} busy={busy.has(key)}
+                onClick={() => void start('cltagger', v.label)}
+              />
+            </li>
+          )
+        })}
+      </ul>
+      <button type="button" onClick={() => setAdvOpen(!advOpen)}
+        className="btn btn-ghost btn-sm text-xs text-fg-tertiary self-start">
+        {advOpen ? '▾' : '▸'} 自定义 repo（高级）
+      </button>
+      {advOpen && (
+        <SettingsField label="model_id">
+          <input
+            type="text"
+            value={modelId}
+            onChange={(e) => onModelIdChange(e.target.value)}
+            className={textInputClass}
+            placeholder="cella110n/cl_tagger"
+          />
+        </SettingsField>
+      )}
+    </ModelGroupCard>
+  )
+}
+
 function buildPatch(draft: Secrets, server: Secrets): SecretsPatch {
   const out: Record<string, Record<string, unknown>> = {}
   for (const key of Object.keys(draft) as Section[]) {
@@ -616,29 +786,27 @@ function fmtBytes(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
-function ModelsSection() {
+function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError }: {
+  catalog: ModelsCatalog | null
+  busy: Set<string>
+  start: (model_id: string, variant?: string) => Promise<void>
+  reloadCatalog: () => Promise<void>
+  catalogError: string | null
+}) {
   const { toast } = useToast()
-  const [catalog, setCatalog] = useState<ModelsCatalog | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<Set<string>>(new Set())
   const [rootDraft, setRootDraft] = useState<string>('')
   const [serverRoot, setServerRoot] = useState<string | null>(null)
   const [savingRoot, setSavingRoot] = useState(false)
   const [selectedAnima, setSelectedAnima] = useState<string>('preview3-base')
 
-  const reload = useCallback(async () => {
-    try {
-      const [c, sec] = await Promise.all([api.getModelsCatalog(), api.getSecrets()])
-      setCatalog(c)
-      const root = sec.models?.root ?? null
-      setServerRoot(root)
-      setRootDraft((prev) => (prev === '' || prev === (serverRoot ?? '') ? root ?? '' : prev))
+  // 一次性拉一份 secrets 取 models.root + selected_anima（这两项走独立 PUT，
+  // 不进 SettingsPage 的全局 dirty 流程）。catalog 由父级注入。
+  useEffect(() => {
+    void api.getSecrets().then((sec) => {
+      setServerRoot(sec.models?.root ?? null)
+      setRootDraft(sec.models?.root ?? '')
       setSelectedAnima(sec.models?.selected_anima ?? 'preview3-base')
-      setError(null)
-    } catch (e) {
-      setError(String(e))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }).catch(() => {})
   }, [])
 
   const pickAnima = async (variant: string) => {
@@ -647,14 +815,12 @@ function ModelsSection() {
     try {
       await api.updateSecrets({ models: { selected_anima: variant } })
       toast(`默认主模型已切到 ${variant}`, 'success')
-      await reload()
+      await reloadCatalog()
     } catch (e) {
       toast(String(e), 'error')
-      void reload()
+      void reloadCatalog()
     }
   }
-
-  useEffect(() => { void reload() }, [reload])
 
   const saveRoot = async () => {
     const v = rootDraft.trim()
@@ -662,7 +828,8 @@ function ModelsSection() {
     try {
       await api.updateSecrets({ models: { root: v ? v : null } })
       toast(v ? `已保存模型根目录: ${v}` : '已恢复默认模型根目录', 'success')
-      await reload()
+      setServerRoot(v ? v : null)
+      await reloadCatalog()
     } catch (e) {
       toast(String(e), 'error')
     } finally {
@@ -671,27 +838,10 @@ function ModelsSection() {
   }
 
   const rootDirty = rootDraft.trim() !== (serverRoot ?? '')
-
-  useEventStream((evt) => {
-    if (evt.type === 'model_download_changed') { void reload() }
-  })
-
-  const start = async (model_id: string, variant?: string) => {
-    const key = variant ? `${model_id}:${variant}` : model_id
-    setBusy((s) => new Set(s).add(key))
-    try {
-      await api.startModelDownload({ model_id, variant })
-      toast(`开始下载 ${key}`, 'success')
-      await reload()
-    } catch (e) {
-      toast(String(e), 'error')
-    } finally {
-      setBusy((s) => { const n = new Set(s); n.delete(key); return n })
-    }
-  }
+  const error = catalogError
 
   return (
-    <SettingsSection title="Models（一键下载训练所需模型）">
+    <SettingsSection title="训练模型（一键下载）">
       <SettingsField label="模型根目录 (models_root)">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input
@@ -758,8 +908,8 @@ function ModelsSection() {
             </div>
           </ModelGroupCard>
 
-          {/* Qwen3 + T5 */}
-          {(['qwen3', 't5_tokenizer', 'cltagger'] as const).map((id) => {
+          {/* Qwen3 + T5（CLTagger 已挪到「打标」tab） */}
+          {(['qwen3', 't5_tokenizer'] as const).map((id) => {
             const m = catalog[id]
             const dl = catalog.downloads[id]
             const allExist = m.files.every((f) => f.exists)

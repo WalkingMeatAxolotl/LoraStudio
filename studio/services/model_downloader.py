@@ -62,6 +62,19 @@ T5_FILES = [
     "special_tokens_map.json",
 ]
 
+# CLTagger 子目录布局：仓库内 cl_tagger_1_02/model.onnx 等。新版本（1.03 等）
+# 出现时往这里加一行；UI 自动作为 radio 选项暴露。
+# label → (model_path, tag_mapping_path)
+CLTAGGER_VERSIONS: dict[str, tuple[str, str]] = {
+    "cl_tagger_1_02": (
+        "cl_tagger_1_02/model.onnx",
+        "cl_tagger_1_02/tag_mapping.json",
+    ),
+}
+
+# WD14 模型常驻文件名（HF SmilingWolf/* 仓库顶层都是这两个）。
+WD14_FILES = ("model.onnx", "selected_tags.csv")
+
 # ---------------------------------------------------------------------------
 # paths
 # ---------------------------------------------------------------------------
@@ -104,6 +117,16 @@ def qwen_dir(root: Path) -> Path:
 
 def t5_tokenizer_dir(root: Path) -> Path:
     return root / "t5_tokenizer"
+
+
+def wd14_target_dir(root: Path, model_id: str) -> Path:
+    """WD14 单个 model_id 的本地目录。同 wd14_tagger 的 _resolve_model_dir 路径布局。"""
+    return root / "wd14" / safe_dir_name(model_id)
+
+
+def cltagger_target_root(root: Path, model_id: str) -> Path:
+    """CLTagger repo 的本地根目录。子目录布局来自 CLTAGGER_VERSIONS。"""
+    return root / "cltagger" / safe_dir_name(model_id)
 
 
 def find_anima_main(root: Optional[Path] = None) -> Optional[Path]:
@@ -273,6 +296,24 @@ def download_cltagger(
     return ok
 
 
+def download_wd14(
+    model_id: str,
+    root: Optional[Path] = None,
+    *,
+    on_log: Callable[[str], None] = print,
+) -> bool:
+    """下载 WD14 单个 model_id 的两个文件到 `{models_root}/wd14/{safe_id}/`。"""
+    r = root or models_root()
+    target = wd14_target_dir(r, model_id)
+    on_log(f"\n📥 WD14 {model_id} → {target}")
+    target.mkdir(parents=True, exist_ok=True)
+    ok = True
+    for f in WD14_FILES:
+        if not download_flat(model_id, f, target / f, on_log=on_log):
+            ok = False
+    return ok
+
+
 # ---------------------------------------------------------------------------
 # catalog
 # ---------------------------------------------------------------------------
@@ -310,7 +351,43 @@ def build_catalog(root: Optional[Path] = None) -> dict[str, Any]:
     qwen_d = qwen_dir(r)
     t5_d = t5_tokenizer_dir(r)
     cl_cfg = secrets.load().cltagger
-    cl_root = r / "cltagger" / safe_dir_name(cl_cfg.model_id)
+    wd14_cfg = secrets.load().wd14
+
+    # WD14 候选每个 model_id 一行：两文件全在才算"已下载"。
+    wd14_variants = []
+    for mid in wd14_cfg.model_ids:
+        target = wd14_target_dir(r, mid)
+        files = [{"name": f, **_file_status(target / f)} for f in WD14_FILES]
+        all_exist = all(f["exists"] for f in files)
+        total_size = sum(f["size"] for f in files)
+        wd14_variants.append({
+            "model_id": mid,
+            "is_current": mid == wd14_cfg.model_id,
+            "target_path": str(target),
+            "exists": all_exist,
+            "size": total_size,
+            "files": files,
+        })
+
+    # CLTagger 版本预设（CLTAGGER_VERSIONS 写死的子目录布局）。
+    cl_root = cltagger_target_root(r, cl_cfg.model_id)
+    cl_variants = []
+    for label, (mp, tmp) in CLTAGGER_VERSIONS.items():
+        files = [
+            {"name": mp, **_file_status(cl_root / mp)},
+            {"name": tmp, **_file_status(cl_root / tmp)},
+        ]
+        all_exist = all(f["exists"] for f in files)
+        total_size = sum(f["size"] for f in files)
+        cl_variants.append({
+            "label": label,
+            "model_path": mp,
+            "tag_mapping_path": tmp,
+            "is_current": cl_cfg.model_path == mp and cl_cfg.tag_mapping_path == tmp,
+            "exists": all_exist,
+            "size": total_size,
+            "files": files,
+        })
 
     return {
         "models_root": str(r),
@@ -350,16 +427,23 @@ def build_catalog(root: Optional[Path] = None) -> dict[str, Any]:
                 {"name": f, **_file_status(t5_d / f)} for f in T5_FILES
             ],
         },
+        "wd14": {
+            "id": "wd14",
+            "name": "WD14",
+            "description": "SmilingWolf 系列 ONNX 打标",
+            "repo": "SmilingWolf/*",
+            "current_model_id": wd14_cfg.model_id,
+            "variants": wd14_variants,
+        },
         "cltagger": {
             "id": "cltagger",
             "name": "CLTagger",
             "description": "cella110n CLTagger ONNX",
             "repo": cl_cfg.model_id,
             "target_dir": str(cl_root),
-            "files": [
-                {"name": f, **_file_status(cl_root / f)}
-                for f in (cl_cfg.model_path, cl_cfg.tag_mapping_path)
-            ],
+            "current_model_path": cl_cfg.model_path,
+            "current_tag_mapping_path": cl_cfg.tag_mapping_path,
+            "variants": cl_variants,
         },
         "downloads": get_status_snapshot(),
     }
@@ -497,10 +581,29 @@ def trigger(model_id: str, variant: Optional[str] = None) -> str:
         return key
     if model_id == "cltagger":
         cfg = secrets.load().cltagger
-        key = "cltagger"
-        target = root / "cltagger" / safe_dir_name(cfg.model_id)
+        target = cltagger_target_root(root, cfg.model_id)
+        # variant 可指定预设 label（覆盖 cfg 当前的 model_path），便于 UI 一键
+        # 下载非"当前选中"的版本。未指定时用 cfg 当前路径。
+        if variant:
+            preset = CLTAGGER_VERSIONS.get(variant)
+            if preset is None:
+                raise ValueError(f"unknown cltagger variant {variant!r}")
+            cfg = secrets.CLTaggerConfig(
+                **{**cfg.model_dump(), "model_path": preset[0], "tag_mapping_path": preset[1]}
+            )
+            key = f"cltagger:{variant}"
+        else:
+            key = "cltagger"
         start_download_async(
             key, lambda log: download_cltagger(target, cfg, on_log=log)
+        )
+        return key
+    if model_id == "wd14":
+        if not variant:
+            raise ValueError("wd14 需要 variant=model_id")
+        key = f"wd14:{variant}"
+        start_download_async(
+            key, lambda log: download_wd14(variant, root, on_log=log)
         )
         return key
     raise ValueError(f"unknown model_id {model_id!r}")
