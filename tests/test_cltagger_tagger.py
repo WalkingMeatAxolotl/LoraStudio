@@ -99,3 +99,13 @@ def test_tag_iterator_runs_onnx_batch(isolated_secrets: Path, tmp_path: Path) ->
     assert [r["tags"] for r in results] == [["x"], ["x"]]
     fed = t._session.run.call_args[0][1]["input"]
     assert fed.shape == (2, 3, 4, 4)
+
+
+def test_preprocess_supports_nhwc_layout(isolated_secrets: Path) -> None:
+    t = cltagger_tagger.CLTagger()
+    t._input_size = 4
+    t._input_layout = "nhwc"
+    arr = t._preprocess(Image.new("RGB", (8, 8), (255, 0, 0)))
+    assert arr.shape == (4, 4, 3)
+    assert arr[0, 0, 0] == pytest.approx(-1.0, abs=1e-4)  # B
+    assert arr[0, 0, 2] == pytest.approx(1.0, abs=1e-4)   # R

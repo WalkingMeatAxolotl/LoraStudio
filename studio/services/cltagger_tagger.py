@@ -40,6 +40,7 @@ class CLTagger:
         self._input_name: str | None = None
         self._output_names: list[str] | None = None
         self._input_size: int = 448
+        self._input_layout: str = "nchw"
 
     def _cfg(self) -> "secrets.CLTaggerConfig":
         base = secrets.load().cltagger.model_dump()
@@ -113,15 +114,36 @@ class CLTagger:
             self._session = ort.InferenceSession(
                 str(model_path), providers=["CPUExecutionProvider"]
             )
-        self._input_name = self._session.get_inputs()[0].name
+        input_meta = self._session.get_inputs()[0]
+        self._input_name = input_meta.name
         self._output_names = [o.name for o in self._session.get_outputs()]
-        self._input_size = self._infer_input_size(self._session.get_inputs()[0].shape)
+        self._input_layout = self._infer_input_layout(input_meta.shape)
+        self._input_size = self._infer_input_size(input_meta.shape, self._input_layout)
         self._labels = self._load_tag_mapping(mapping_path)
 
     @staticmethod
-    def _infer_input_size(shape: list[object]) -> int:
-        for dim in reversed(shape):
-            if isinstance(dim, int) and dim > 0:
+    def _infer_input_layout(shape: list[object]) -> str:
+        if len(shape) >= 4:
+            if shape[1] == 3:
+                return "nchw"
+            if shape[-1] == 3:
+                return "nhwc"
+        return "nchw"
+
+    @staticmethod
+    def _infer_input_size(shape: list[object], layout: str) -> int:
+        dims = list(shape)
+        if len(dims) >= 4:
+            if layout == "nchw":
+                for dim in (dims[2], dims[3]):
+                    if isinstance(dim, int) and dim > 0:
+                        return dim
+            else:
+                for dim in (dims[1], dims[2]):
+                    if isinstance(dim, int) and dim > 0:
+                        return dim
+        for dim in reversed(dims):
+            if isinstance(dim, int) and dim > 0 and dim != 3:
                 return dim
         return 448
 
@@ -167,9 +189,14 @@ class CLTagger:
             img = canvas
         img = img.resize((size, size), Image.Resampling.BICUBIC)
         arr = np.asarray(img, dtype=np.float32) / 255.0
-        arr = arr.transpose(2, 0, 1)[::-1, :, :]
-        mean = np.array([0.5, 0.5, 0.5], dtype=np.float32).reshape(3, 1, 1)
-        std = np.array([0.5, 0.5, 0.5], dtype=np.float32).reshape(3, 1, 1)
+        arr = arr[..., ::-1]  # RGB -> BGR
+        if self._input_layout == "nchw":
+            arr = arr.transpose(2, 0, 1)
+            mean = np.array([0.5, 0.5, 0.5], dtype=np.float32).reshape(3, 1, 1)
+            std = np.array([0.5, 0.5, 0.5], dtype=np.float32).reshape(3, 1, 1)
+        else:
+            mean = np.array([0.5, 0.5, 0.5], dtype=np.float32).reshape(1, 1, 3)
+            std = np.array([0.5, 0.5, 0.5], dtype=np.float32).reshape(1, 1, 3)
         return (arr - mean) / std
 
     @staticmethod
