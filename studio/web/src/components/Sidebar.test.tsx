@@ -12,9 +12,9 @@ function renderAt(path: string) {
 }
 
 describe('Sidebar (PP0)', () => {
-  it('groups main items + tools panel with all 5 destinations', () => {
+  it('shows main items + tools with all 5 destinations', () => {
     renderAt('/')
-    // Main
+    // 主导航
     expect(screen.getByRole('link', { name: /项目/ })).toHaveAttribute(
       'href',
       '/'
@@ -23,8 +23,8 @@ describe('Sidebar (PP0)', () => {
       'href',
       '/queue'
     )
-    // Tools group
-    expect(screen.getByText('工具')).toBeInTheDocument()
+    // 工具区（重设计后没有 "工具" 分组 label，只是用 border-top 分隔；
+    // 这里只验证三个链接到位即可）
     expect(screen.getByRole('link', { name: /预设/ })).toHaveAttribute(
       'href',
       '/tools/presets'
@@ -39,13 +39,16 @@ describe('Sidebar (PP0)', () => {
     )
   })
 
-  it('marks the active route with cyan styling', () => {
+  it('marks the active route', () => {
     renderAt('/tools/presets')
     const link = screen.getByRole('link', { name: /预设/ })
-    expect(link.className).toMatch(/text-cyan-300/)
-    // Non-active link does not get the active class
+    // 活跃 link：bg-surface + font-semibold（重设计 token 化后的活跃态）
+    expect(link.className).toMatch(/bg-surface/)
+    expect(link.className).toMatch(/font-semibold/)
+    // 非活跃 link 没有这俩
     const queue = screen.getByRole('link', { name: /队列/ })
-    expect(queue.className).not.toMatch(/text-cyan-300/)
+    expect(queue.className).not.toMatch(/bg-surface/)
+    expect(queue.className).not.toMatch(/font-semibold/)
   })
 
   it('does not include the removed Datasets link', () => {

@@ -11,6 +11,9 @@ interface Props {
   disabledFields?: string[]
   /** 每个 disabled 字段的徽章文字；缺省走 Field 默认「自动 · 项目控制」。 */
   disabledHints?: Record<string, string>
+  /** 字段不 disabled 但要挂个徽章（如「自动 · 项目设置」表示项目预填了，
+   * 但仍允许用户修改）。优先级：disabledHints > autoHints。 */
+  autoHints?: Record<string, string>
 }
 
 /**
@@ -18,10 +21,11 @@ interface Props {
  * show_when 用 evalShowWhen 做条件显示，依赖当前 values。
  */
 export default function SchemaForm({
-  schema, values, onChange, disabledFields, disabledHints,
+  schema, values, onChange, disabledFields, disabledHints, autoHints,
 }: Props) {
   const disabledSet = new Set(disabledFields ?? [])
-  const hints = disabledHints ?? {}
+  const dHints = disabledHints ?? {}
+  const aHints = autoHints ?? {}
   // 用 schema.groups[].default_collapsed 决定初始折叠状态；用户手动改后保留状态。
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     const out: Record<string, boolean> = {}
@@ -52,19 +56,17 @@ export default function SchemaForm({
         return (
           <section
             key={key}
-            className="border border-slate-700 rounded-lg bg-slate-800/40"
+            className="rounded-md border border-subtle bg-surface"
           >
             <button
               type="button"
               onClick={() =>
                 setCollapsed({ ...collapsed, [key]: !isCollapsed })
               }
-              className="w-full flex items-center justify-between
-                px-4 py-3 text-sm font-semibold text-slate-200
-                hover:bg-slate-800/60 transition-colors"
+              className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-fg-primary bg-transparent border-none cursor-pointer"
             >
               <span>{label}</span>
-              <span className="text-slate-500 text-xs">
+              <span className="text-fg-tertiary text-xs">
                 {fields.length} 项 {isCollapsed ? '▸' : '▾'}
               </span>
             </button>
@@ -73,6 +75,8 @@ export default function SchemaForm({
                 {fields.map((name) => {
                   const prop = props[name]
                   if (!evalShowWhen(prop.show_when, values)) return null
+                  const isDisabled = disabledSet.has(name)
+                  const hint = isDisabled ? dHints[name] : aHints[name]
                   return (
                     <Field
                       key={name}
@@ -80,8 +84,8 @@ export default function SchemaForm({
                       prop={prop}
                       value={values[name]}
                       onChange={(v) => setField(name, v)}
-                      disabled={disabledSet.has(name)}
-                      disabledHint={hints[name]}
+                      disabled={isDisabled}
+                      hint={hint}
                     />
                   )
                 })}

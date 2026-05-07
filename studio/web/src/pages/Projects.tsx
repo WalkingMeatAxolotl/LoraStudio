@@ -1,29 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { api, type ProjectStage, type ProjectSummary } from '../api/client'
+import PageHeader from '../components/PageHeader'
+import StageBadge from '../components/StageBadge'
 import { useToast } from '../components/Toast'
 import { useEventStream } from '../lib/useEventStream'
 
-const STAGE_LABEL: Record<ProjectStage, string> = {
-  created: '已创建',
-  downloading: '下载中',
-  curating: '筛选中',
-  tagging: '打标中',
-  regularizing: '正则集中',
-  configured: '已配置',
-  training: '训练中',
-  done: '完成',
+function relativeTime(ts: number): string {
+  const diff = Date.now() / 1000 - ts
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
+  if (diff < 604800) return `${Math.floor(diff / 86400)} 天前`
+  return new Date(ts * 1000).toLocaleDateString('zh-CN')
 }
 
-const STAGE_COLOR: Record<ProjectStage, string> = {
-  created: 'bg-slate-700/60 text-slate-300',
-  downloading: 'bg-amber-700/40 text-amber-200',
-  curating: 'bg-amber-700/40 text-amber-200',
-  tagging: 'bg-amber-700/40 text-amber-200',
-  regularizing: 'bg-amber-700/40 text-amber-200',
-  configured: 'bg-cyan-700/40 text-cyan-200',
-  training: 'bg-violet-700/40 text-violet-200',
-  done: 'bg-emerald-700/40 text-emerald-200',
+// stage → step path for quick-open nav
+const STAGE_STEP: Partial<Record<ProjectStage, string>> = {
+  downloading:  'download',
+  curating:     'curate',
+  tagging:      'tag',
+  regularizing: 'reg',
+  configured:   'train',
+  training:     'train',
 }
 
 export default function ProjectsPage() {
@@ -49,15 +48,10 @@ export default function ProjectsPage() {
     }
   }
 
-  useEffect(() => {
-    void refresh()
-  }, [])
+  useEffect(() => { void refresh() }, [])
 
-  // SSE: project_state_changed → 重拉列表
   useEventStream((evt) => {
-    if (evt.type === 'project_state_changed') {
-      void refresh()
-    }
+    if (evt.type === 'project_state_changed') void refresh()
   })
 
   const handleCreate = async (form: NewProjectForm) => {
@@ -78,14 +72,16 @@ export default function ProjectsPage() {
     }
   }
 
-  const handleDelete = async (p: ProjectSummary) => {
+  const handleDelete = async (p: ProjectSummary, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
     if (!confirm(`移到回收站？\n${p.title} (${p.slug})`)) return
     try {
       await api.deleteProject(p.id)
       toast(`已移到回收站: ${p.title}`, 'success')
       await refresh()
-    } catch (e) {
-      toast(String(e), 'error')
+    } catch (err) {
+      toast(String(err), 'error')
     }
   }
 
@@ -96,14 +92,13 @@ export default function ProjectsPage() {
       const stats = result.stats
       toast(
         `已导入 ${result.project.title}（${stats.image_count} 张图，${stats.tagged_count} 已打标）`,
-        'success'
+        'success',
       )
       navigate(`/projects/${result.project.id}`)
     } catch (e) {
       toast(`导入失败: ${e}`, 'error')
     } finally {
       setImporting(false)
-      // 清空 file input 以便用户能重新选同一个文件
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
@@ -118,111 +113,85 @@ export default function ProjectsPage() {
     }
   }
 
+  const openProject = (p: ProjectSummary) => {
+    navigate(`/projects/${p.id}`)
+  }
+
   return (
-    <div className="space-y-4">
-      <header className="flex items-center gap-3">
-        <h1 className="text-2xl font-semibold flex-1">项目</h1>
-        <button
-          onClick={handleEmptyTrash}
-          className="text-xs text-slate-500 hover:text-slate-300"
-        >
-          清空回收站
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".zip,application/zip"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            if (f) void handleImportFile(f)
-          }}
-        />
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={importing}
-          className="px-3 py-1.5 rounded text-sm bg-slate-700 hover:bg-slate-600 disabled:opacity-50"
-          title={importing ? '上传 + 解压中...' : '上传训练集 zip → 自动新建项目'}
-        >
-          {importing ? '⏳ 导入中...' : '⬆️ 导入训练集'}
-        </button>
-        <button
-          onClick={() => setCreating(true)}
-          className="px-3 py-1.5 rounded text-sm bg-cyan-600 hover:bg-cyan-500"
-        >
-          + 新建项目
-        </button>
-      </header>
-
-      {error && (
-        <div className="p-3 rounded bg-red-900/40 border border-red-700 text-red-300 text-sm font-mono">
-          {error}
-        </div>
-      )}
-
-      {loading ? (
-        <p className="text-slate-500">加载中...</p>
-      ) : items.length === 0 ? (
-        <p className="text-slate-500 mt-12 text-center">
-          还没有项目。点右上角「+ 新建项目」开始一个新的 LoRA 训练。
-        </p>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {items.map((p) => (
-            <article
-              key={p.id}
-              className="rounded-xl border border-slate-700 bg-slate-800/40 p-4 flex flex-col gap-2 hover:border-cyan-700 transition"
+    <div className="fade-in">
+      <PageHeader
+        eyebrow="工作台 · projects"
+        title="项目"
+        subtitle="每个项目对应一个 LoRA 训练目标 — 角色、风格或概念。新建一个项目开始流水线。"
+        actions={
+          <>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={handleEmptyTrash}
+              title="物理删除回收站"
             >
-              <div className="flex items-center gap-2">
-                <Link
-                  to={`/projects/${p.id}`}
-                  className="text-base font-semibold text-slate-100 hover:text-cyan-300 flex-1 truncate"
-                >
-                  {p.title}
-                </Link>
-                <span
-                  className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${STAGE_COLOR[p.stage]}`}
-                >
-                  {STAGE_LABEL[p.stage]}
-                </span>
+              清空回收站
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".zip,application/zip"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) void handleImportFile(f)
+              }}
+            />
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              title={importing ? '上传 + 解压中...' : '上传训练集 zip → 自动新建项目'}
+            >
+              {importing ? '导入中…' : '导入 zip'}
+            </button>
+            <button className="btn btn-primary" onClick={() => setCreating(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span>新建项目</span>
+            </button>
+          </>
+        }
+      />
+
+      <div className="p-6">
+        {error && (
+          <div className="mb-4 px-3.5 py-2.5 rounded-md bg-err-soft border border-err text-err text-sm font-mono">{error}</div>
+        )}
+
+        {loading ? (
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
+            {[1, 2, 3].map(i => (
+              <div key={i} className="card p-[18px]" style={{ height: 140 }}>
+                <div className="w-3/5 h-4 rounded bg-overlay mb-2.5" />
+                <div className="w-2/5 h-[11px] rounded-sm bg-overlay" />
               </div>
-              <div className="text-xs text-slate-500 font-mono truncate">
-                {p.slug}
-              </div>
-              <div className="text-xs text-slate-400 flex gap-3">
-                <span>{p.download_image_count ?? 0} 张下载</span>
-                <span className="flex-1" />
-                <span>
-                  {new Date(p.updated_at * 1000).toLocaleString('zh-CN', {
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
-              </div>
-              {p.note && (
-                <p className="text-xs text-slate-400 line-clamp-2">{p.note}</p>
-              )}
-              <div className="flex gap-2 mt-1">
-                <Link
-                  to={`/projects/${p.id}`}
-                  className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
-                >
-                  打开
-                </Link>
-                <span className="flex-1" />
-                <button
-                  onClick={() => handleDelete(p)}
-                  className="text-xs px-2 py-1 rounded text-red-400 hover:text-red-300 hover:bg-red-900/30"
-                >
-                  删除
-                </button>
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="mt-20 text-center text-fg-tertiary">
+            <div className="text-lg mb-2">还没有项目</div>
+            <div className="text-sm">点右上角「新建项目」开始一个新的 LoRA 训练</div>
+          </div>
+        ) : (
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
+            {items.map((p) => (
+              <ProjectCard
+                key={p.id}
+                project={p}
+                onClick={() => openProject(p)}
+                onDelete={(e) => handleDelete(p, e)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       {creating && (
         <NewProjectDialog
@@ -234,6 +203,82 @@ export default function ProjectsPage() {
     </div>
   )
 }
+
+function ProjectCard({
+  project: p,
+  onClick,
+  onDelete,
+}: {
+  project: ProjectSummary
+  onClick: () => void
+  onDelete: (e: React.MouseEvent) => void
+}) {
+  const [hovered, setHovered] = useState(false)
+
+  const stepPath = p.stage in STAGE_STEP ? STAGE_STEP[p.stage] : undefined
+
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={`p-[18px] text-left rounded-lg cursor-pointer flex flex-col gap-3.5 relative w-full ${hovered ? 'border-dim shadow-sm bg-surface' : 'border border-subtle bg-surface'}`}
+      style={{ transition: 'border-color 0.15s, box-shadow 0.15s' }}
+    >
+      {/* header row */}
+      <div className="flex justify-between items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="text-md font-semibold overflow-hidden text-ellipsis whitespace-nowrap" style={{ letterSpacing: '-0.01em' }}>
+            {p.title}
+          </div>
+          <div className="mono text-xs text-fg-tertiary mt-0.5">
+            {p.slug}
+          </div>
+        </div>
+        <StageBadge stage={p.stage} />
+      </div>
+
+      {/* note */}
+      {p.note && (
+        <p className="m-0 text-sm text-fg-secondary overflow-hidden line-clamp-2">
+          {p.note}
+        </p>
+      )}
+
+      {/* footer row */}
+      <div className="flex gap-4 text-sm text-fg-secondary mt-auto items-center">
+        <StatPair label="下载" value={p.download_image_count ?? 0} />
+        <span className="flex-1" />
+        {stepPath && (
+          <span className="text-xs text-accent font-mono">
+            继续 →
+          </span>
+        )}
+        <span className="text-fg-tertiary text-xs">
+          {relativeTime(p.updated_at)}
+        </span>
+        <button
+          onClick={onDelete}
+          className="bg-transparent border-none px-1.5 py-0.5 rounded-sm text-fg-tertiary text-xs cursor-pointer"
+          title="移到回收站"
+        >
+          ×
+        </button>
+      </div>
+    </button>
+  )
+}
+
+function StatPair({ label, value }: { label: string; value: number }) {
+  return (
+    <span className="inline-flex gap-1.5 items-baseline">
+      <span className="font-mono font-semibold text-fg-primary">{value}</span>
+      <span className="text-xs text-fg-tertiary uppercase tracking-wider">{label}</span>
+    </span>
+  )
+}
+
+// ── New Project Dialog ──────────────────────────────────────────
 
 interface NewProjectForm {
   title: string
@@ -264,64 +309,70 @@ function NewProjectDialog({
 
   return (
     <div
-      className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/45"
       onClick={onCancel}
     >
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-[90%] max-w-md space-y-4"
+        className="bg-surface border border-dim rounded-xl p-7 flex flex-col gap-[18px] shadow-lg"
+        style={{ width: '90%', maxWidth: 440 }}
       >
-        <h2 className="text-lg font-semibold">新建项目</h2>
-        <label className="block">
-          <span className="text-xs text-slate-400 font-mono">title</span>
+        <h2 className="m-0 text-xl font-semibold">新建项目</h2>
+
+        <FieldLabel label="项目名称" hint="title">
           <input
             autoFocus
+            className="input"
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
-            className="mt-1 w-full px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-sm focus:outline-none focus:border-cyan-500"
             placeholder="例：Cosmic Kaguya"
           />
-        </label>
-        <label className="block">
-          <span className="text-xs text-slate-400 font-mono">
-            initial_version_label
-          </span>
+        </FieldLabel>
+
+        <FieldLabel label="初始版本标签" hint="initial_version_label">
           <input
+            className="input input-mono"
             value={form.initial_version_label}
-            onChange={(e) =>
-              setForm({ ...form, initial_version_label: e.target.value })
-            }
-            className="mt-1 w-full px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-sm focus:outline-none focus:border-cyan-500"
+            onChange={(e) => setForm({ ...form, initial_version_label: e.target.value })}
             placeholder="v1 / baseline / ..."
           />
-        </label>
-        <label className="block">
-          <span className="text-xs text-slate-400 font-mono">note</span>
+        </FieldLabel>
+
+        <FieldLabel label="备注" hint="note（可选）">
           <textarea
+            className="input"
             value={form.note}
             onChange={(e) => setForm({ ...form, note: e.target.value })}
-            className="mt-1 w-full px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-sm focus:outline-none focus:border-cyan-500 h-20"
-            placeholder="可选：训练目标 / 备注"
+            placeholder="训练目标 / 备注"
+            rows={3}
+            style={{ resize: 'vertical' }}
           />
-        </label>
+        </FieldLabel>
+
         <div className="flex gap-2 justify-end">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-3 py-1.5 rounded text-sm bg-slate-700 hover:bg-slate-600"
-          >
-            取消
-          </button>
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>取消</button>
           <button
             type="submit"
+            className="btn btn-primary"
             disabled={busy || !form.title.trim()}
-            className="px-3 py-1.5 rounded text-sm bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500"
           >
-            {busy ? '创建中...' : '创建'}
+            {busy ? '创建中…' : '创建'}
           </button>
         </div>
       </form>
     </div>
+  )
+}
+
+function FieldLabel({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-sm font-medium">
+        {label}
+        {hint && <span className="ml-2 text-xs text-fg-tertiary font-mono">{hint}</span>}
+      </span>
+      {children}
+    </label>
   )
 }

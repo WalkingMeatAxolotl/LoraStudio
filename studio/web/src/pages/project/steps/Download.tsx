@@ -9,6 +9,7 @@ import {
   type Version,
 } from '../../../api/client'
 import ImageGrid, { applySelection } from '../../../components/ImageGrid'
+import StepShell from '../../../components/StepShell'
 import { useToast } from '../../../components/Toast'
 import { useEventStream } from '../../../lib/useEventStream'
 
@@ -31,11 +32,11 @@ interface Estimate {
 }
 
 const STATUS_COLOR: Record<Job['status'], string> = {
-  pending: 'bg-slate-700/60 text-slate-300',
-  running: 'bg-amber-700/40 text-amber-200',
-  done: 'bg-emerald-700/40 text-emerald-200',
-  failed: 'bg-red-800/50 text-red-200',
-  canceled: 'bg-slate-700/60 text-slate-300',
+  pending: 'badge badge-neutral',
+  running: 'badge badge-warn',
+  done: 'badge badge-ok',
+  failed: 'badge badge-err',
+  canceled: 'badge badge-neutral',
 }
 
 // 信息密度优先：每个 panel 紧凑成单/双 inline 行；已下载 grid 占主区域。
@@ -163,120 +164,130 @@ export default function DownloadPage() {
   const maxCount = estimate && estimate.count > 0 ? estimate.count : 5000
 
   return (
-    <div className="flex flex-col h-full gap-2 min-h-0">
-      {/* 单行标题 */}
-      <header className="flex items-baseline gap-2 flex-wrap shrink-0">
-        <h2 className="text-base font-semibold">① 下载</h2>
-        <span className="text-xs text-slate-500">
-          Booru 抓取 + 本地上传，共享{' '}
-          <code className="text-slate-400">{project.slug}/download/</code> ·{' '}
-          <Link to="/tools/settings" className="text-cyan-400 hover:underline">
-            设置
-          </Link>{' '}
-          配置 exclude / 凭据
-        </span>
-      </header>
+    <StepShell
+      idx={1}
+      title="下载图片"
+      subtitle="Booru 抓取 + 本地上传"
+      actions={
+        <Link to="/tools/settings" className="btn btn-ghost btn-sm">
+          设置
+        </Link>
+      }
+    >
+    <div className="flex flex-col h-full gap-3 min-h-0">
 
-      {/* 操作行：两个紧凑 panel 并排（窄屏堆叠） */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 shrink-0">
-        <BooruPanel
-          tag={tag}
-          setTag={setTag}
-          apiSource={apiSource}
-          setApiSource={setApiSource}
-          estimate={estimate}
-          count={count}
-          setCount={setCount}
-          maxCount={maxCount}
-          busy={busy}
-          isLive={!!isLive}
-          onEstimate={doEstimate}
-          onStart={start}
-        />
-        <UploadPanel
-          pid={project.id}
-          onUploaded={(r) => {
-            setLastUpload(r)
-            void refreshFiles()
-            void reload()
-          }}
-        />
-      </div>
+      {/* 主体左右两栏：左（booru/upload + 状态 + grid） / 右（下载统计侧边栏） */}
+      <div className="grid gap-3 flex-1 min-h-0" style={{ gridTemplateColumns: '1fr 240px' }}>
 
-      {/* 状态条：仅在有 job / 上次上传结果时出现，details 折叠 */}
-      {(job || lastUpload) && (
-        <div className="flex flex-col gap-1.5 shrink-0">
-          {job && (
-            <JobStrip
-              job={job}
-              logs={logs}
-              onCancel={isLive ? cancel : undefined}
+        {/* 左栏 */}
+        <div className="flex flex-col gap-2 min-h-0 min-w-0">
+
+          {/* 操作行：两个紧凑 panel 并排（窄屏堆叠） */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 shrink-0">
+            <BooruPanel
+              tag={tag}
+              setTag={setTag}
+              apiSource={apiSource}
+              setApiSource={setApiSource}
+              estimate={estimate}
+              count={count}
+              setCount={setCount}
+              maxCount={maxCount}
+              busy={busy}
+              isLive={!!isLive}
+              onEstimate={doEstimate}
+              onStart={start}
             />
-          )}
-          {lastUpload && (
-            <UploadResultStrip
-              result={lastUpload}
-              onDismiss={() => setLastUpload(null)}
+            <UploadPanel
+              pid={project.id}
+              onUploaded={(r) => {
+                setLastUpload(r)
+                void refreshFiles()
+                void reload()
+              }}
             />
+          </div>
+
+          {/* 状态条：仅在有 job / 上次上传结果时出现，details 折叠 */}
+          {(job || lastUpload) && (
+            <div className="flex flex-col gap-1.5 shrink-0">
+              {job && (
+                <JobStrip
+                  job={job}
+                  logs={logs}
+                  onCancel={isLive ? cancel : undefined}
+                />
+              )}
+              {lastUpload && (
+                <UploadResultStrip
+                  result={lastUpload}
+                  onDismiss={() => setLastUpload(null)}
+                />
+              )}
+            </div>
           )}
+
+          {/* 已下载 grid — 占满剩余高度，支持多选 + 删除 */}
+          <DownloadedGrid
+            project={project}
+            files={files}
+            selected={selected}
+            anchor={anchor}
+            deleting={deleting}
+            onSelect={(name, e) => {
+              const r = applySelection(
+                selected,
+                name,
+                e,
+                files.map((f) => f.name),
+                anchor
+              )
+              setSelected(r.next)
+              setAnchor(r.anchor)
+            }}
+            onSelectAll={() => setSelected(new Set(files.map((f) => f.name)))}
+            onClear={() => {
+              setSelected(new Set())
+              setAnchor(null)
+            }}
+            onDelete={async () => {
+              if (selected.size === 0) return
+              if (
+                !window.confirm(
+                  `从 download/ 删除 ${selected.size} 张图片（含同名 caption metadata）？\n操作不可恢复。`
+                )
+              )
+                return
+              setDeleting(true)
+              try {
+                const r = await api.deleteProjectFiles(
+                  project.id,
+                  Array.from(selected)
+                )
+                toast(
+                  `已删除 ${r.deleted.length} 张${
+                    r.missing.length ? ` · 跳过 ${r.missing.length} 张（不存在）` : ''
+                  }`,
+                  'success'
+                )
+                setSelected(new Set())
+                setAnchor(null)
+                await refreshFiles()
+                void reload()
+              } catch (e) {
+                toast(String(e), 'error')
+              } finally {
+                setDeleting(false)
+              }
+            }}
+          />
         </div>
-      )}
 
-      {/* 已下载 grid — 占满剩余高度，支持多选 + 删除 */}
-      <DownloadedGrid
-        project={project}
-        files={files}
-        selected={selected}
-        anchor={anchor}
-        deleting={deleting}
-        onSelect={(name, e) => {
-          const r = applySelection(
-            selected,
-            name,
-            e,
-            files.map((f) => f.name),
-            anchor
-          )
-          setSelected(r.next)
-          setAnchor(r.anchor)
-        }}
-        onSelectAll={() => setSelected(new Set(files.map((f) => f.name)))}
-        onClear={() => {
-          setSelected(new Set())
-          setAnchor(null)
-        }}
-        onDelete={async () => {
-          if (selected.size === 0) return
-          if (
-            !window.confirm(
-              `从 download/ 删除 ${selected.size} 张图片（含同名 caption metadata）？\n操作不可恢复。`
-            )
-          )
-            return
-          setDeleting(true)
-          try {
-            const r = await api.deleteProjectFiles(
-              project.id,
-              Array.from(selected)
-            )
-            toast(
-              `已删除 ${r.deleted.length} 张${
-                r.missing.length ? ` · 跳过 ${r.missing.length} 张（不存在）` : ''
-              }`,
-              'success'
-            )
-            setSelected(new Set())
-            setAnchor(null)
-            await refreshFiles()
-            void reload()
-          } catch (e) {
-            toast(String(e), 'error')
-          } finally {
-            setDeleting(false)
-          }
-        }}
-      />
+        {/* 右栏：下载统计侧边栏 */}
+        <DownloadStatsSidebar files={files} projectDownloadCount={project.download_image_count} />
+      </div>
     </div>
+    </StepShell>
   )
 }
 
@@ -316,32 +327,32 @@ function DownloadedGrid({
     [files, project.id]
   )
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-800/30 overflow-hidden flex flex-col flex-1 min-h-0">
-      <header className="px-3 py-1.5 border-b border-slate-700 flex items-center gap-2 shrink-0 text-xs">
-        <h3 className="font-semibold text-slate-200">已下载</h3>
-        <span className="text-slate-500">{files.length} 张</span>
+    <section className="flex flex-col flex-1 min-h-0 rounded-md border border-subtle bg-surface overflow-hidden">
+      <header className="flex items-center gap-2 shrink-0 px-2.5 py-1.5 border-b border-subtle text-sm">
+        <h3 className="font-semibold">已下载</h3>
+        <span className="text-fg-tertiary">{files.length} 张</span>
         {selected.size > 0 && (
-          <span className="text-cyan-300">· 已选 {selected.size}</span>
+          <span className="text-accent">· 已选 {selected.size}</span>
         )}
         <span className="flex-1" />
         <button
           onClick={onSelectAll}
           disabled={files.length === 0 || deleting}
-          className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-50"
+          className="btn btn-ghost btn-sm"
         >
           全选
         </button>
         <button
           onClick={onClear}
           disabled={selected.size === 0 || deleting}
-          className="px-2 py-0.5 rounded text-slate-400 hover:text-slate-200 disabled:opacity-30"
+          className="btn btn-ghost btn-sm"
         >
           清空
         </button>
         <button
           onClick={() => void onDelete()}
           disabled={selected.size === 0 || deleting}
-          className="px-2 py-0.5 rounded bg-red-700/80 hover:bg-red-700 text-red-100 disabled:opacity-40"
+          className="btn btn-sm bg-err-soft text-err"
           title="删除选中的图片 + 同名 caption metadata"
         >
           {deleting ? '删除中...' : `🗑 删除 ${selected.size}`}
@@ -395,7 +406,7 @@ function BooruPanel({
 }: BooruPanelProps) {
   const disabled = busy || isLive
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 space-y-1.5">
+    <section className="flex flex-col gap-1.5 rounded-md border border-subtle bg-surface px-3 py-2.5">
       <PanelTitle accent="cyan">Booru 抓取</PanelTitle>
       <div className="flex items-center gap-1.5">
         <select
@@ -404,7 +415,8 @@ function BooruPanel({
             setApiSource(e.target.value as 'gelbooru' | 'danbooru')
           }
           disabled={disabled}
-          className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs w-24"
+          className="input text-sm"
+          style={{ width: 'auto', padding: '3px 8px' }}
         >
           <option value="gelbooru">Gelbooru</option>
           <option value="danbooru">Danbooru</option>
@@ -417,30 +429,31 @@ function BooruPanel({
           }}
           disabled={disabled}
           placeholder="tag (如 character_x rating:safe)"
-          className="flex-1 px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs focus:outline-none focus:border-cyan-500"
+          className="input flex-1 text-sm"
+          style={{ padding: '3px 8px' }}
         />
         <button
           onClick={onEstimate}
           disabled={disabled || !tag.trim()}
-          className="text-xs px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
+          className="btn btn-secondary btn-sm"
         >
           {busy && !estimate ? '查询中...' : '查询'}
         </button>
       </div>
       {estimate && (
-        <div className="flex items-center gap-1.5 flex-wrap text-xs">
-          <span className="text-slate-300">
+        <div className="flex items-center gap-1.5 flex-wrap text-sm text-fg-secondary">
+          <span>
             匹配{' '}
             {estimate.count >= 0 ? (
-              <strong className="text-cyan-300">{estimate.count}</strong>
+              <strong className="text-accent">{estimate.count}</strong>
             ) : (
-              <strong className="text-amber-300">未知</strong>
+              <strong className="text-warn">未知</strong>
             )}
           </span>
           {estimate.count !== 0 && (
             <>
-              <span className="text-slate-500">·</span>
-              <span className="text-slate-500">count</span>
+              <span className="text-dim">·</span>
+              <span className="text-fg-tertiary">count</span>
               <input
                 type="number"
                 min={1}
@@ -450,13 +463,14 @@ function BooruPanel({
                   setCount(Math.min(Number(e.target.value) || 1, maxCount))
                 }
                 disabled={disabled}
-                className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-xs w-20 focus:outline-none focus:border-cyan-500"
+                className="input input-mono"
+                style={{ width: 80, padding: '2px 6px' }}
               />
               {estimate.count > 0 && (
                 <button
                   onClick={() => setCount(estimate.count)}
                   disabled={disabled}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
+                  className="btn btn-ghost btn-sm"
                 >
                   全部 {estimate.count}
                 </button>
@@ -464,14 +478,14 @@ function BooruPanel({
               <button
                 onClick={onStart}
                 disabled={disabled || count < 1}
-                className="ml-auto text-xs px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500"
+                className="btn btn-primary btn-sm ml-auto"
               >
                 {isLive ? '下载中...' : `开始 ${count}`}
               </button>
             </>
           )}
           <span
-            className="basis-full text-[10px] text-slate-500 truncate"
+            className="basis-full truncate text-xs text-fg-tertiary"
             title={estimate.effective_query}
           >
             query: <code>{estimate.effective_query}</code>
@@ -541,7 +555,7 @@ function UploadPanel({
   const fileNames = picked.map((f) => f.name).join(', ')
 
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 space-y-1.5">
+    <section className="flex flex-col gap-1.5 rounded-md border border-subtle bg-surface px-3 py-2.5">
       <PanelTitle accent="emerald">本地上传</PanelTitle>
       <label
         onDragOver={(e) => {
@@ -550,12 +564,10 @@ function UploadPanel({
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
-        className={
-          'flex items-center gap-2 cursor-pointer rounded border border-dashed px-2.5 py-1.5 text-xs transition-colors ' +
-          (dragging
-            ? 'border-emerald-500 bg-emerald-950/30 text-emerald-200'
-            : 'border-slate-600 hover:border-slate-400 text-slate-300')
-        }
+        className={[
+          'flex items-center gap-2 cursor-pointer transition-colors rounded-sm border border-dashed text-sm px-2.5 py-1.5',
+          dragging ? 'border-accent text-accent bg-accent-soft' : 'border-dim text-fg-secondary',
+        ].join(' ')}
       >
         <input
           ref={inputRef}
@@ -567,34 +579,34 @@ function UploadPanel({
           className="hidden"
         />
         <span className="font-medium">点击选择 / 拖入</span>
-        <span className="text-slate-500">
+        <span className="text-fg-tertiary">
           · png / jpg / webp / bmp / gif / .zip(自动解压)
         </span>
         <span className="flex-1" />
         {picked.length > 0 && (
-          <span className="text-emerald-300">
+          <span className="text-ok">
             已选 {picked.length} · {(totalBytes / 1024 / 1024).toFixed(1)} MB
           </span>
         )}
       </label>
       {picked.length > 0 && (
-        <div className="flex items-center gap-1.5 text-xs">
+        <div className="flex items-center gap-1.5">
           <button
             onClick={submit}
             disabled={uploading}
-            className="text-xs px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500"
+            className="btn btn-primary btn-sm"
           >
             {uploading ? '上传中...' : `上传 ${picked.length}`}
           </button>
           <button
             onClick={reset}
             disabled={uploading}
-            className="text-[11px] px-2 py-1 rounded text-slate-400 hover:text-slate-200"
+            className="btn btn-ghost btn-sm"
           >
             清空
           </button>
           <span
-            className="ml-1 text-[10px] text-slate-500 truncate min-w-0 flex-1"
+            className="truncate min-w-0 flex-1 ml-1 text-xs text-fg-tertiary"
             title={fileNames}
           >
             {fileNames}
@@ -625,22 +637,16 @@ function JobStrip({
   return (
     <details
       open={isLive}
-      className="group rounded-lg border border-slate-700 bg-slate-800/40 overflow-hidden"
+      className="group rounded-md border border-subtle bg-surface overflow-hidden"
     >
-      <summary className="px-3 py-1.5 cursor-pointer flex items-center gap-2 text-xs select-none list-none">
-        <span className="text-slate-500 group-open:rotate-90 transition-transform inline-block w-3">
-          ▸
-        </span>
-        <span
-          className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${STATUS_COLOR[job.status]}`}
-        >
-          {job.status}
-        </span>
-        <span className="text-slate-400 font-mono">job #{job.id}</span>
+      <summary className="cursor-pointer flex items-center gap-2 list-none px-2.5 py-1.5 text-sm select-none">
+        <span className="inline-block transition-transform group-open:rotate-90 text-fg-tertiary w-3">▸</span>
+        <span className={STATUS_COLOR[job.status]}>{job.status}</span>
+        <span className="mono text-fg-secondary">job #{job.id}</span>
         {elapsed && elapsed > 0 && (
-          <span className="text-slate-500">· {Math.round(elapsed)}s</span>
+          <span className="text-fg-tertiary">· {Math.round(elapsed)}s</span>
         )}
-        <span className="text-slate-300 truncate flex-1 min-w-0 font-mono text-[11px]">
+        <span className="mono truncate flex-1 min-w-0 text-fg-secondary text-xs">
           {lastLine}
         </span>
         {isLive && onCancel && (
@@ -649,13 +655,13 @@ function JobStrip({
               e.preventDefault()
               onCancel()
             }}
-            className="text-[11px] px-2 py-0.5 rounded text-red-300 hover:text-red-200 hover:bg-red-900/30"
+            className="btn btn-ghost btn-sm text-err"
           >
             取消
           </button>
         )}
       </summary>
-      <pre className="p-2.5 text-[11px] font-mono text-slate-300 bg-slate-950/40 max-h-56 overflow-y-auto whitespace-pre-wrap border-t border-slate-700">
+      <pre className="px-3 py-2 text-xs font-mono text-fg-secondary bg-sunken max-h-[224px] overflow-auto whitespace-pre-wrap border-t border-subtle m-0">
         {logs.length === 0 ? '(等待日志...)' : logs.slice(-1000).join('\n')}
       </pre>
     </details>
@@ -672,19 +678,15 @@ function UploadResultStrip({
   const skipped = result.skipped.length
   const ok = result.added.length
   return (
-    <details className="group rounded-lg border border-slate-700 bg-slate-800/40 overflow-hidden">
-      <summary className="px-3 py-1.5 cursor-pointer flex items-center gap-2 text-xs select-none list-none">
-        <span className="text-slate-500 group-open:rotate-90 transition-transform inline-block w-3">
-          ▸
-        </span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-emerald-700/40 text-emerald-200">
-          upload
-        </span>
-        <span className="text-slate-300">
-          添加 <strong className="text-emerald-300">{ok}</strong>
+    <details className="group rounded-md border border-subtle bg-surface overflow-hidden">
+      <summary className="cursor-pointer flex items-center gap-2 list-none px-2.5 py-1.5 text-sm select-none">
+        <span className="inline-block transition-transform group-open:rotate-90 text-fg-tertiary w-3">▸</span>
+        <span className="badge badge-ok">upload</span>
+        <span className="text-fg-secondary">
+          添加 <strong className="text-ok">{ok}</strong>
           {skipped > 0 && (
             <>
-              {' · '}跳过 <strong className="text-amber-300">{skipped}</strong>
+              {' · '}跳过 <strong className="text-warn">{skipped}</strong>
             </>
           )}
         </span>
@@ -694,22 +696,22 @@ function UploadResultStrip({
             e.preventDefault()
             onDismiss()
           }}
-          className="text-[11px] px-1.5 py-0.5 rounded text-slate-400 hover:text-slate-200"
+          className="btn btn-ghost btn-sm"
           title="关闭"
         >
           ×
         </button>
       </summary>
       {skipped > 0 ? (
-        <ul className="p-2.5 text-[11px] font-mono text-amber-300/90 max-h-40 overflow-y-auto space-y-0.5 border-t border-slate-700">
+        <ul className="px-3 py-2 text-xs font-mono text-warn bg-sunken max-h-[160px] overflow-auto border-t border-subtle m-0 list-none">
           {result.skipped.map((s, i) => (
             <li key={`${s.name}-${i}`} className="truncate">
-              {s.name} <span className="text-slate-500">— {s.reason}</span>
+              {s.name} <span className="text-fg-tertiary">— {s.reason}</span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="p-2.5 text-[11px] text-slate-500 border-t border-slate-700">
+        <p className="px-3 py-2 text-xs text-fg-tertiary border-t border-subtle m-0">
           全部成功，无跳过。
         </p>
       )}
@@ -728,11 +730,102 @@ function PanelTitle({
   accent: 'cyan' | 'emerald'
   children: React.ReactNode
 }) {
-  const dot = accent === 'cyan' ? 'bg-cyan-400' : 'bg-emerald-400'
+  const dotCls = accent === 'cyan' ? 'bg-accent' : 'bg-ok'
   return (
-    <h3 className="text-[10px] font-semibold text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
-      <span className={`inline-block w-1.5 h-1.5 rounded-full ${dot}`} />
+    <h3 className="caption flex items-center gap-1.5">
+      <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${dotCls}`} />
       {children}
     </h3>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 下载统计侧边栏
+// ---------------------------------------------------------------------------
+function DownloadStatsSidebar({
+  files,
+  projectDownloadCount,
+}: {
+  files: DownloadFile[]
+  projectDownloadCount: number
+}) {
+  // 按扩展名分组统计
+  const extCounts = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const f of files) {
+      const ext = f.name.split('.').pop()?.toLowerCase() ?? '?'
+      m[ext] = (m[ext] ?? 0) + 1
+    }
+    return Object.entries(m).sort((a, b) => b[1] - a[1])
+  }, [files])
+
+  return (
+    <div className="flex flex-col gap-3 min-w-0">
+      {/* 总量卡片 */}
+      <div className="rounded-md border border-subtle bg-surface px-3 py-2.5">
+        <PanelTitle accent="cyan">下载统计</PanelTitle>
+        <StatRow label="总量" value={projectDownloadCount} />
+        <StatRow label="本页可见" value={files.length} />
+        {files.length > 0 && (
+          <StatRow
+            label="总大小"
+            value={files.reduce((s, f) => s + f.size, 0)}
+            format="bytes"
+          />
+        )}
+      </div>
+
+      {/* 格式分布 */}
+      <div className="rounded-md border border-subtle bg-surface px-3 py-2.5 flex-1 flex flex-col min-h-0">
+        <PanelTitle accent="emerald">格式分布</PanelTitle>
+        {files.length === 0 ? (
+          <p className="text-xs text-fg-tertiary m-0 mt-1.5">
+            还没有图片
+          </p>
+        ) : (
+          <div className="flex flex-col gap-1.5 mt-1.5 flex-1 overflow-y-auto">
+            {extCounts.map(([ext, count]) => {
+              const pct = Math.round((count / files.length) * 100)
+              return (
+                <div key={ext} className="flex items-center gap-1.5">
+                  <span className="text-xs font-mono text-fg-primary w-9 uppercase text-right">
+                    {ext}
+                  </span>
+                  <div className="flex-1 h-1.5 rounded bg-sunken overflow-hidden">
+                    <div
+                      className="h-full bg-accent rounded transition-[width] duration-300 ease-out"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-fg-tertiary w-9 text-right">{count}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function StatRow({
+  label,
+  value,
+  format,
+}: {
+  label: string
+  value: number
+  format?: 'bytes'
+}) {
+  const display = format === 'bytes'
+    ? value > 1024 * 1024
+      ? `${(value / 1024 / 1024).toFixed(1)} MB`
+      : `${(value / 1024).toFixed(0)} KB`
+    : String(value)
+  return (
+    <div className="flex justify-between items-baseline mt-1.5 text-xs">
+      <span className="text-fg-tertiary">{label}</span>
+      <span className="font-mono text-fg-primary font-medium">{display}</span>
+    </div>
   )
 }

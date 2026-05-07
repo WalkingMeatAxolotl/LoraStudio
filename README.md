@@ -6,6 +6,8 @@ Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaLoraStudi
 
 输出的 LoRA 权重直接 ComfyUI 可用（`lora_unet_*` 格式，无需任何转换）。
 
+![Studio 训练页](docs/images/studio-train.png)
+
 ---
 
 ## 上游与致谢
@@ -13,7 +15,7 @@ Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaLoraStudi
 本仓库的核心训练脚本派生自 [**Moeblack/AnimaLoraToolkit**](https://github.com/Moeblack/AnimaLoraToolkit)。
 
 - 主模型 / VAE：[circlestone-labs / Anima](https://huggingface.co/circlestone-labs/Anima)
-- 训练监控前端 HTML：单文件 `monitor_smooth.html`
+- 早期训练监控页 `monitor_smooth.html`（已被 React `MonitorDashboard` 取代，保留作独立窗口 fallback）
 
 ---
 
@@ -37,6 +39,8 @@ Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaLoraStudi
 - ⑥ 训练（preset 双向流，version 私有 config + 全局 preset 池）
 - 队列 / 任务详情（日志 / 监控 / 输出下载 / 全量 zip）
 - 设置（凭据 / WD14 多模型 / 模型一键下载 / 路径自定义）
+- 监控页 React 原生（loss / lr 曲线 + 采样图缩略图条，按 step 切换）
+- 暗色 / 日间模式 + 字号密度切换；config 编辑自动落盘（无需点保存）
 
 ---
 
@@ -46,7 +50,7 @@ Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaLoraStudi
 
 下面这些**不是** Studio 自动装的，得先准备好：
 
-- **NVIDIA GPU 驱动 + CUDA runtime**（16 GB+ 显存；A 卡 / Apple Silicon 不支持）
+- **NVIDIA GPU 驱动 + CUDA runtime**（**16 GB+ 显存推荐，12 GB 极限可跑**；A 卡 / Apple Silicon 不支持）
 - **Python 3.10+**（PATH 上能直接 `python` 调到）
 - **Node.js 18+**（前端构建用，PATH 上能 `npm`）
 - **Git**
@@ -55,7 +59,7 @@ Anima LoRA / LoKr 训练工具集，**附带完整 Web 工作台 (AnimaLoraStudi
 
 ```bash
 git clone https://github.com/WalkingMeatAxolotl/AnimaLoraStudio
-cd AnimaLoraToolkit
+cd AnimaLoraStudio
 
 # Windows
 studio.bat
@@ -122,7 +126,7 @@ WD14 打标模型不在这里——首次进 ③ 打标时自动从 HF 拉到 `m
 4. **③ 打标**：选 WD14 模型 + 阈值，一键自动打标
 5. **④ 标签编辑**：批量加 / 删 / 替换；单图修；自动还原点
 6. **⑤ 正则集**：基于 tag 分布反向搜 booru，自动 WD14 打标 + 分辨率 AR 聚类
-7. **⑥ 训练**：选 preset 复制进 version 私有 config，改参数 → 入队
+7. **⑥ 训练**：选 preset 复制进 version 私有 config，改参数（debounce 600ms 自动落盘，无需点保存），入队即开始训练。Picker 标签会显示「· 已自定义」表示和原预设已分叉，预设池不会被改
 8. 「队列」页查看任务，进**任务详情**看日志 / 监控 / 输出（含一键全量 zip 下载）
 
 输出的 LoRA 权重已经是 `lora_unet_*` 格式，**直接拖进 ComfyUI 即可**，不需要任何转换。
@@ -132,10 +136,10 @@ WD14 打标模型不在这里——首次进 ③ 打标时自动从 HF 拉到 `m
 ## 项目结构
 
 ```
-AnimaLoraToolkit/
+AnimaLoraStudio/
 ├── anima_train.py            # 训练核心（被 Studio worker 通过 subprocess 拉起）
 ├── train_monitor.py          # 训练状态写入器（被 anima_train 调）
-├── monitor_smooth.html       # 监控 UI（HTML，Studio iframe 嵌入）
+├── monitor_smooth.html       # 早期监控页（已被 React MonitorDashboard 取代，保留作独立窗口 fallback）
 ├── studio/                   # AnimaStudio Web 工作台（FastAPI + React）
 │   ├── server.py             # 守护进程入口
 │   ├── services/             # 业务逻辑（uploads / 打标 / 正则集 / model_downloader 等）
@@ -188,8 +192,8 @@ AnimaLoraToolkit/
 
 ## 硬件要求
 
-- **GPU**：24 GB+ 显存（RTX 3090 / 4090 / 5090；Apple Silicon 暂不支持）
-- **RAM**：32 GB+
+- **GPU**：NVIDIA，**16 GB+ 显存推荐**（RTX 4060Ti 16G / 4070Ti / 4080 / 5070+ / 3090 / 4090 / 5090 等）；**12 GB 极限可跑**（4070 / 3060 12G 等，需关 sample 输出或减小 batch / 分辨率）。系统 GPU 占用低，VRAM 主要给训练；A 卡 / Apple Silicon 不支持
+- **RAM**：16 GB+
 - **存储**：SSD 强烈推荐（latent cache + sample 输出 IO 频繁）
 
 ---

@@ -2145,7 +2145,9 @@ async def events(request: Request) -> StreamingResponse:
 
 @app.get("/samples/{filename}")
 def get_sample(
-    filename: str, task_id: Optional[int] = None
+    filename: str,
+    task_id: Optional[int] = None,
+    w: Optional[int] = None,
 ) -> FileResponse:
     """采样图代理。
 
@@ -2156,10 +2158,15 @@ def get_sample(
     - 同级 `output/<任意子目录>/samples/`（兜底防 anima_train 用别的 output 名）
 
     没给 task_id → 兜底全局 OUTPUT_DIR/samples/（旧训练直接命令行的兼容）。
+
+    `?w=N` 给了 → 走 thumb_cache 生成 N px 缩略图（用于监控页缩略图条）；
+    不给 → 返回原图。两种都走 _thumb_response 的弱 etag + no-cache，浏览器
+    304 命中即可，避免「重启窗口期失败响应被永久缓存」问题。
     """
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(400, "invalid filename")
 
+    resolved: Optional[Path] = None
     if task_id is not None:
         with db.connection_for() as conn:
             row = conn.execute(
@@ -2181,17 +2188,25 @@ def get_sample(
                     candidates.append(sub / "samples" / filename)
         for p in candidates:
             if p.exists():
-                return FileResponse(p)
-        logger.info(
-            "sample 404: task_id=%s file=%s tried=%s",
-            task_id, filename, [str(p) for p in candidates],
-        )
-        raise HTTPException(404)
+                resolved = p
+                break
+        if resolved is None:
+            logger.info(
+                "sample 404: task_id=%s file=%s tried=%s",
+                task_id, filename, [str(p) for p in candidates],
+            )
+            raise HTTPException(404)
+    else:
+        path = OUTPUT_DIR / "samples" / filename
+        if not path.exists():
+            raise HTTPException(404)
+        resolved = path
 
-    path = OUTPUT_DIR / "samples" / filename
-    if not path.exists():
-        raise HTTPException(404)
-    return FileResponse(path)
+    # w 给了走缩略图；w<=0 或没给 → 原图。复用 thumb_cache，盘上落 .jpg；
+    # 浏览器走弱 etag + no-cache，304 命中很轻。
+    if w is not None and w > 0:
+        return _thumb_response(resolved, w)
+    return _thumb_response(resolved, 0)  # size=0 内部直接返回 src，不缩
 
 
 # ---------------------------------------------------------------------------

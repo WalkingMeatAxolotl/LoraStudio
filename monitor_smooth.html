@@ -9,27 +9,29 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
-            --bg-primary: #0a0a0a;
-            --bg-secondary: #111111;
-            --bg-tertiary: #1a1a1a;
-            --border: #2a2a2a;
-            --text-primary: #e0e0e0;
-            --text-secondary: #666;
-            --text-dim: #444;
-            --accent: #39ff14;
-            --accent-dim: rgba(57, 255, 20, 0.15);
-            --accent-glow: rgba(57, 255, 20, 0.4);
-            --warning: #ff6b35;
-            --error: #ff3366;
+            /* warm-ivory palette — mirrors studio/web/src/styles/tokens.css */
+            --bg-primary:   #f6f5f1;
+            --bg-secondary: #ffffff;
+            --bg-tertiary:  #efeee8;
+            --border:       #e0ded4;
+            --text-primary: #1a1812;
+            --text-secondary: #4a4740;
+            --text-dim:     #7a7770;
+            --accent:       #d8541d;
+            --accent-dim:   #fbe8de;
+            --accent-glow:  rgba(216, 84, 29, 0.2);
+            --warning:      #b97a16;
+            --error:        #c2371b;
+            --ok:           #2d7a4f;
             --mono: 'JetBrains Mono', 'Consolas', monospace;
-            --display: 'Space Mono', monospace;
+            --display: 'Inter', ui-sans-serif, system-ui, sans-serif;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
+
         html { font-size: 14px; }
 
-        body { 
+        body {
             font-family: var(--mono);
             background: var(--bg-primary);
             color: var(--text-primary);
@@ -37,16 +39,6 @@
             line-height: 1.5;
             padding-bottom: 30px;
             overflow-x: hidden;
-        }
-
-        /* CRT scanline */
-        body::before {
-            content: "";
-            position: fixed;
-            inset: 0;
-            pointer-events: none;
-            background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
-            z-index: 9999;
         }
 
         /* ==================== HEADER ==================== */
@@ -72,9 +64,8 @@
             font-family: var(--display);
             font-size: 1.1rem;
             font-weight: 700;
-            letter-spacing: 0.15em;
+            letter-spacing: -0.01em;
             color: var(--accent);
-            text-shadow: 0 0 10px var(--accent-glow);
             white-space: nowrap;
         }
 
@@ -87,16 +78,17 @@
             padding: 4px 10px;
             background: var(--accent-dim);
             border: 1px solid var(--accent);
+            border-radius: 4px;
             font-size: 0.75rem;
             text-transform: uppercase;
-            letter-spacing: 0.1em;
+            letter-spacing: 0.05em;
         }
 
         .status-dot {
             width: 6px;
             height: 6px;
             background: var(--accent);
-            box-shadow: 0 0 6px var(--accent);
+            border-radius: 50%;
             animation: blink 1s infinite;
         }
 
@@ -134,12 +126,12 @@
         }
 
         .stat-value {
-            font-family: var(--display);
+            font-family: var(--mono);
             font-size: 1.6rem;
             font-weight: 700;
             color: var(--accent);
-            text-shadow: 0 0 15px var(--accent-glow);
             line-height: 1.2;
+            font-variant-numeric: tabular-nums;
         }
 
         .stat-sub {
@@ -155,8 +147,8 @@
             margin-left: 4px;
         }
 
-        .stat-trend.down { background: rgba(57,255,20,0.15); color: var(--accent); }
-        .stat-trend.up { background: rgba(255,107,53,0.15); color: var(--warning); }
+        .stat-trend.down { background: rgba(45,122,79,0.12); color: var(--ok); }
+        .stat-trend.up { background: rgba(185,122,22,0.12); color: var(--warning); }
 
         /* ==================== PROGRESS ==================== */
         .progress-section {
@@ -177,6 +169,7 @@
         .progress-track {
             height: 4px;
             background: var(--bg-tertiary);
+            border-radius: 2px;
             position: relative;
             overflow: hidden;
         }
@@ -184,7 +177,7 @@
         .progress-fill {
             height: 100%;
             background: var(--accent);
-            box-shadow: 0 0 8px var(--accent-glow);
+            border-radius: 2px;
             transition: width 0.5s ease-out;
         }
 
@@ -211,7 +204,7 @@
 
         /* Charts */
         .chart-section {
-            background: var(--bg-primary);
+            background: var(--bg-secondary);
             padding: 20px;
             min-width: 0;
             overflow: hidden;
@@ -248,7 +241,7 @@
         }
 
         .legend-dot { width: 12px; height: 2px; }
-        .legend-dot.raw { background: rgba(255,255,255,0.2); }
+        .legend-dot.raw { background: rgba(74,71,64,0.3); }
         .legend-dot.smooth { background: var(--accent); }
         .legend-dot.lr { background: var(--warning); }
 
@@ -320,8 +313,8 @@
             overflow: hidden;
             cursor: pointer;
             border: 2px solid transparent;
-            background: var(--bg-primary);
-            transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+            background: var(--bg-tertiary);
+            transition: border-color 0.15s ease, transform 0.1s ease;
             flex-shrink: 0;
         }
 
@@ -332,7 +325,7 @@
 
         .sample-thumb.active {
             border-color: var(--accent);
-            box-shadow: 0 0 8px var(--accent-glow);
+            box-shadow: 0 2px 8px var(--accent-glow);
         }
 
         .sample-thumb img {
@@ -351,7 +344,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            background: var(--bg-primary);
+            background: var(--bg-tertiary);
             border: 1px solid var(--border);
             border-radius: 8px;
             overflow: hidden;
@@ -375,7 +368,7 @@
             bottom: 8px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(0,0,0,0.8);
+            background: rgba(246,245,241,0.92);
             padding: 4px 12px;
             border-radius: 4px;
             font-size: 0.7rem;
@@ -475,7 +468,7 @@
             gap: 8px;
             font-size: 0.7rem;
             color: var(--text-secondary);
-            background: rgba(255,255,255,0.03);
+            background: var(--bg-tertiary);
             padding: 2px 8px;
             border-radius: 4px;
             border: 1px solid var(--border);
@@ -743,23 +736,25 @@
             interaction: { mode: 'index', intersect: false },
             scales: {
                 x: {
-                    grid: { color: 'rgba(255,255,255,0.03)', drawBorder: false },
-                    ticks: { color: '#444', font: { family: "'JetBrains Mono'", size: 10 }, maxTicksLimit: 8 }
+                    grid: { color: 'rgba(20,18,12,0.06)', drawBorder: false },
+                    ticks: { color: '#7a7770', font: { family: "'JetBrains Mono'", size: 10 }, maxTicksLimit: 8 }
                 },
                 y: {
-                    grid: { color: 'rgba(255,255,255,0.03)', drawBorder: false },
-                    ticks: { color: '#444', font: { family: "'JetBrains Mono'", size: 10 } }
+                    grid: { color: 'rgba(20,18,12,0.06)', drawBorder: false },
+                    ticks: { color: '#7a7770', font: { family: "'JetBrains Mono'", size: 10 } }
                 }
             },
             plugins: {
                 legend: { display: false },
                 tooltip: {
-                    backgroundColor: '#1a1a1a',
-                    borderColor: '#2a2a2a',
+                    backgroundColor: '#ffffff',
+                    borderColor: '#cdcbc0',
                     borderWidth: 1,
+                    titleColor: '#1a1812',
+                    bodyColor: '#4a4740',
                     titleFont: { family: "'JetBrains Mono'" },
                     bodyFont: { family: "'JetBrains Mono'" },
-                    cornerRadius: 0
+                    cornerRadius: 4
                 }
             }
         };
@@ -788,8 +783,8 @@
             data: {
                 labels: [],
                 datasets: [
-                    { label: 'Raw', data: [], borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.02)', fill: true, tension: 0, pointRadius: 0, borderWidth: 1 },
-                    { label: 'EMA', data: [], borderColor: '#39ff14', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2 }
+                    { label: 'Raw', data: [], borderColor: 'rgba(74,71,64,0.2)', backgroundColor: 'rgba(74,71,64,0.04)', fill: true, tension: 0, pointRadius: 0, borderWidth: 1 },
+                    { label: 'EMA', data: [], borderColor: '#d8541d', backgroundColor: 'rgba(216,84,29,0.06)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 }
                 ]
             },
             options: chartDefaults
@@ -799,7 +794,7 @@
             type: 'line',
             data: {
                 labels: [],
-                datasets: [{ label: 'LR', data: [], borderColor: '#ff6b35', backgroundColor: 'rgba(255,107,53,0.05)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5 }]
+                datasets: [{ label: 'LR', data: [], borderColor: '#b97a16', backgroundColor: 'rgba(185,122,22,0.06)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5 }]
             },
             options: chartDefaults
         });
@@ -877,7 +872,7 @@
             lastUpdate = Date.now();
 
             document.getElementById('status-text').textContent = 'TRAINING';
-            document.getElementById('connection-status').innerHTML = '<span style="color:#39ff14">● Connected</span>';
+            document.getElementById('connection-status').innerHTML = '<span style="color:#2d7a4f">● 已连接</span>';
 
             // Stats
             document.getElementById('epoch').textContent = data.epoch || 0;
@@ -933,7 +928,7 @@
             } catch (e) {
                 if (Date.now() - lastUpdate > 5000) {
                     document.getElementById('status-text').textContent = 'OFFLINE';
-                    document.getElementById('connection-status').innerHTML = '<span style="color:#ff3366">● Disconnected</span>';
+                    document.getElementById('connection-status').innerHTML = '<span style="color:#c2371b">● 已断开</span>';
                 }
             }
         }
@@ -967,7 +962,7 @@
                 // EventSource 自动重连；超 5s 没数据 → 标 offline
                 if (Date.now() - lastUpdate > 5000) {
                     document.getElementById('status-text').textContent = 'OFFLINE';
-                    document.getElementById('connection-status').innerHTML = '<span style="color:#ff3366">● Disconnected</span>';
+                    document.getElementById('connection-status').innerHTML = '<span style="color:#c2371b">● 已断开</span>';
                 }
             };
         }

@@ -1,42 +1,9 @@
+@import './styles/tokens.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-html,
-body {
-  margin: 0;
-  background: #0b1120;
-  color: #e2e8f0;
-  font-family:
-    'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Roboto',
-    sans-serif;
-}
-
-/* —— 自定义滚动条 —— 全局细滚动条 + 悬停加深 ——
- * `scrollbar-gutter: stable` 给容器永远预留滚动条空间，避免内容因为出现 / 消失
- * 滚动条而横向跳动。Firefox 用 `scrollbar-width`，Chromium 走 ::-webkit。 */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
-}
-
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-*::-webkit-scrollbar-thumb {
-  background-color: rgba(148, 163, 184, 0.25);
-  border-radius: 4px;
-}
-*::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(148, 163, 184, 0.55);
-}
-
-/* 给所有 overflow-auto / overflow-y-auto 默认预留滚动槽，杜绝抖动。
- * 想关掉的特定容器加 `[scrollbar-gutter:auto]`。 */
+/* 给所有 overflow-auto / overflow-y-auto 默认预留滚动槽，杜绝抖动 */
 .overflow-auto,
 .overflow-y-auto {
   scrollbar-gutter: stable;

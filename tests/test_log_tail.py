@@ -57,3 +57,28 @@ def test_tailer_flushes_partial_line_on_stop(tmp_path: Path) -> None:
     time.sleep(0.1)
     tailer.stop()
     assert received == ["abc"]
+
+
+def test_tailer_strips_ansi_and_nul(tmp_path: Path) -> None:
+    """C++ 库（onnxruntime）写到 fd 2 的 ANSI 颜色码 + NUL 字节要剥掉。
+
+    Windows 上 onnx CUDA dlopen 失败时会写：
+        \x1b[1;31m...红色错误...\x1b[m
+    再叠 UTF-16 风格的 NUL 字节（每个 ASCII 后一个 \x00），前端 <pre>
+    渲染就是 `日[1;31m` 加字间夹空格的乱码。tail 阶段统一剥干净。
+    """
+    log = tmp_path / "ansi.log"
+    raw = (
+        b"\x1b[1;31m2026-05-06 [E:onnxruntime] FAIL\x1b[m\n"
+        b"o\x00n\x00n\x00x\x00\n"
+    )
+    log.write_bytes(raw)
+    received: list[str] = []
+    tailer = LogTailer(log, received.append, poll_interval=0.05)
+    tailer.start()
+    _wait_lines(received, 2)
+    tailer.stop()
+    assert received[:2] == [
+        "2026-05-06 [E:onnxruntime] FAIL",
+        "onnx",
+    ]

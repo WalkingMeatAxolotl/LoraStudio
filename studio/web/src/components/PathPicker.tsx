@@ -41,29 +41,32 @@ export default function PathPicker({
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center"
       onClick={onClose}
     >
       <div
-        className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl
-          w-[640px] max-h-[80vh] flex flex-col"
+        className="bg-elevated border border-dim rounded-lg shadow-xl w-[640px] max-h-[80vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="px-4 py-3 border-b border-slate-700 flex items-center gap-2">
-          <h3 className="text-sm font-semibold flex-1">选择路径</h3>
+        {/* Header */}
+        <header className="px-4 py-3 border-b border-subtle flex items-center gap-2 shrink-0">
+          <h3 className="m-0 text-sm font-semibold flex-1 text-fg-primary">
+            选择路径
+          </h3>
           <button
             onClick={onClose}
-            className="text-slate-500 hover:text-slate-200 text-sm"
+            className="btn btn-ghost btn-sm"
           >
             ✕
           </button>
         </header>
 
-        <div className="px-4 py-2 border-b border-slate-800 flex items-center gap-2">
+        {/* Path bar */}
+        <div className="px-3 py-2 border-b border-subtle flex items-center gap-1.5 shrink-0 bg-sunken">
           {data?.parent && (
             <button
               onClick={() => void load(data.parent!)}
-              className="text-xs text-slate-400 hover:text-slate-200"
+              className="btn btn-ghost btn-sm shrink-0"
             >
               ← 上级
             </button>
@@ -73,21 +76,25 @@ export default function PathPicker({
             value={path}
             onChange={(e) => setPath(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void load(path)}
-            className="flex-1 px-2 py-1 bg-slate-800 border border-slate-700 rounded
-              text-xs font-mono"
+            className="input input-mono flex-1"
+            style={{ padding: '4px 8px', fontSize: 'var(--t-xs)' }}
           />
           <button
             onClick={() => void load(path)}
-            className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600"
+            className="btn btn-secondary btn-sm shrink-0"
           >
             前往
           </button>
         </div>
 
+        {/* Error */}
         {error && (
-          <div className="px-4 py-2 text-red-400 text-sm font-mono">{error}</div>
+          <div className="px-3.5 py-2 text-err text-xs font-mono bg-err-soft border-b border-err shrink-0">
+            {error}
+          </div>
         )}
 
+        {/* File list */}
         <div className="flex-1 overflow-y-auto">
           {data?.entries.map((e) => {
             const childPath =
@@ -99,45 +106,41 @@ export default function PathPicker({
             return (
               <div
                 key={e.name}
-                className="px-4 py-2 border-b border-slate-800 flex items-center
-                  gap-3 hover:bg-slate-800/50 group"
+                className="px-3.5 py-2 border-b border-subtle flex items-center gap-2.5 cursor-default hover:bg-overlay transition-colors"
               >
-                <span className="text-slate-500 w-4 text-center">
+                <span className="text-fg-tertiary w-4 text-center shrink-0">
                   {e.type === 'dir' ? '📁' : '📄'}
                 </span>
-                <span className="flex-1 text-sm font-mono">{e.name}</span>
-                {enterable && (
-                  <button
-                    onClick={() => void load(childPath)}
-                    className="text-xs text-slate-400 hover:text-cyan-400 invisible group-hover:visible"
-                  >
-                    打开
-                  </button>
-                )}
-                {selectable && (
-                  <button
-                    onClick={() => onPick(childPath)}
-                    className="text-xs text-slate-400 hover:text-emerald-400 invisible group-hover:visible"
-                  >
-                    选这个
-                  </button>
-                )}
+                <span className="flex-1 text-sm font-mono text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap">
+                  {e.name}
+                </span>
+                <div className="flex gap-1 shrink-0">
+                  {enterable && (
+                    <button
+                      onClick={() => void load(childPath)}
+                      className="btn btn-ghost btn-sm"
+                    >
+                      打开
+                    </button>
+                  )}
+                  {selectable && (
+                    <button
+                      onClick={() => onPick(childPath)}
+                      className="btn btn-primary btn-sm"
+                    >
+                      选这个
+                    </button>
+                  )}
+                </div>
               </div>
             )
           })}
         </div>
 
-        <footer className="px-4 py-3 border-t border-slate-700 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 rounded text-sm bg-slate-700 hover:bg-slate-600"
-          >
-            取消
-          </button>
-          <button
-            onClick={() => onPick(path)}
-            className="px-3 py-1.5 rounded text-sm bg-cyan-600 hover:bg-cyan-500"
-          >
+        {/* Footer */}
+        <footer className="px-3.5 py-2.5 border-t border-subtle flex justify-end gap-2 shrink-0 bg-surface">
+          <button onClick={onClose} className="btn btn-secondary btn-sm">取消</button>
+          <button onClick={() => onPick(path)} className="btn btn-primary btn-sm">
             选择当前目录
           </button>
         </footer>

@@ -1,0 +1,12 @@
+# Force CRLF on Windows scripts. cmd.exe parses .bat with LF-only line
+# endings unreliably (often loads the whole file as one line, then exits
+# silently -- looks like a "double-click and the window flashes closed" bug).
+# Treat as binary -- keeps the raw CRLF bytes verbatim in the repo so
+# `git pull` actually rewrites the working copy when the file changes.
+# `text eol=crlf` would only convert on checkout, leaving stale LF working
+# copies untouched (the bug that caused the silent double-click crash).
+*.bat binary
+*.cmd binary
+
+# PowerShell tolerates LF on modern Windows; keep normalization.
+*.ps1 text eol=crlf

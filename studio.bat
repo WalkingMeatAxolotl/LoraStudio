@@ -6,9 +6,18 @@ REM   studio.bat            same as: python -m studio run
 REM   studio.bat dev        frontend + backend dev mode
 REM   studio.bat build      build frontend only
 REM   studio.bat test       run pytest + vitest
+REM
+REM NOTE: This file MUST stay pure ASCII. cmd.exe parses .bat files with the
+REM system ANSI codepage BEFORE `chcp 65001` takes effect, so any non-ASCII
+REM byte breaks line parsing on Japanese (cp932), Chinese (cp936), etc. hosts.
 
 setlocal
 cd /d "%~dp0"
+
+REM Force Python to UTF-8 stdout/stderr so prints with non-ASCII (Chinese)
+REM don't crash on non-UTF-8 system locales (e.g. cp932 Japanese).
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
 
 if exist "venv\Scripts\python.exe" (
     set PYTHON=venv\Scripts\python.exe
@@ -17,31 +26,36 @@ if exist "venv\Scripts\python.exe" (
 ) else (
     where python >nul 2>nul
     if errorlevel 1 (
-        echo studio.bat: PATH 上找不到 python，请先安装 Python 3.10+ 1>&2
+        echo studio.bat: python not found on PATH. Please install Python 3.10+. 1>&2
         goto :fail
     )
-    echo [studio] 未发现 venv，正在创建 venv\ 并安装依赖（首次运行，可能需要几分钟）...
-    python -m venv venv || (echo studio.bat: 创建 venv 失败 1>&2 & goto :fail)
+    echo [studio] No venv detected. Creating venv\ and installing dependencies -- first run may take a few minutes...
+    python -m venv venv || (echo studio.bat: failed to create venv 1>&2 & goto :fail)
     set PYTHON=venv\Scripts\python.exe
-    %PYTHON% -m pip install --upgrade pip || (echo studio.bat: 升级 pip 失败 1>&2 & goto :fail)
+    %PYTHON% -m pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ || (echo studio.bat: failed to upgrade pip 1>&2 & goto :fail)
     if exist requirements.txt (
-        %PYTHON% -m pip install -r requirements.txt || (echo studio.bat: pip install -r requirements.txt 失败 1>&2 & goto :fail)
+        echo [studio] Installing Python dependencies -- will retry via Aliyun mirror if slow...
+        %PYTHON% -m pip install -r requirements.txt
+        if errorlevel 1 (
+            echo [studio] pip install failed, retrying via Aliyun mirror...
+            %PYTHON% -m pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ || (echo studio.bat: pip install failed 1>&2 & goto :fail)
+        )
     ) else (
-        echo studio.bat: 找不到 requirements.txt，跳过依赖安装 1>&2
+        echo studio.bat: requirements.txt not found, skipping dependency install 1>&2
     )
 )
 
 %PYTHON% -m studio %*
-set RC=%ERRORLEVEL%
-if %RC% neq 0 (
+set STUDIO_ERR=%ERRORLEVEL%
+if %STUDIO_ERR% NEQ 0 (
     echo.
-    echo [studio] 进程退出码 %RC% -- 按任意键关闭窗口
+    echo [studio] Exit code %STUDIO_ERR%. Press any key to close...
     pause >nul
 )
-exit /b %RC%
+exit /b %STUDIO_ERR%
 
 :fail
 echo.
-echo [studio] setup 失败 -- 按任意键关闭窗口
+echo [studio] setup failed. Press any key to close...
 pause >nul
 exit /b 1

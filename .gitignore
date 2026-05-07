@@ -70,3 +70,9 @@ dataset/
 nul
 AGENTS.md
 CLAUDE.md
+
+# 本地解压的设计稿原始目录（已整理进 mockup/）
+1/
+
+# 工具生成的临时目录
+.spec-workflow/

@@ -9,6 +9,7 @@ import {
 } from '../../../api/client'
 import ImageGrid, { applySelection } from '../../../components/ImageGrid'
 import ImagePreviewModal from '../../../components/ImagePreviewModal'
+import StepShell from '../../../components/StepShell'
 import { useToast } from '../../../components/Toast'
 import { useEventStream } from '../../../lib/useEventStream'
 
@@ -295,19 +296,19 @@ export default function CurationPage() {
 
   if (!activeVersion) {
     return (
-      <p className="text-slate-500">
+      <p className="text-fg-tertiary p-6">
         请先选择 / 创建一个版本（左上 VersionTabs）
       </p>
     )
   }
   if (error) {
     return (
-      <div className="p-3 rounded bg-red-900/40 border border-red-700 text-red-300 font-mono text-sm">
+      <div className="p-3 rounded-md bg-err-soft border border-err text-err font-mono text-sm">
         {error}
       </div>
     )
   }
-  if (!view) return <p className="text-slate-500">加载...</p>
+  if (!view) return <p className="text-fg-tertiary p-6">加载...</p>
 
   const switchRightFolder = (next: string) => {
     setRightFolder(next)
@@ -389,6 +390,7 @@ export default function CurationPage() {
       setNewFolder('')
       switchRightFolder(name)
       await refresh()
+      await reload()
     } catch (e) {
       toast(String(e), 'error')
     } finally {
@@ -416,6 +418,10 @@ export default function CurationPage() {
       setRenaming(null)
       toast(`${target} → ${next}`, 'success')
       await refresh()
+      // 关键：reload 项目 context，让 activeVersion.stats.train_folders 跟上磁盘真实
+      // 名字。否则 Train 页仍按旧 folder 名解析 N_label，repeat 显示错（没生效是
+      // 误解，启动训练时后端按真实磁盘读，但前端展示错本身就是 bug）。
+      await reload()
     } catch (e) {
       toast(String(e), 'error')
     } finally {
@@ -439,6 +445,7 @@ export default function CurationPage() {
       })
       if (rightFolder === name) switchRightFolder('')
       await refresh()
+      await reload()
     } catch (e) {
       toast(String(e), 'error')
     } finally {
@@ -487,32 +494,27 @@ export default function CurationPage() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full gap-3">
-      {/* 标题压缩成单行 */}
-      <header className="flex items-baseline gap-2 flex-wrap shrink-0">
-        <h2 className="text-base font-semibold">② 筛选</h2>
-        <span className="text-xs text-slate-500">
-          download → train · download 永远保留 · 按住{' '}
-          <kbd className="px-1 rounded bg-slate-800 text-slate-300">Alt</kbd>{' '}
-          悬停缩略图查看大图
-        </span>
-        <span className="flex-1" />
-        <label className="flex items-center gap-1.5 text-xs text-slate-400">
+    <StepShell
+      idx={2}
+      title="筛选图片"
+      subtitle="download → train"
+      actions={
+        <label className="flex items-center gap-1.5 text-sm text-fg-secondary whitespace-nowrap shrink-0">
           排序
           <select
             value={sortMode}
             onChange={(e) => setSortMode(e.target.value as SortMode)}
-            className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-xs text-slate-200"
+            className="input px-2 py-0.5 text-sm"
             title="排序作用于左右两个网格"
           >
             {SORT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
+              <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
         </label>
-      </header>
+      }
+    >
+    <div className="flex flex-col h-full gap-3">
 
       {/* Download + Train 两列平分整宽；预览改为 alt+hover 浮层，不占布局位置。 */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 items-stretch flex-1 min-h-0">
@@ -571,7 +573,8 @@ export default function CurationPage() {
                 value={newFolder}
                 onChange={(e) => setNewFolder(e.target.value)}
                 placeholder="+ 新建:5_concept"
-                className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs w-36"
+                className="input input-mono px-2 py-0.5 text-sm"
+                style={{ width: 144 }}
               />
               <BtnSecondary
                 onClick={doCreateFolder}
@@ -614,8 +617,8 @@ export default function CurationPage() {
           />
 
           {renaming && (
-            <div className="flex items-center gap-2 my-3 text-xs">
-              <span className="text-slate-400">改名 {renaming.target} →</span>
+            <div className="flex items-center gap-2 my-3 text-sm">
+              <span className="text-fg-secondary">改名 {renaming.target} →</span>
               <input
                 autoFocus
                 value={renaming.value}
@@ -626,14 +629,15 @@ export default function CurationPage() {
                   if (e.key === 'Enter') doRenameFolder()
                   if (e.key === 'Escape') setRenaming(null)
                 }}
-                className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs w-44"
+                className="input input-mono px-2 py-0.5"
+                style={{ width: 176 }}
               />
               <BtnPrimary onClick={doRenameFolder} disabled={busy}>
                 确认
               </BtnPrimary>
               <button
                 onClick={() => setRenaming(null)}
-                className="text-xs px-2 py-1 rounded text-slate-400 hover:text-slate-200"
+                className="btn btn-ghost btn-sm"
               >
                 取消
               </button>
@@ -674,6 +678,7 @@ export default function CurationPage() {
         />
       )}
     </div>
+    </StepShell>
   )
 }
 
@@ -700,46 +705,36 @@ function FolderSummary({
 }) {
   if (folders.length === 0) {
     return (
-      <p className="text-xs text-slate-500">
-        还没有训练文件夹（默认应有 1_data，可在右上「+ 新建」）
+      <p className="text-sm text-fg-tertiary">
+        还没有训练文件夹，点击「+ 新建」创建
       </p>
     )
   }
   const total = folders.reduce((s, f) => s + (counts[f] ?? 0), 0)
   return (
-    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+    <div className="flex flex-wrap items-center gap-1.5 text-sm">
       {folders.map((f) => {
         const isActive = f === activeFolder
         return (
           <span
             key={f}
-            className={
-              'group inline-flex items-center rounded border transition-colors ' +
-              (isActive
-                ? 'border-cyan-600 bg-cyan-950/30'
-                : 'border-slate-700 bg-slate-900/40 hover:border-slate-500')
-            }
+            className={`group inline-flex items-center transition-colors rounded-md ${
+              isActive ? 'border border-accent bg-accent-soft' : 'border border-dim bg-surface'
+            }`}
           >
             <button
               onClick={() => onSwitch(f)}
-              title={
-                isActive ? '当前查看（也是复制目标）' : '点击切换查看 + 复制目标'
-              }
-              className={
-                'px-2 py-1 ' +
-                (isActive
-                  ? 'text-cyan-200'
-                  : 'text-slate-300 hover:text-slate-100')
-              }
+              title={isActive ? '当前查看（也是复制目标）' : '点击切换查看 + 复制目标'}
+              className={`px-2 py-0.5 font-mono ${isActive ? 'text-accent' : 'text-fg-secondary'}`}
             >
-              <span className="font-mono">{f}</span>
-              <span className="text-slate-500"> ({counts[f] ?? 0})</span>
+              {f}
+              <span className="text-fg-tertiary"> ({counts[f] ?? 0})</span>
             </button>
             <button
               onClick={() => onRename(f)}
               disabled={busy}
               title="改名"
-              className="px-1 py-1 text-[10px] text-slate-600 opacity-0 group-hover:opacity-100 hover:text-slate-200"
+              className="opacity-0 group-hover:opacity-100 px-1 py-0.5 text-xs text-fg-tertiary"
             >
               ✎
             </button>
@@ -747,14 +742,14 @@ function FolderSummary({
               onClick={() => onDelete(f)}
               disabled={busy}
               title="删除文件夹"
-              className="px-1 py-1 text-[10px] text-slate-600 opacity-0 group-hover:opacity-100 hover:text-red-400"
+              className="opacity-0 group-hover:opacity-100 px-1 py-0.5 text-xs text-fg-tertiary"
             >
               ×
             </button>
           </span>
         )
       })}
-      <span className="text-slate-500 ml-2">总 {total} 张</span>
+      <span className="text-fg-tertiary ml-2">总 {total} 张</span>
     </div>
   )
 }
@@ -772,27 +767,24 @@ function AltHoverPreview({ focus }: { focus: Focus }) {
       aria-hidden
       className="fixed inset-0 z-40 pointer-events-none flex items-center justify-center p-6"
     >
-      <div className="relative bg-black/85 rounded-lg border border-slate-700 shadow-2xl flex flex-col overflow-hidden max-w-[95vw] max-h-[95vh]">
+      <div
+        className="relative flex flex-col overflow-hidden rounded-lg border border-bold max-w-[95vw] max-h-[95vh] bg-black/90 shadow-xl"
+      >
         <img
           src={focus.url}
           alt={focus.name}
           className="max-w-[95vw] max-h-[88vh] object-contain"
         />
-        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-slate-800 text-xs">
-          <span
-            className={
-              'text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 ' +
-              (focus.side === 'left'
-                ? 'bg-emerald-700/40 text-emerald-200'
-                : 'bg-cyan-700/40 text-cyan-200')
-            }
-          >
+        <div
+          className="flex items-center gap-2 shrink-0 px-3 py-1.5 border-t border-white/[0.08]"
+        >
+          <span className={`shrink-0 ${focus.side === 'left' ? 'badge badge-ok' : 'badge badge-info'}`}>
             {sourceLabel}
           </span>
-          <code className="text-slate-200 truncate flex-1 min-w-0">
+          <code className="mono truncate flex-1 min-w-0 text-fg-inverse text-sm">
             {focus.name}
           </code>
-          <span className="text-[10px] text-slate-500 shrink-0">
+          <span className="text-xs shrink-0 text-white/40">
             松开 Alt 关闭
           </span>
         </div>
@@ -801,9 +793,9 @@ function AltHoverPreview({ focus }: { focus: Focus }) {
   )
 }
 
-const ACCENT_BAR: Record<'emerald' | 'cyan', string> = {
-  emerald: 'bg-emerald-500/70',
-  cyan: 'bg-cyan-500/70',
+const ACCENT_BAR_CLS: Record<'emerald' | 'cyan', string> = {
+  emerald: 'bg-ok',
+  cyan: 'bg-info',
 }
 
 function PanelCard({
@@ -820,15 +812,16 @@ function PanelCard({
   children: React.ReactNode
 }) {
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-800/30 overflow-hidden flex flex-col min-h-0">
-      <div className={`h-0.5 w-full ${ACCENT_BAR[accent]}`} />
-      <header className="px-3 py-1.5 border-b border-slate-700 flex flex-wrap items-center gap-1.5">
-        <h3 className="text-xs font-semibold text-slate-100">{title}</h3>
-        <span className="text-[11px] text-slate-500">{subtitle}</span>
+    <section className="flex flex-col min-h-0 rounded-md border border-subtle bg-surface overflow-hidden"
+    >
+      <div className={`h-0.5 ${ACCENT_BAR_CLS[accent]}`} />
+      <header className="flex flex-wrap items-center gap-1.5 px-2.5 py-1.5 border-b border-subtle text-sm">
+        <h3 className="font-semibold">{title}</h3>
+        <span className="text-xs text-fg-tertiary">{subtitle}</span>
         <span className="flex-1" />
         {actions}
       </header>
-      <div className="p-2 flex-1 min-h-0 flex flex-col">{children}</div>
+      <div className="flex-1 min-h-0 flex flex-col p-2">{children}</div>
     </section>
   )
 }
@@ -838,10 +831,7 @@ function BtnPrimary({
   ...rest
 }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button
-      {...rest}
-      className="text-xs px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500"
-    >
+    <button {...rest} className="btn btn-primary btn-sm">
       {children}
     </button>
   )
@@ -852,10 +842,7 @@ function BtnSecondary({
   ...rest
 }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button
-      {...rest}
-      className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500"
-    >
+    <button {...rest} className="btn btn-secondary btn-sm">
       {children}
     </button>
   )
@@ -868,7 +855,7 @@ function BtnDanger({
   return (
     <button
       {...rest}
-      className="text-xs px-3 py-1 rounded bg-red-700/80 hover:bg-red-600 disabled:bg-slate-700 disabled:text-slate-500"
+      className="btn btn-sm bg-err-soft text-err border-err"
     >
       {children}
     </button>

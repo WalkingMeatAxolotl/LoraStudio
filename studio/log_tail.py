@@ -8,9 +8,16 @@ PP6.4：增加 MonitorStatePoller —— 监听 monitor_state.json mtime，
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Any, Callable
+
+# C++ 库（典型如 onnxruntime）有时直接往 worker 进程的 fd 2 写带 ANSI 颜色码
+# 的日志，前端 <pre> 不解析 ANSI，会渲染成 `日[1;31m...` 之类的乱码。Windows
+# 上还会塞 UTF-16 风格的 NUL 字节，让一行 ASCII 看起来字间夹空格。统一在
+# tail 阶段剥掉，让前端拿到的就是干净文本。
+_ANSI_CSI_RE = re.compile(r"\x1b\[[\d;?]*[A-Za-z]")
 
 
 class LogTailer:
@@ -77,7 +84,10 @@ class LogTailer:
             if not chunk:
                 return
             self._offset += len(chunk)
-        text = self._buffer + chunk.decode("utf-8", errors="replace")
+        raw = chunk.decode("utf-8", errors="replace")
+        # 剥 ANSI CSI 转义 + NUL 字节（onnxruntime 等 C++ 库直写 fd 2 的副产物）
+        cleaned = _ANSI_CSI_RE.sub("", raw).replace("\x00", "")
+        text = self._buffer + cleaned
         # 拆行；最后一段不完整就留在 buffer 里下次拼
         lines = text.split("\n")
         self._buffer = lines.pop()
