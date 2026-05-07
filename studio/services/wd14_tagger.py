@@ -88,6 +88,16 @@ class WD14Tagger:
 
     # -------------------- model resolution --------------------
 
+    def _local_model_dir_status(self) -> tuple[Path, bool]:
+        cfg = self._cfg()
+        if cfg.local_dir:
+            d = Path(cfg.local_dir)
+            ok = (d / "model.onnx").exists() and (d / "selected_tags.csv").exists()
+            return d, ok
+        d = REPO_ROOT / "models" / "wd14" / _safe_dir_name(cfg.model_id)
+        ok = (d / "model.onnx").exists() and (d / "selected_tags.csv").exists()
+        return d, ok
+
     def _resolve_model_dir(self) -> Path:
         cfg = self._cfg()
         if cfg.local_dir:
@@ -118,10 +128,14 @@ class WD14Tagger:
 
     def is_available(self) -> tuple[bool, str]:
         try:
-            d = self._resolve_model_dir()
+            d, ok = self._local_model_dir_status()
         except Exception as exc:  # noqa: BLE001
             return False, str(exc)
-        return True, f"模型: {d.name}"
+        if ok:
+            return True, f"模型: {d.name}"
+        if self._cfg().local_dir:
+            return False, f"local_dir 缺少 model.onnx 或 selected_tags.csv: {d}"
+        return False, f"需下载模型: {d.name}"
 
     def prepare(self) -> None:
         if self._session is not None:

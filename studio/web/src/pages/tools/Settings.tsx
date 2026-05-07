@@ -22,6 +22,7 @@ type Section =
   | 'huggingface'
   | 'joycaption'
   | 'wd14'
+  | 'cltagger'
   | 'models'
   | 'queue'
 
@@ -52,6 +53,18 @@ const EMPTY: Secrets = {
     local_dir: null,
     threshold_general: 0.35,
     threshold_character: 0.85,
+    blacklist_tags: [],
+    batch_size: 8,
+  },
+  cltagger: {
+    model_id: 'cella110n/cl_tagger',
+    model_path: 'cl_tagger_1_02/model.onnx',
+    tag_mapping_path: 'cl_tagger_1_02/tag_mapping.json',
+    local_dir: null,
+    threshold_general: 0.35,
+    threshold_character: 0.6,
+    add_rating_tag: false,
+    add_model_tag: false,
     blacklist_tags: [],
     batch_size: 8,
   },
@@ -331,6 +344,73 @@ export default function SettingsPage() {
             className={textInputClass}                                  />
         </SettingsField>
         <WD14RuntimePanel />
+      </SettingsSection>
+
+      <SettingsSection title="CLTagger">
+        <SettingsField label="model_id">
+          <input
+            type="text"
+            value={draft.cltagger.model_id}
+            onChange={(e) => update('cltagger', 'model_id', e.target.value)}
+            className={textInputClass}                                  />
+        </SettingsField>
+        <SettingsField label="model_path">
+          <input
+            type="text"
+            value={draft.cltagger.model_path}
+            onChange={(e) => update('cltagger', 'model_path', e.target.value)}
+            className={textInputClass}                                  />
+        </SettingsField>
+        <SettingsField label="tag_mapping_path">
+          <input
+            type="text"
+            value={draft.cltagger.tag_mapping_path}
+            onChange={(e) => update('cltagger', 'tag_mapping_path', e.target.value)}
+            className={textInputClass}                                  />
+        </SettingsField>
+        <SettingsField label="local_dir (留空 = 自动 HF 下载)">
+          <input
+            type="text"
+            value={draft.cltagger.local_dir ?? ''}
+            onChange={(e) => update('cltagger', 'local_dir', e.target.value || null)}
+            className={textInputClass}                                  />
+        </SettingsField>
+        <div className="grid grid-cols-2 gap-2">
+          <SettingsField label="threshold_general">
+            <input
+              type="number" step="0.01" min={0} max={1}
+              value={draft.cltagger.threshold_general}
+              onChange={(e) => update('cltagger', 'threshold_general', Number(e.target.value))}
+              className={textInputClass}                                          />
+          </SettingsField>
+          <SettingsField label="threshold_character">
+            <input
+              type="number" step="0.01" min={0} max={1}
+              value={draft.cltagger.threshold_character}
+              onChange={(e) => update('cltagger', 'threshold_character', Number(e.target.value))}
+              className={textInputClass}                                          />
+          </SettingsField>
+        </div>
+        <SettingsField label="add_rating_tag">
+          <Bool value={draft.cltagger.add_rating_tag} onChange={(v) => update('cltagger', 'add_rating_tag', v)} />
+        </SettingsField>
+        <SettingsField label="add_model_tag">
+          <Bool value={draft.cltagger.add_model_tag} onChange={(v) => update('cltagger', 'add_model_tag', v)} />
+        </SettingsField>
+        <SettingsField label="blacklist_tags (逗号分隔)">
+          <input
+            type="text"
+            value={draft.cltagger.blacklist_tags.join(', ')}
+            onChange={(e) => update('cltagger', 'blacklist_tags', e.target.value.split(',').map((t) => t.trim()).filter(Boolean))}
+            className={textInputClass}                                  />
+        </SettingsField>
+        <SettingsField label="batch_size (GPU 推理一批塞几张；CPU 自动降到 1)">
+          <input
+            type="number" min={1} max={64}
+            value={draft.cltagger.batch_size}
+            onChange={(e) => update('cltagger', 'batch_size', Math.max(1, Number(e.target.value) || 1))}
+            className={textInputClass}                                  />
+        </SettingsField>
       </SettingsSection>
 
       <SettingsSection title="队列调度">
@@ -620,7 +700,7 @@ function ModelsSection() {
           </ModelGroupCard>
 
           {/* Qwen3 + T5 */}
-          {(['qwen3', 't5_tokenizer'] as const).map((id) => {
+          {(['qwen3', 't5_tokenizer', 'cltagger'] as const).map((id) => {
             const m = catalog[id]
             const dl = catalog.downloads[id]
             const allExist = m.files.every((f) => f.exists)

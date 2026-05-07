@@ -3,6 +3,7 @@ import { Link, useOutletContext } from 'react-router-dom'
 import {
   api,
   type Job,
+  type CLTaggerConfig,
   type ProjectDetail,
   type TaggerName,
   type TaggerStatus,
@@ -32,12 +33,38 @@ type Wd14Form = {
   blacklist_tags: string[]
 }
 
+type CLTaggerForm = {
+  threshold_general: number
+  threshold_character: number
+  model_id: string
+  model_path: string
+  tag_mapping_path: string
+  local_dir: string
+  add_rating_tag: boolean
+  add_model_tag: boolean
+  blacklist_tags: string[]
+}
+
 function fromConfig(cfg: WD14Config): Wd14Form {
   return {
     threshold_general: cfg.threshold_general,
     threshold_character: cfg.threshold_character,
     model_id: cfg.model_id,
     local_dir: cfg.local_dir ?? '',
+    blacklist_tags: cfg.blacklist_tags,
+  }
+}
+
+function fromCLTaggerConfig(cfg: CLTaggerConfig): CLTaggerForm {
+  return {
+    threshold_general: cfg.threshold_general,
+    threshold_character: cfg.threshold_character,
+    model_id: cfg.model_id,
+    model_path: cfg.model_path,
+    tag_mapping_path: cfg.tag_mapping_path,
+    local_dir: cfg.local_dir ?? '',
+    add_rating_tag: cfg.add_rating_tag,
+    add_model_tag: cfg.add_model_tag,
     blacklist_tags: cfg.blacklist_tags,
   }
 }
@@ -52,6 +79,8 @@ export default function TaggingPage() {
 
   const [wd14Defaults, setWd14Defaults] = useState<WD14Config | null>(null)
   const [wd14Form, setWd14Form] = useState<Wd14Form | null>(null)
+  const [cltaggerDefaults, setCltaggerDefaults] = useState<CLTaggerConfig | null>(null)
+  const [cltaggerForm, setCltaggerForm] = useState<CLTaggerForm | null>(null)
   const [advOpen, setAdvOpen] = useState(false)
 
   const [job, setJob] = useState<Job | null>(null)
@@ -66,6 +95,8 @@ export default function TaggingPage() {
       .then((s) => {
         setWd14Defaults(s.wd14)
         setWd14Form(fromConfig(s.wd14))
+        setCltaggerDefaults(s.cltagger)
+        setCltaggerForm(fromCLTaggerConfig(s.cltagger))
       })
       .catch((e) => toast(`读取 wd14 默认配置失败：${e}`, 'error'))
     // toast 函数引用稳定；只在 mount 时跑一次
@@ -140,6 +171,34 @@ export default function TaggingPage() {
     return Object.keys(out).length ? out : undefined
   }
 
+  const buildCLTaggerOverrides = (): Record<string, unknown> | undefined => {
+    if (!cltaggerForm || !cltaggerDefaults) return undefined
+    const out: Record<string, unknown> = {}
+    if (cltaggerForm.threshold_general !== cltaggerDefaults.threshold_general)
+      out.threshold_general = cltaggerForm.threshold_general
+    if (cltaggerForm.threshold_character !== cltaggerDefaults.threshold_character)
+      out.threshold_character = cltaggerForm.threshold_character
+    if (cltaggerForm.model_id !== cltaggerDefaults.model_id)
+      out.model_id = cltaggerForm.model_id
+    if (cltaggerForm.model_path !== cltaggerDefaults.model_path)
+      out.model_path = cltaggerForm.model_path
+    if (cltaggerForm.tag_mapping_path !== cltaggerDefaults.tag_mapping_path)
+      out.tag_mapping_path = cltaggerForm.tag_mapping_path
+    const localDirChanged =
+      (cltaggerForm.local_dir || null) !== (cltaggerDefaults.local_dir ?? null)
+    if (localDirChanged) out.local_dir = cltaggerForm.local_dir || null
+    if (cltaggerForm.add_rating_tag !== cltaggerDefaults.add_rating_tag)
+      out.add_rating_tag = cltaggerForm.add_rating_tag
+    if (cltaggerForm.add_model_tag !== cltaggerDefaults.add_model_tag)
+      out.add_model_tag = cltaggerForm.add_model_tag
+    if (
+      JSON.stringify(cltaggerForm.blacklist_tags) !==
+      JSON.stringify(cltaggerDefaults.blacklist_tags)
+    )
+      out.blacklist_tags = cltaggerForm.blacklist_tags
+    return Object.keys(out).length ? out : undefined
+  }
+
   const startTagging = async () => {
     if (!taggerStatus?.ok) {
       toast(`${tagger} 不可用：${taggerStatus?.msg ?? '未知'}`, 'error')
@@ -147,11 +206,14 @@ export default function TaggingPage() {
     }
     try {
       const overrides =
-        tagger === 'wd14' ? buildWd14Overrides() : undefined
+        tagger === 'wd14' ? buildWd14Overrides()
+          : tagger === 'cltagger' ? buildCLTaggerOverrides()
+            : undefined
       const j = await api.startTag(project.id, activeVersion.id, {
         tagger,
         output_format: outputFormat,
-        wd14_overrides: overrides,
+        wd14_overrides: tagger === 'wd14' ? overrides : undefined,
+        cltagger_overrides: tagger === 'cltagger' ? overrides : undefined,
       })
       setJob(j)
       setLogs([])
@@ -201,6 +263,7 @@ export default function TaggingPage() {
               style={{ padding: '3px 8px' }}
             >
               <option value="wd14">WD14（本地 ONNX）</option>
+              <option value="cltagger">CLTagger（本地 ONNX）</option>
               <option value="joycaption">JoyCaption（远程 vLLM）</option>
             </select>
             <span
@@ -237,6 +300,17 @@ export default function TaggingPage() {
               form={wd14Form}
               defaults={wd14Defaults}
               onChange={setWd14Form}
+              advOpen={advOpen}
+              setAdvOpen={setAdvOpen}
+              disabled={isLive}
+            />
+          )}
+
+          {tagger === 'cltagger' && (
+            <CLTaggerPanel
+              form={cltaggerForm}
+              defaults={cltaggerDefaults}
+              onChange={setCltaggerForm}
               advOpen={advOpen}
               setAdvOpen={setAdvOpen}
               disabled={isLive}
@@ -386,6 +460,170 @@ function Wd14Panel({
             label="blacklist_tags（逗号分隔）"
             value={form.blacklist_tags.join(', ')}
             placeholder="如 monochrome, comic"
+            disabled={disabled}
+            onChange={(v) =>
+              onChange({
+                ...form,
+                blacklist_tags: v
+                  .split(',')
+                  .map((t) => t.trim())
+                  .filter(Boolean),
+              })
+            }
+            modified={
+              JSON.stringify(form.blacklist_tags) !==
+              JSON.stringify(defaults.blacklist_tags)
+            }
+          />
+        </div>
+      )}
+    </section>
+  )
+}
+
+function CLTaggerPanel({
+  form,
+  defaults,
+  onChange,
+  advOpen,
+  setAdvOpen,
+  disabled,
+}: {
+  form: CLTaggerForm | null
+  defaults: CLTaggerConfig | null
+  onChange: (f: CLTaggerForm) => void
+  advOpen: boolean
+  setAdvOpen: (b: boolean) => void
+  disabled: boolean
+}) {
+  if (!form || !defaults) {
+    return (
+      <section className="rounded-md border border-subtle bg-surface px-3 py-2 text-xs text-fg-tertiary shrink-0">
+        加载 CLTagger 默认参数...
+      </section>
+    )
+  }
+
+  const dirty =
+    form.threshold_general !== defaults.threshold_general ||
+    form.threshold_character !== defaults.threshold_character ||
+    form.model_id !== defaults.model_id ||
+    form.model_path !== defaults.model_path ||
+    form.tag_mapping_path !== defaults.tag_mapping_path ||
+    (form.local_dir || null) !== (defaults.local_dir ?? null) ||
+    form.add_rating_tag !== defaults.add_rating_tag ||
+    form.add_model_tag !== defaults.add_model_tag ||
+    JSON.stringify(form.blacklist_tags) !==
+      JSON.stringify(defaults.blacklist_tags)
+
+  const restore = () => onChange(fromCLTaggerConfig(defaults))
+
+  return (
+    <section className="rounded-md border border-subtle bg-surface px-3.5 py-2.5 flex flex-col gap-2 shrink-0 text-sm">
+      <div className="flex items-center gap-2 flex-wrap">
+        <PanelDot />
+        <span className="caption">CLTagger 参数</span>
+        <span className="text-xs text-fg-tertiary">
+          预填{' '}
+          <Link to="/tools/settings" className="text-accent" title="去设置页编辑全局默认">
+            全局设置
+          </Link>{' '}
+          · 本次有效，不写回
+        </span>
+        <span className="flex-1" />
+        {dirty && (
+          <>
+            <span className="badge badge-warn">已改</span>
+            <button
+              onClick={restore}
+              disabled={disabled}
+              className="btn btn-ghost btn-sm"
+              title="还原为全局设置"
+            >
+              ↻ 还原
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <ThresholdInput
+          label="general"
+          value={form.threshold_general}
+          base={defaults.threshold_general}
+          disabled={disabled}
+          onChange={(v) => onChange({ ...form, threshold_general: v })}
+        />
+        <ThresholdInput
+          label="character"
+          value={form.threshold_character}
+          base={defaults.threshold_character}
+          disabled={disabled}
+          onChange={(v) => onChange({ ...form, threshold_character: v })}
+        />
+        <label className="flex items-center gap-1.5 text-xs text-fg-tertiary">
+          <input
+            type="checkbox"
+            checked={form.add_rating_tag}
+            disabled={disabled}
+            onChange={(e) => onChange({ ...form, add_rating_tag: e.target.checked })}
+          />
+          rating
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-fg-tertiary">
+          <input
+            type="checkbox"
+            checked={form.add_model_tag}
+            disabled={disabled}
+            onChange={(e) => onChange({ ...form, add_model_tag: e.target.checked })}
+          />
+          model
+        </label>
+        <button
+          type="button"
+          onClick={() => setAdvOpen(!advOpen)}
+          className="btn btn-ghost btn-sm text-xs text-fg-tertiary"
+        >
+          {advOpen ? '▾' : '▸'} 高级
+        </button>
+      </div>
+
+      {advOpen && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
+          <LabeledInput
+            label="model_id"
+            value={form.model_id}
+            disabled={disabled}
+            onChange={(v) => onChange({ ...form, model_id: v })}
+            modified={form.model_id !== defaults.model_id}
+          />
+          <LabeledInput
+            label="local_dir"
+            value={form.local_dir}
+            placeholder="留空 = 自动 HF 下载"
+            disabled={disabled}
+            onChange={(v) => onChange({ ...form, local_dir: v })}
+            modified={(form.local_dir || null) !== (defaults.local_dir ?? null)}
+          />
+          <LabeledInput
+            label="model_path"
+            value={form.model_path}
+            disabled={disabled}
+            onChange={(v) => onChange({ ...form, model_path: v })}
+            modified={form.model_path !== defaults.model_path}
+          />
+          <LabeledInput
+            label="tag_mapping_path"
+            value={form.tag_mapping_path}
+            disabled={disabled}
+            onChange={(v) => onChange({ ...form, tag_mapping_path: v })}
+            modified={form.tag_mapping_path !== defaults.tag_mapping_path}
+          />
+          <LabeledInput
+            className="md:col-span-2"
+            label="blacklist_tags（逗号分隔）"
+            value={form.blacklist_tags.join(', ')}
+            placeholder="如 low quality, signature"
             disabled={disabled}
             onChange={(v) =>
               onChange({
@@ -565,7 +803,9 @@ function TagPreviewPanel({
         <div className="text-xs text-fg-secondary leading-relaxed">
           {tagger === 'wd14'
             ? 'WD14 ONNX 本地推理，无需网络'
-            : 'JoyCaption 远程 vLLM，自然语言描述'}
+            : tagger === 'cltagger'
+              ? 'CLTagger ONNX 本地推理，支持角色阈值'
+              : 'JoyCaption 远程 vLLM，自然语言描述'}
         </div>
       </div>
 

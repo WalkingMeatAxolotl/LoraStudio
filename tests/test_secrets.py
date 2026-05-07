@@ -50,6 +50,14 @@ def test_wd14_defaults_include_candidate_list(secrets_file: Path) -> None:
     assert set(secrets.DEFAULT_WD14_MODELS).issubset(set(s.wd14.model_ids))
 
 
+def test_cltagger_defaults_use_1_02(secrets_file: Path) -> None:
+    s = secrets.load()
+    assert s.cltagger.model_id == "cella110n/cl_tagger"
+    assert s.cltagger.model_path == "cl_tagger_1_02/model.onnx"
+    assert s.cltagger.tag_mapping_path == "cl_tagger_1_02/tag_mapping.json"
+    assert s.cltagger.threshold_character == pytest.approx(0.6)
+
+
 def test_wd14_legacy_file_without_model_ids_gets_defaults(
     secrets_file: Path,
 ) -> None:

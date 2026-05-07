@@ -92,6 +92,19 @@ export interface WD14Config {
   batch_size: number
 }
 
+export interface CLTaggerConfig {
+  model_id: string
+  model_path: string
+  tag_mapping_path: string
+  local_dir: string | null
+  threshold_general: number
+  threshold_character: number
+  add_rating_tag: boolean
+  add_model_tag: boolean
+  blacklist_tags: string[]
+  batch_size: number
+}
+
 /** PP8 — onnxruntime 装包状态 + nvidia-smi 检测结果。 */
 export interface WD14Runtime {
   installed: 'onnxruntime' | 'onnxruntime-gpu' | null
@@ -163,6 +176,7 @@ export interface Secrets {
   huggingface: HuggingFaceConfig
   joycaption: JoyCaptionConfig
   wd14: WD14Config
+  cltagger: CLTaggerConfig
   models: ModelsConfig
   queue: QueueConfig
 }
@@ -204,7 +218,7 @@ export interface AnimaVaeCatalog extends ModelFileStatus {
 }
 
 export interface ModelDirCatalog {
-  id: 'qwen3' | 't5_tokenizer'
+  id: 'qwen3' | 't5_tokenizer' | 'cltagger'
   name: string
   description: string
   repo: string
@@ -227,6 +241,7 @@ export interface ModelsCatalog {
   anima_vae: AnimaVaeCatalog
   qwen3: ModelDirCatalog
   t5_tokenizer: ModelDirCatalog
+  cltagger: ModelDirCatalog
   downloads: Record<string, ModelDownloadStatus>
 }
 
@@ -347,7 +362,7 @@ export interface CopyResult {
 
 // ---- tagging (PP4) --------------------------------------------------------
 
-export type TaggerName = 'wd14' | 'joycaption'
+export type TaggerName = 'wd14' | 'cltagger' | 'joycaption'
 
 export interface TaggerStatus {
   name: TaggerName
@@ -862,6 +877,17 @@ export const api = {
         threshold_character?: number | null
         model_id?: string | null
         local_dir?: string | null
+        blacklist_tags?: string[] | null
+      }
+      cltagger_overrides?: {
+        threshold_general?: number | null
+        threshold_character?: number | null
+        model_id?: string | null
+        model_path?: string | null
+        tag_mapping_path?: string | null
+        local_dir?: string | null
+        add_rating_tag?: boolean | null
+        add_model_tag?: boolean | null
         blacklist_tags?: string[] | null
       }
     }

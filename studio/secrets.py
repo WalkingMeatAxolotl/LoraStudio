@@ -99,6 +99,20 @@ class WD14Config(BaseModel):
         return self
 
 
+class CLTaggerConfig(BaseModel):
+    model_id: str = "cella110n/cl_tagger"
+    model_path: str = "cl_tagger_1_02/model.onnx"
+    tag_mapping_path: str = "cl_tagger_1_02/tag_mapping.json"
+    local_dir: Optional[str] = None
+    threshold_general: float = 0.35
+    threshold_character: float = 0.6
+    add_rating_tag: bool = False
+    add_model_tag: bool = False
+    blacklist_tags: list[str] = Field(default_factory=list)
+    # 与 WD14 一致：只有 CUDA EP 时才真正 batch，CPU 自动降到 1。
+    batch_size: int = 8
+
+
 class QueueConfig(BaseModel):
     """队列调度策略（PP10.2）。
 
@@ -132,6 +146,7 @@ class Secrets(BaseModel):
     huggingface: HuggingFaceConfig = Field(default_factory=HuggingFaceConfig)
     joycaption: JoyCaptionConfig = Field(default_factory=JoyCaptionConfig)
     wd14: WD14Config = Field(default_factory=WD14Config)
+    cltagger: CLTaggerConfig = Field(default_factory=CLTaggerConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     queue: QueueConfig = Field(default_factory=QueueConfig)
 
