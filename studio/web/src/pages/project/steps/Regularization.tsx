@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import {
   api,
-  type GenerateRequest,
   type Job,
   type LoraEntry,
   type ProjectDetail,
+  type RegAiRequest,
   type RegBuildRequest,
   type RegStatus,
   type RegTagCount,
@@ -69,16 +69,15 @@ export default function RegularizationPage() {
   // Tab：设置&日志 / 图片预览 / 模型生成。job done 时自动切到图片，让用户看成果。
   const [activeTab, setActiveTab] = useState<'config' | 'images' | 'ai'>('config')
 
-  // AI 生成参数
-  const [aiPrompt, setAiPrompt] = useState('')
+  // AI 生成参数（排除 tag 复用主组件的 excluded 状态）
   const [aiNeg, setAiNeg] = useState('worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, bad anatomy')
   const [aiWidth, setAiWidth] = useState(1024)
   const [aiHeight, setAiHeight] = useState(1024)
   const [aiSteps, setAiSteps] = useState(25)
   const [aiCfg, setAiCfg] = useState(4.0)
-  const [aiCount, setAiCount] = useState(4)
   const [aiSeed, setAiSeed] = useState(0)
   const [aiLoras, setAiLoras] = useState<LoraEntry[]>([])
+  const [aiIncremental, setAiIncremental] = useState(false)
   const [aiTask, setAiTask] = useState<Task | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiPickerIdx, setAiPickerIdx] = useState<number | null>(null)
@@ -172,15 +171,7 @@ export default function RegularizationPage() {
     }
   })
 
-  // 用 train top tags 预填 AI 提示词（仅第一次加载时设置）
-  const aiPromptSeeded = useRef(false)
-  useEffect(() => {
-    if (aiPromptSeeded.current || trainTags.length === 0) return
-    aiPromptSeeded.current = true
-    setAiPrompt(trainTags.map((t) => t.tag).join(', '))
-  }, [trainTags])
-
-  // 轮询 AI 生成任务状态
+  // 轮询 AI 正则生成任务状态
   const aiTaskId = aiTask?.id
   useEffect(() => {
     if (aiTaskId == null) return
@@ -188,7 +179,7 @@ export default function RegularizationPage() {
     const poll = async () => {
       if (!active) return
       try {
-        const t = await api.getGenerateTask(aiTaskId)
+        const t = await api.getRegAiTask(project.id, vid!, aiTaskId)
         if (!active) return
         setAiTask(t)
         if (['done', 'failed', 'canceled'].includes(t.status)) {
@@ -201,30 +192,27 @@ export default function RegularizationPage() {
     void poll()
     const interval = setInterval(poll, 2000)
     return () => { active = false; clearInterval(interval) }
-  }, [aiTaskId, refreshReg])
+  }, [aiTaskId, project.id, vid, refreshReg])
 
   const handleAiGenerate = async () => {
     if (!vid) return
-    if (!aiPrompt.trim()) {
-      toast('请输入提示词', 'error'); return
-    }
     setAiBusy(true)
     setAiTask(null)
     try {
-      const body: GenerateRequest = {
-        prompts: [aiPrompt],
+      const body: RegAiRequest = {
+        excluded_tags: Array.from(excluded),
         negative_prompt: aiNeg,
         width: aiWidth,
         height: aiHeight,
         steps: aiSteps,
         cfg_scale: aiCfg,
-        count: aiCount,
         seed: aiSeed,
         lora_configs: aiLoras.filter((l) => l.path.trim()),
+        incremental: aiIncremental,
       }
-      const task = await api.enqueueRegGenerate(project.id, vid, body)
+      const task = await api.enqueueRegAi(project.id, vid, body)
       setAiTask(task)
-      toast(`生成任务 #${task.id} 已入队，完成后写入 reg/1_ai/`, 'success')
+      toast(`AI 正则生成任务 #${task.id} 已入队`, 'success')
     } catch (e) {
       toast(String(e), 'error')
       setAiBusy(false)
@@ -363,17 +351,18 @@ export default function RegularizationPage() {
       {activeTab === 'ai' ? (
         <AiGenPanel
           trainTags={trainTags}
-          prompt={aiPrompt} onPromptChange={setAiPrompt}
+          excluded={excluded} onToggle={toggleTag}
           neg={aiNeg} onNegChange={setAiNeg}
           width={aiWidth} onWidthChange={setAiWidth}
           height={aiHeight} onHeightChange={setAiHeight}
           steps={aiSteps} onStepsChange={setAiSteps}
           cfg={aiCfg} onCfgChange={setAiCfg}
-          count={aiCount} onCountChange={setAiCount}
           seed={aiSeed} onSeedChange={setAiSeed}
           loras={aiLoras} onLorasChange={setAiLoras}
+          incremental={aiIncremental} onIncrementalChange={setAiIncremental}
           pickerIdx={aiPickerIdx} onPickerIdxChange={setAiPickerIdx}
           task={aiTask}
+          trainImageCount={trainImageCount}
         />
       ) : activeTab === 'config' ? (
         <div className="flex flex-col gap-3 min-h-0 flex-1 overflow-y-auto">
@@ -997,7 +986,7 @@ function AiTaskStatus({ task }: { task: Task | null }) {
       <span className={cls}>{label}</span>
       <span className="caption font-mono">#{task.id}</span>
       {task.status === 'done' && (
-        <span className="text-xs text-fg-tertiary">图片已写入 reg/1_ai/</span>
+        <span className="text-xs text-fg-tertiary">已写入 reg 对应子目录</span>
       )}
       {task.status === 'failed' && task.error_msg && (
         <span className="text-xs text-err">{task.error_msg}</span>
@@ -1008,30 +997,32 @@ function AiTaskStatus({ task }: { task: Task | null }) {
 
 function AiGenPanel({
   trainTags,
-  prompt, onPromptChange,
+  excluded, onToggle,
   neg, onNegChange,
   width, onWidthChange,
   height, onHeightChange,
   steps, onStepsChange,
   cfg, onCfgChange,
-  count, onCountChange,
   seed, onSeedChange,
   loras, onLorasChange,
+  incremental, onIncrementalChange,
   pickerIdx, onPickerIdxChange,
   task,
+  trainImageCount,
 }: {
   trainTags: RegTagCount[]
-  prompt: string; onPromptChange: (v: string) => void
+  excluded: Set<string>; onToggle: (tag: string) => void
   neg: string; onNegChange: (v: string) => void
   width: number; onWidthChange: (v: number) => void
   height: number; onHeightChange: (v: number) => void
   steps: number; onStepsChange: (v: number) => void
   cfg: number; onCfgChange: (v: number) => void
-  count: number; onCountChange: (v: number) => void
   seed: number; onSeedChange: (v: number) => void
   loras: LoraEntry[]; onLorasChange: (v: LoraEntry[]) => void
+  incremental: boolean; onIncrementalChange: (v: boolean) => void
   pickerIdx: number | null; onPickerIdxChange: (v: number | null) => void
   task: Task | null
+  trainImageCount: number
 }) {
   const addLora = () => onLorasChange([...loras, { path: '', scale: 1.0 }])
   const delLora = (i: number) => onLorasChange(loras.filter((_, idx) => idx !== i))
@@ -1044,21 +1035,16 @@ function AiGenPanel({
     <div className="flex flex-col gap-3 min-h-0 flex-1 overflow-y-auto">
       <section className="rounded-md border border-subtle bg-surface px-3.5 py-3 flex flex-col gap-3 shrink-0 text-sm">
         <p className="text-2xs text-fg-tertiary m-0">
-          生成结果写入 <span className="font-mono">reg/1_ai/</span>，训练时作为正则图使用（1 repeat）。
-          {trainTags.length > 0 && ' 已预填 train top tags，可直接修改。'}
+          逐图生成：为 train 每张图（共{' '}
+          <span className="font-mono text-fg-primary">{trainImageCount}</span>
+          {' '}张）的 tag 生成对应正则图，写入 <span className="font-mono">reg/{'{subfolder}'}/</span>。
+          排除 tag 与左侧「Booru」共用，修改后两边同步生效。
         </p>
 
-        {/* 提示词 */}
-        <div className="flex flex-col gap-1">
-          <label className="caption">正向提示词</label>
-          <textarea
-            className="input font-mono text-sm resize-y"
-            rows={4}
-            value={prompt}
-            onChange={(e) => onPromptChange(e.target.value)}
-            placeholder="输入提示词，例如 newest, safe, 1girl, masterpiece, best quality"
-          />
-        </div>
+        {/* 排除 tag（复用 ExcludeTagsPicker） */}
+        <ExcludeTagsPicker trainTags={trainTags} excluded={excluded} onToggle={onToggle} />
+
+        {/* 负面提示词 */}
         <div className="flex flex-col gap-1">
           <label className="caption">负面提示词</label>
           <textarea
@@ -1078,10 +1064,17 @@ function AiGenPanel({
           <AiNumField label="步数" value={steps} onChange={onStepsChange} min={1} max={150} />
           <AiNumField label="CFG Scale" value={cfg} onChange={onCfgChange} min={0} max={20} step={0.5} />
         </div>
-        <div className="flex gap-2">
-          <AiNumField label="生成张数" value={count} onChange={onCountChange} min={1} max={64} />
-          <AiNumField label="种子（0=随机）" value={seed} onChange={onSeedChange} min={0} />
-        </div>
+        <AiNumField label="种子（0=随机）" value={seed} onChange={onSeedChange} min={0} />
+
+        {/* 补足模式 */}
+        <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={incremental}
+            onChange={(e) => onIncrementalChange(e.target.checked)}
+          />
+          <span className="text-fg-secondary">补足模式（跳过 reg 目录中已有对应文件的图）</span>
+        </label>
 
         {/* LoRA */}
         <div className="flex flex-col gap-2">
