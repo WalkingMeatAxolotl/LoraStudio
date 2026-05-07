@@ -26,6 +26,27 @@ type Section =
   | 'models'
   | 'queue'
 
+type Tab = 'dataset' | 'tagging' | 'training' | 'appearance'
+
+const TAB_LIST: { id: Tab; label: string }[] = [
+  { id: 'dataset', label: '数据集' },
+  { id: 'tagging', label: '打标' },
+  { id: 'training', label: '训练' },
+  { id: 'appearance', label: '页面' },
+]
+
+const TAB_STORAGE_KEY = 'studio.settings.activeTab'
+
+function getStoredTab(): Tab {
+  try {
+    const v = localStorage.getItem(TAB_STORAGE_KEY)
+    if (v === 'dataset' || v === 'tagging' || v === 'training' || v === 'appearance') return v
+  } catch {
+    /* ignore localStorage errors */
+  }
+  return 'dataset'
+}
+
 const EMPTY: Secrets = {
   gelbooru: {
     user_id: '',
@@ -79,7 +100,17 @@ export default function SettingsPage() {
   const [draft, setDraft] = useState<Secrets>(EMPTY)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [tab, setTab] = useState<Tab>(getStoredTab)
   const { toast } = useToast()
+
+  const switchTab = (next: Tab) => {
+    setTab(next)
+    try {
+      localStorage.setItem(TAB_STORAGE_KEY, next)
+    } catch {
+      /* ignore localStorage errors */
+    }
+  }
 
   useEffect(() => {
     api
@@ -160,6 +191,23 @@ export default function SettingsPage() {
         </div>
       )}
 
+      <nav className="flex gap-1 border-b border-subtle">
+        {TAB_LIST.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => switchTab(t.id)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === t.id
+                ? 'border-accent text-fg-primary'
+                : 'border-transparent text-fg-tertiary hover:text-fg-secondary'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === 'dataset' && (<>
       <SettingsSection title="Gelbooru">
         <SettingsField label="user_id">
           <input
@@ -255,17 +303,9 @@ export default function SettingsPage() {
           </SettingsField>
         </div>
       </SettingsSection>
+      </>)}
 
-      <SettingsSection title="HuggingFace">
-        <SettingsField label="token">
-          <SensitiveInput
-            value={draft.huggingface.token}
-            serverValue={server?.huggingface.token ?? ''}
-            onChange={(v) => update('huggingface', 'token', v)}
-          />
-        </SettingsField>
-      </SettingsSection>
-
+      {tab === 'tagging' && (<>
       <SettingsSection title="JoyCaption (vLLM)">
         <SettingsField label="base_url">
           <input
@@ -412,6 +452,21 @@ export default function SettingsPage() {
             className={textInputClass}                                  />
         </SettingsField>
       </SettingsSection>
+      </>)}
+
+      {tab === 'training' && (<>
+      <SettingsSection title="HuggingFace">
+        <SettingsField label="token">
+          <SensitiveInput
+            value={draft.huggingface.token}
+            serverValue={server?.huggingface.token ?? ''}
+            onChange={(v) => update('huggingface', 'token', v)}
+          />
+        </SettingsField>
+        <p className="text-xs text-fg-tertiary px-1">
+          用于 HF 私有 repo 鉴权；公开仓库（含 SmilingWolf WD14 / cella110n CLTagger）不用填。
+        </p>
+      </SettingsSection>
 
       <SettingsSection title="队列调度">
         <SettingsField label="允许 GPU 任务与训练并行">
@@ -424,8 +479,12 @@ export default function SettingsPage() {
         </SettingsField>
       </SettingsSection>
 
-      <DisplaySection />
       <ModelsSection />
+      </>)}
+
+      {tab === 'appearance' && (
+        <DisplaySection />
+      )}
     </div>
     </div>
     </div>
