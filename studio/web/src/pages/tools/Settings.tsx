@@ -221,7 +221,7 @@ export default function SettingsPage() {
       />
 
       <div className="p-6 pb-12 flex-1 overflow-y-auto">
-      <div className="flex flex-col gap-8 max-w-[900px]">
+      <div className="flex flex-col gap-8 max-w-[1200px]">
 
       {error && (
         <div className="p-3 rounded-md bg-err-soft border border-err text-err text-sm font-mono">
@@ -301,7 +301,10 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection title="下载（全局）">
-        <SettingsField label="exclude_tags (逗号分隔)">
+        <SettingsField
+          label="exclude_tags"
+          desc="逗号分隔；搜索时自动追加 -tag，Gelbooru / Danbooru 同样生效"
+        >
           <input
             type="text"
             value={draft.download.exclude_tags.join(', ')}
@@ -313,32 +316,32 @@ export default function SettingsPage() {
             placeholder="例：comic, monochrome, lowres"
             className={textInputClass}                                  />
         </SettingsField>
-        <p className="text-xs text-fg-tertiary px-1">
-          搜索时自动追加 <code>-tag</code>，对 Gelbooru 与 Danbooru 同样生效。
-        </p>
 
-        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-subtle">
-          <SettingsField label="parallel_workers">
+        <div className="grid grid-cols-3 gap-3 pt-2 border-t border-subtle">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-fg-secondary font-mono">parallel_workers</label>
             <input
               type="number" min={1} max={16}
               value={draft.download.parallel_workers}
               onChange={(e) => update('download', 'parallel_workers', Math.max(1, Number(e.target.value) || 1))}
-              className={textInputClass}                                        />
-          </SettingsField>
-          <SettingsField label="api_rate_per_sec">
+              className={`${textInputClass} max-w-24`}                              />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-fg-secondary font-mono">api_rate_per_sec</label>
             <input
               type="number" step="0.5" min={0.5} max={10}
               value={draft.download.api_rate_per_sec}
               onChange={(e) => update('download', 'api_rate_per_sec', Math.max(0.5, Number(e.target.value) || 0.5))}
-              className={textInputClass}                                        />
-          </SettingsField>
-          <SettingsField label="cdn_rate_per_sec">
+              className={`${textInputClass} max-w-24`}                              />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-fg-secondary font-mono">cdn_rate_per_sec</label>
             <input
               type="number" step="1" min={1} max={20}
               value={draft.download.cdn_rate_per_sec}
               onChange={(e) => update('download', 'cdn_rate_per_sec', Math.max(1, Number(e.target.value) || 1))}
-              className={textInputClass}                                        />
-          </SettingsField>
+              className={`${textInputClass} max-w-24`}                              />
+          </div>
         </div>
       </SettingsSection>
       </>)}
@@ -378,42 +381,43 @@ export default function SettingsPage() {
           candidates={draft.wd14.model_ids}
           onCandidatesChange={(next) => update('wd14', 'model_ids', next)}
         />
-        <SettingsField label="local_dir (留空 = 自动 HF 下载)">
+        <SettingsField label="local_dir" desc="留空 = 自动 HF 下载">
           <input
             type="text"
             value={draft.wd14.local_dir ?? ''}
             onChange={(e) => update('wd14', 'local_dir', e.target.value || null)}
             className={textInputClass}                                  />
         </SettingsField>
-        <SettingsField label="threshold_general">
-          <input
-            type="number" step="0.01" min={0} max={1}
-            value={draft.wd14.threshold_general}
-            onChange={(e) => update('wd14', 'threshold_general', Number(e.target.value))}
-            className={textInputClass}                                  />
-        </SettingsField>
-        <SettingsField label="threshold_character">
-          <input
-            type="number" step="0.01" min={0} max={1}
-            value={draft.wd14.threshold_character}
-            onChange={(e) => update('wd14', 'threshold_character', Number(e.target.value))}
-            className={textInputClass}                                  />
-        </SettingsField>
-        <SettingsField label="blacklist_tags (逗号分隔)">
+        <div className="grid grid-cols-2 gap-3">
+          <SettingsField label="threshold_general">
+            <input
+              type="number" step="0.01" min={0} max={1}
+              value={draft.wd14.threshold_general}
+              onChange={(e) => update('wd14', 'threshold_general', Number(e.target.value))}
+              className={`${textInputClass} max-w-32`}                              />
+          </SettingsField>
+          <SettingsField label="threshold_character">
+            <input
+              type="number" step="0.01" min={0} max={1}
+              value={draft.wd14.threshold_character}
+              onChange={(e) => update('wd14', 'threshold_character', Number(e.target.value))}
+              className={`${textInputClass} max-w-32`}                              />
+          </SettingsField>
+        </div>
+        <SettingsField label="blacklist_tags" desc="逗号分隔">
           <input
             type="text"
             value={draft.wd14.blacklist_tags.join(', ')}
             onChange={(e) => update('wd14', 'blacklist_tags', e.target.value.split(',').map((t) => t.trim()).filter(Boolean))}
             className={textInputClass}                                  />
         </SettingsField>
-        <SettingsField label="batch_size (GPU 推理一批塞几张；CPU 自动降到 1)">
+        <SettingsField label="batch_size" desc="GPU 推理一批塞几张；CPU 自动降到 1">
           <input
             type="number" min={1} max={64}
             value={draft.wd14.batch_size}
             onChange={(e) => update('wd14', 'batch_size', Math.max(1, Number(e.target.value) || 1))}
-            className={textInputClass}                                  />
+            className={`${textInputClass} max-w-24`}                              />
         </SettingsField>
-        <WD14RuntimePanel />
       </SettingsSection>
 
       <SettingsSection title="CLTagger">
@@ -430,50 +434,54 @@ export default function SettingsPage() {
           modelId={draft.cltagger.model_id}
           onModelIdChange={(id) => update('cltagger', 'model_id', id)}
         />
-        <SettingsField label="local_dir (留空 = 自动 HF 下载)">
+        <SettingsField label="local_dir" desc="留空 = 自动 HF 下载">
           <input
             type="text"
             value={draft.cltagger.local_dir ?? ''}
             onChange={(e) => update('cltagger', 'local_dir', e.target.value || null)}
             className={textInputClass}                                  />
         </SettingsField>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-3">
           <SettingsField label="threshold_general">
             <input
               type="number" step="0.01" min={0} max={1}
               value={draft.cltagger.threshold_general}
               onChange={(e) => update('cltagger', 'threshold_general', Number(e.target.value))}
-              className={textInputClass}                                          />
+              className={`${textInputClass} max-w-32`}                                      />
           </SettingsField>
           <SettingsField label="threshold_character">
             <input
               type="number" step="0.01" min={0} max={1}
               value={draft.cltagger.threshold_character}
               onChange={(e) => update('cltagger', 'threshold_character', Number(e.target.value))}
-              className={textInputClass}                                          />
+              className={`${textInputClass} max-w-32`}                                      />
           </SettingsField>
         </div>
-        <SettingsField label="add_rating_tag">
-          <Bool value={draft.cltagger.add_rating_tag} onChange={(v) => update('cltagger', 'add_rating_tag', v)} />
-        </SettingsField>
-        <SettingsField label="add_model_tag">
-          <Bool value={draft.cltagger.add_model_tag} onChange={(v) => update('cltagger', 'add_model_tag', v)} />
-        </SettingsField>
-        <SettingsField label="blacklist_tags (逗号分隔)">
+        <div className="grid grid-cols-2 gap-3">
+          <SettingsField label="add_rating_tag">
+            <Bool value={draft.cltagger.add_rating_tag} onChange={(v) => update('cltagger', 'add_rating_tag', v)} />
+          </SettingsField>
+          <SettingsField label="add_model_tag">
+            <Bool value={draft.cltagger.add_model_tag} onChange={(v) => update('cltagger', 'add_model_tag', v)} />
+          </SettingsField>
+        </div>
+        <SettingsField label="blacklist_tags" desc="逗号分隔">
           <input
             type="text"
             value={draft.cltagger.blacklist_tags.join(', ')}
             onChange={(e) => update('cltagger', 'blacklist_tags', e.target.value.split(',').map((t) => t.trim()).filter(Boolean))}
             className={textInputClass}                                  />
         </SettingsField>
-        <SettingsField label="batch_size (GPU 推理一批塞几张；CPU 自动降到 1)">
+        <SettingsField label="batch_size" desc="GPU 推理一批塞几张；CPU 自动降到 1">
           <input
             type="number" min={1} max={64}
             value={draft.cltagger.batch_size}
             onChange={(e) => update('cltagger', 'batch_size', Math.max(1, Number(e.target.value) || 1))}
-            className={textInputClass}                                  />
+            className={`${textInputClass} max-w-24`}                              />
         </SettingsField>
       </SettingsSection>
+
+      <ONNXRuntimeSection />
       </>)}
 
       {tab === 'training' && (<>
@@ -530,11 +538,18 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   )
 }
 
-function SettingsField({ label, children }: { label: string; children: React.ReactNode }) {
+function SettingsField({ label, desc, children }: {
+  label: string
+  desc?: string
+  children: React.ReactNode
+}) {
   return (
-    <div className="grid grid-cols-[200px_1fr] gap-3 items-center">
-      <label className="text-xs text-fg-secondary font-mono">{label}</label>
-      {children}
+    <div className="grid grid-cols-[240px_1fr] gap-3 items-start">
+      <div className="flex flex-col gap-0.5 pt-1.5">
+        <label className="text-xs text-fg-secondary font-mono leading-none">{label}</label>
+        {desc && <p className="text-[10px] text-fg-tertiary m-0 leading-snug">{desc}</p>}
+      </div>
+      <div className="min-w-0">{children}</div>
     </div>
   )
 }
@@ -1004,12 +1019,13 @@ function DownloadButton({ exists, status, busy, onClick }: {
   )
 }
 
-// ── WD14 Runtime Panel ──────────────────────────────────────────────────────
+// ── ONNX Runtime Section（WD14 + CLTagger 共用 onnxruntime 包管理） ─────────
 
-function WD14RuntimePanel() {
+function ONNXRuntimeSection() {
   const [rt, setRt] = useState<WD14Runtime | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<null | 'auto' | 'gpu' | 'cpu'>(null)
+  const [reinstallOpen, setReinstallOpen] = useState(false)
   const { toast } = useToast()
 
   const refresh = useCallback(async () => {
@@ -1047,52 +1063,94 @@ function WD14RuntimePanel() {
     }
   }
 
-  if (error) return <div className="text-err text-xs font-mono">{error}</div>
-  if (!rt) return <div className="text-xs text-fg-tertiary">加载 runtime 状态...</div>
+  const cuda = rt?.cuda_detect ?? { available: false, driver_version: null, gpu_name: null }
+  const mismatched = !!rt && cuda.available && !rt.cuda_available
+  // 默认状态正常时整体折叠；有错 / mismatch / 需重启时自动展开
+  const hasIssue = !!error || (rt && (
+    !!rt.cuda_load_error || rt.restart_required || mismatched
+  ))
 
-  const epLabel = (rt.providers ?? []).map((p) => p.replace('ExecutionProvider', '')).join(' / ') || '(none)'
-  const cuda = rt.cuda_detect ?? { available: false, driver_version: null, gpu_name: null }
-  const cudaInfo = cuda.available ? `${cuda.gpu_name ?? '?'} (driver ${cuda.driver_version ?? '?'})` : '未检测到 NVIDIA GPU'
-  const mismatched = cuda.available && !rt.cuda_available
-
-  const runtimeBoxClass = 'rounded-sm border border-subtle bg-sunken p-2 flex flex-col gap-1 text-xs'
+  // summary 里显示一行简短状态，用户不展开就能扫到
+  const statusLabel = error
+    ? '⚠ 加载状态失败'
+    : !rt
+      ? '加载中...'
+      : rt.cuda_load_error
+        ? '⚠ CUDA 加载失败'
+        : rt.restart_required
+          ? '⚠ 需重启 Studio'
+          : mismatched
+            ? '⚠ GPU 但跑 CPU EP'
+            : rt.cuda_available
+              ? `CUDA · ${rt.installed ?? '?'}`
+              : `CPU · ${rt.installed ?? '?'}`
+  const statusOk = rt && !hasIssue
 
   return (
-    <div className={runtimeBoxClass}>
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-fg-tertiary shrink-0">runtime:</span>
-        <code className="font-mono text-fg-primary">{rt.installed ?? '(未安装)'}{rt.version ? `==${rt.version}` : ''}</code>
-        <StatusLabel bg={rt.cuda_available ? 'bg-ok-soft' : 'bg-warn-soft'} fg={rt.cuda_available ? 'text-ok' : 'text-warn'} text={rt.cuda_available ? 'CUDA' : 'CPU only'} />
-      </div>
-      <div className="text-fg-tertiary">EP: <code className="text-fg-secondary font-mono">{epLabel}</code></div>
-      <div className="text-fg-tertiary">GPU 检测: <span className="text-fg-secondary">{cudaInfo}</span></div>
+    <details open={!!hasIssue} className="rounded-md border border-subtle bg-surface group">
+      <summary className="cursor-pointer p-4 list-none flex items-center gap-2">
+        <span className="text-fg-tertiary text-xs transition-transform group-open:rotate-90 inline-block w-3">▸</span>
+        <h2 className="text-sm font-semibold text-fg-primary m-0">ONNX Runtime</h2>
+        <span className="text-xs text-fg-tertiary">WD14 / CLTagger 共用</span>
+        <span className={`ml-auto text-xs font-mono ${statusOk ? 'text-ok' : 'text-warn'}`}>{statusLabel}</span>
+      </summary>
 
-      {rt.restart_required && (
-        <div className="rounded-sm border border-err bg-err-soft px-2 py-1.5 text-err text-xs">
-          已装新 onnxruntime 包，但当前进程仍在用旧的。<strong>请重启 Studio</strong> 让 EP 切换生效。
-        </div>
-      )}
-      {!rt.restart_required && mismatched && (
-        <div className="rounded-sm border border-info bg-info-soft px-2 py-1.5 text-info text-xs">
-          检测到 NVIDIA GPU 但 onnxruntime 只有 CPU EP — WD14 会跑得很慢。点下方「重装为 GPU 版」修复。
-        </div>
-      )}
-      {rt.cuda_load_error && (
-        <div className="rounded-sm border border-err bg-err-soft px-2 py-1.5 text-xs text-err">
-          <div>CUDA EP 加载失败，已降级到 CPU。</div>
-          <code className="block font-mono text-xs text-err break-all whitespace-pre-wrap mt-1">
-            {rt.cuda_load_error}
-          </code>
-        </div>
-      )}
+      <div className="px-4 pb-4 flex flex-col gap-3">
+        {error && <div className="text-err text-xs font-mono">{error}</div>}
+        {!error && !rt && <div className="text-xs text-fg-tertiary">加载 runtime 状态...</div>}
+        {rt && (
+          <>
+            <div className="rounded-sm border border-subtle bg-sunken p-2 flex flex-col gap-1 text-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-fg-tertiary shrink-0">runtime:</span>
+                <code className="font-mono text-fg-primary">{rt.installed ?? '(未安装)'}{rt.version ? `==${rt.version}` : ''}</code>
+                <StatusLabel bg={rt.cuda_available ? 'bg-ok-soft' : 'bg-warn-soft'} fg={rt.cuda_available ? 'text-ok' : 'text-warn'} text={rt.cuda_available ? 'CUDA' : 'CPU only'} />
+              </div>
+              <div className="text-fg-tertiary">EP: <code className="text-fg-secondary font-mono">{(rt.providers ?? []).map((p) => p.replace('ExecutionProvider', '')).join(' / ') || '(none)'}</code></div>
+              <div className="text-fg-tertiary">GPU 检测: <span className="text-fg-secondary">{cuda.available ? `${cuda.gpu_name ?? '?'} (driver ${cuda.driver_version ?? '?'})` : '未检测到 NVIDIA GPU'}</span></div>
+            </div>
 
-      <div className="flex gap-1.5 flex-wrap pt-1">
-        <button onClick={() => install('auto')} disabled={busy !== null} className="btn btn-secondary btn-sm">{busy === 'auto' ? '装包中...' : '自动检测'}</button>
-        <button onClick={() => install('gpu')} disabled={busy !== null} className="btn btn-primary btn-sm">{busy === 'gpu' ? '装包中...' : '重装为 GPU'}</button>
-        <button onClick={() => install('cpu')} disabled={busy !== null} className="btn btn-secondary btn-sm">{busy === 'cpu' ? '装包中...' : '重装为 CPU'}</button>
-        <button onClick={() => void refresh()} disabled={busy !== null} className="px-2 py-0.5 text-fg-tertiary bg-transparent border-none cursor-pointer rounded-sm">↻</button>
+            {rt.restart_required && (
+              <div className="rounded-sm border border-err bg-err-soft px-2 py-1.5 text-err text-xs">
+                已装新 onnxruntime 包，但当前进程仍在用旧的。<strong>请重启 Studio</strong> 让 EP 切换生效。
+              </div>
+            )}
+            {!rt.restart_required && mismatched && (
+              <div className="rounded-sm border border-info bg-info-soft px-2 py-1.5 text-info text-xs">
+                检测到 NVIDIA GPU 但 onnxruntime 只有 CPU EP — WD14 / CLTagger 会跑得很慢。展开「强制重装」装 GPU 版本。
+              </div>
+            )}
+            {rt.cuda_load_error && (
+              <div className="rounded-sm border border-err bg-err-soft px-2 py-1.5 text-xs text-err">
+                <div>CUDA EP 加载失败，已降级到 CPU。</div>
+                <code className="block font-mono text-xs text-err break-all whitespace-pre-wrap mt-1">
+                  {rt.cuda_load_error}
+                </code>
+              </div>
+            )}
+
+            <div className="flex gap-1.5 items-center flex-wrap">
+              <button onClick={() => install('auto')} disabled={busy !== null} className="btn btn-primary btn-sm">
+                {busy === 'auto' ? '装包中...' : '自动检测 + 装合适的包'}
+              </button>
+              <button onClick={() => void refresh()} disabled={busy !== null} title="刷新状态"
+                className="px-2 py-0.5 text-fg-tertiary bg-transparent border-none cursor-pointer rounded-sm">↻</button>
+              <button type="button" onClick={() => setReinstallOpen(!reinstallOpen)}
+                className="btn btn-ghost btn-sm text-xs text-fg-tertiary ml-auto">
+                {reinstallOpen ? '▾' : '▸'} 强制重装（高级）
+              </button>
+            </div>
+            {reinstallOpen && (
+              <div className="flex gap-1.5 items-center flex-wrap pt-2 border-t border-subtle">
+                <button onClick={() => install('gpu')} disabled={busy !== null} className="btn btn-secondary btn-sm">{busy === 'gpu' ? '装包中...' : '重装为 GPU'}</button>
+                <button onClick={() => install('cpu')} disabled={busy !== null} className="btn btn-secondary btn-sm">{busy === 'cpu' ? '装包中...' : '重装为 CPU'}</button>
+                <span className="text-[10px] text-fg-tertiary">不知道选哪个就用上面"自动检测"。</span>
+              </div>
+            )}
+          </>
+        )}
       </div>
-    </div>
+    </details>
   )
 }
 
