@@ -437,6 +437,7 @@ class GenerateConfig(BaseModel):
 
     # 运行时
     output_dir: str = Field("", description="输出目录（由服务端填充）")
+    sample_subdir: str = Field("samples", description="图片输出子目录名（reg-AI 生成时设为目标文件夹）")
     mixed_precision: str = Field("bf16", description="混合精度")
     xformers: bool = Field(False, description="xformers attention")
 

@@ -1540,6 +1540,53 @@ def delete_reg(pid: int, vid: int) -> dict[str, Any]:
     return {"deleted": True}
 
 
+@app.post("/api/projects/{pid}/versions/{vid}/reg/generate-ai")
+def reg_generate_ai(pid: int, vid: int, body: GenerateRequest) -> dict[str, Any]:
+    """用模型生成正则图，直接写入 reg/1_ai/ 子目录。"""
+    model_paths = _resolve_model_paths()
+    _, _, vdir = _version_dir_or_404(pid, vid)
+    rdir = _reg_dir(vdir)
+    rdir.mkdir(parents=True, exist_ok=True)
+
+    with db.connection_for() as conn:
+        task_id = db.create_task(
+            conn, name=f"reg-ai p{pid}v{vid}", config_name="generate", priority=0
+        )
+        db.update_task(conn, task_id, task_type="generate")
+
+    job_dir = GENERATE_JOBS_DIR / str(task_id)
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    cfg = GenerateConfig(
+        **model_paths,
+        output_dir=str(rdir),
+        sample_subdir="1_ai",
+        prompts=body.prompts,
+        negative_prompt=body.negative_prompt,
+        width=body.width,
+        height=body.height,
+        steps=body.steps,
+        cfg_scale=body.cfg_scale,
+        sampler_name=body.sampler_name,
+        scheduler=body.scheduler,
+        count=body.count,
+        seed=body.seed,
+        lora_configs=[lc.model_dump() for lc in body.lora_configs],
+        mixed_precision=body.mixed_precision,
+        xformers=body.xformers,
+    )
+
+    cfg_path = GENERATE_CONFIGS_DIR / f"gen_{task_id}.json"
+    cfg_path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+
+    with db.connection_for() as conn:
+        db.update_task(conn, task_id, config_path=str(cfg_path))
+        task = db.get_task(conn, task_id)
+
+    bus.publish({"type": "task_state_changed", "task_id": task_id, "status": "pending"})
+    return task or {"id": task_id}
+
+
 # ---------------------------------------------------------------------------
 # /api/projects/{pid}/versions/{vid}/config  (PP6.2 训练配置 — version 私有)
 # ---------------------------------------------------------------------------

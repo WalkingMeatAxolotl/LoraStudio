@@ -1108,6 +1108,11 @@ export const api = {
     return req<{ items: Task[] }>(`/api/generate${qs}`).then((r) => r.items)
   },
   getGenerateTask: (id: number) => req<Task>(`/api/generate/${id}`),
+  enqueueRegGenerate: (pid: number, vid: number, body: GenerateRequest) =>
+    req<Task>(`/api/projects/${pid}/versions/${vid}/reg/generate-ai`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   // Queue import / export ---------------------------------------------
   exportQueue: (ids?: number[]) => {
