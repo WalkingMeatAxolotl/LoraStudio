@@ -2,7 +2,7 @@
 
 `python -m studio.workers.tag_worker --job-id N`。读 `project_jobs.params`：
     {
-      "tagger": "wd14" | "joycaption",
+      "tagger": "wd14" | "cltagger" | "joycaption",
       "version_id": int,
       "output_format": "txt"|"json"  # 默认 "txt"，已存在的 .json 仍按 .json 写
     }
@@ -68,6 +68,7 @@ def run(job_id: int) -> int:
         version_id = int(params["version_id"])
         fmt = str(params.get("output_format", "txt"))
         wd14_overrides = params.get("wd14_overrides") or None
+        cltagger_overrides = params.get("cltagger_overrides") or None
 
         with db.connection_for() as conn:
             v = versions.get_version(conn, version_id)
@@ -88,11 +89,12 @@ def run(job_id: int) -> int:
             f"images={len(images)} format={fmt}"
         )
 
-        tagger = get_tagger(tagger_name, overrides=wd14_overrides)
+        overrides = cltagger_overrides if tagger_name == "cltagger" else wd14_overrides
+        tagger = get_tagger(tagger_name, overrides=overrides)
         tagger.prepare()
-        if wd14_overrides:
+        if overrides:
             progress(
-                f"[overrides] {', '.join(f'{k}={v}' for k, v in wd14_overrides.items())}"
+                f"[overrides] {', '.join(f'{k}={v}' for k, v in overrides.items())}"
             )
         progress(f"[ready] {tagger_name} 已就绪")
 

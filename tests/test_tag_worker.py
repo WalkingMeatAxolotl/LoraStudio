@@ -113,5 +113,31 @@ def test_run_passes_wd14_overrides_through(env, monkeypatch) -> None:
     assert captured["overrides"] == {"threshold_general": 0.2}
 
 
+def test_run_passes_cltagger_overrides_through(env, monkeypatch) -> None:
+    """worker 应把 params['cltagger_overrides'] 透传到 get_tagger(overrides=...)。"""
+    captured: dict = {}
+
+    def _factory(name: str, overrides=None):
+        captured["name"] = name
+        captured["overrides"] = overrides
+        return _FakeTagger()
+
+    monkeypatch.setattr("studio.workers.tag_worker.get_tagger", _factory)
+
+    with db.connection_for(env["db"]) as conn:
+        conn.execute(
+            "UPDATE project_jobs SET params = json_set(params, "
+            "'$.tagger', 'cltagger', "
+            "'$.cltagger_overrides', json(?)) WHERE id = ?",
+            (json.dumps({"threshold_character": 0.55}), env["job_id"]),
+        )
+        conn.commit()
+
+    rc = tag_worker.run(env["job_id"])
+    assert rc == 0
+    assert captured["name"] == "cltagger"
+    assert captured["overrides"] == {"threshold_character": 0.55}
+
+
 def test_run_unknown_job(env) -> None:
     assert tag_worker.run(99999) == 1

@@ -61,7 +61,6 @@ T5_FILES = [
     "special_tokens_map.json",
 ]
 
-
 # ---------------------------------------------------------------------------
 # paths
 # ---------------------------------------------------------------------------
@@ -257,6 +256,22 @@ def download_t5_tokenizer(
     return ok
 
 
+def download_cltagger(
+    target_root: Path,
+    cfg: Optional["secrets.CLTaggerConfig"] = None,
+    *,
+    on_log: Callable[[str], None] = print,
+) -> bool:
+    cfg = cfg or secrets.load().cltagger
+    on_log(f"\n📥 CLTagger → {target_root}")
+    target_root.mkdir(parents=True, exist_ok=True)
+    ok = True
+    for f in (cfg.model_path, cfg.tag_mapping_path):
+        if not download_flat(cfg.model_id, f, target_root / f, on_log=on_log):
+            ok = False
+    return ok
+
+
 # ---------------------------------------------------------------------------
 # catalog
 # ---------------------------------------------------------------------------
@@ -293,6 +308,8 @@ def build_catalog(root: Optional[Path] = None) -> dict[str, Any]:
     vae_target = anima_vae_target(r)
     qwen_d = qwen_dir(r)
     t5_d = t5_tokenizer_dir(r)
+    cl_cfg = secrets.load().cltagger
+    cl_root = r / "cltagger" / cl_cfg.model_id.replace("/", "_").replace("\\", "_")
 
     return {
         "models_root": str(r),
@@ -330,6 +347,17 @@ def build_catalog(root: Optional[Path] = None) -> dict[str, Any]:
             "target_dir": str(t5_d),
             "files": [
                 {"name": f, **_file_status(t5_d / f)} for f in T5_FILES
+            ],
+        },
+        "cltagger": {
+            "id": "cltagger",
+            "name": "CLTagger",
+            "description": "cella110n CLTagger ONNX",
+            "repo": cl_cfg.model_id,
+            "target_dir": str(cl_root),
+            "files": [
+                {"name": f, **_file_status(cl_root / f)}
+                for f in (cl_cfg.model_path, cl_cfg.tag_mapping_path)
             ],
         },
         "downloads": get_status_snapshot(),
@@ -464,6 +492,14 @@ def trigger(model_id: str, variant: Optional[str] = None) -> str:
         key = "t5_tokenizer"
         start_download_async(
             key, lambda log: download_t5_tokenizer(root, on_log=log)
+        )
+        return key
+    if model_id == "cltagger":
+        cfg = secrets.load().cltagger
+        key = "cltagger"
+        target = root / "cltagger" / cfg.model_id.replace("/", "_").replace("\\", "_")
+        start_download_async(
+            key, lambda log: download_cltagger(target, cfg, on_log=log)
         )
         return key
     raise ValueError(f"unknown model_id {model_id!r}")

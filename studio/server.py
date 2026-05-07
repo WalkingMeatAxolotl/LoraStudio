@@ -1100,10 +1100,24 @@ class Wd14Overrides(BaseModel):
     blacklist_tags: Optional[list[str]] = None
 
 
+class CLTaggerOverrides(BaseModel):
+    """打标页对 CLTagger 设置的「本次任务覆盖」—— 仅在 worker 进程内生效。"""
+    threshold_general: Optional[float] = None
+    threshold_character: Optional[float] = None
+    model_id: Optional[str] = None
+    model_path: Optional[str] = None
+    tag_mapping_path: Optional[str] = None
+    local_dir: Optional[str] = None
+    add_rating_tag: Optional[bool] = None
+    add_model_tag: Optional[bool] = None
+    blacklist_tags: Optional[list[str]] = None
+
+
 class TagJobRequest(BaseModel):
     tagger: str = "wd14"
     output_format: str = "txt"                # "txt" | "json"
     wd14_overrides: Optional[Wd14Overrides] = None
+    cltagger_overrides: Optional[CLTaggerOverrides] = None
 
 
 class CaptionEdit(BaseModel):
@@ -1216,6 +1230,10 @@ def start_tag(pid: int, vid: int, body: TagJobRequest) -> dict[str, Any]:
         ov = body.wd14_overrides.model_dump(exclude_none=True)
         if ov:
             params["wd14_overrides"] = ov
+    if body.tagger == "cltagger" and body.cltagger_overrides is not None:
+        ov = body.cltagger_overrides.model_dump(exclude_none=True)
+        if ov:
+            params["cltagger_overrides"] = ov
 
     with db.connection_for() as conn:
         job = project_jobs.create_job(

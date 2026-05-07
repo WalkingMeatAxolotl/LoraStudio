@@ -134,6 +134,33 @@ def test_start_tag_with_wd14_overrides(client: TestClient) -> None:
     }
 
 
+def test_start_tag_with_cltagger_overrides(client: TestClient) -> None:
+    """传 cltagger_overrides 时，端点应把它落进 params。"""
+    import json as _json
+    pid, vid = _make(client)
+    r = client.post(
+        f"/api/projects/{pid}/versions/{vid}/tag",
+        json={
+            "tagger": "cltagger",
+            "output_format": "txt",
+            "cltagger_overrides": {
+                "threshold_general": 0.25,
+                "threshold_character": 0.55,
+                "add_rating_tag": True,
+                "blacklist_tags": ["signature"],
+            },
+        },
+    )
+    assert r.status_code == 200, r.text
+    params = _json.loads(r.json()["params"])
+    assert params["cltagger_overrides"] == {
+        "threshold_general": 0.25,
+        "threshold_character": 0.55,
+        "add_rating_tag": True,
+        "blacklist_tags": ["signature"],
+    }
+
+
 def test_start_tag_drops_empty_wd14_overrides(client: TestClient) -> None:
     """全部字段都是 None 时不要写空 dict 进 params。"""
     import json as _json
