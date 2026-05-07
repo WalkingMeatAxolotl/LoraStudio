@@ -205,7 +205,39 @@ def cmd_build(_args: argparse.Namespace) -> int:
     rc = npm_install_if_missing(npm)
     if rc != 0:
         return rc
-    return npm_build(npm)
+    rc = npm_build(npm)
+    if rc == 0:
+        _write_build_marker()
+    return rc
+
+
+def _current_git_head() -> Optional[str]:
+    """当前仓库 HEAD commit hash；非 git 仓 / 没有 git 命令 → None。"""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode == 0:
+            return r.stdout.strip() or None
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def _write_build_marker() -> None:
+    """build 成功后把 HEAD 写到 dist/.built-from。云上下次启动直接对比 HEAD
+    决定是否重建，绕开「git pull 不更新 mtime」的坑。"""
+    head = _current_git_head()
+    if not head:
+        return
+    try:
+        (WEB_DIST / ".built-from").write_text(head, encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _spawn_browser_opener(url: str, *, delay: float = 1.0) -> None:
@@ -302,11 +334,28 @@ WEB_SRC = WEB_DIR / "src"
 def _web_dist_is_stale() -> bool:
     """dist 是否落后于 src（云上 git pull 新代码后旧 dist 还在的常见坑）。
 
-    比较 dist/index.html mtime vs src/ 树最新 mtime。dist 不存在 → True。
+    优先比 git HEAD：build 时把 HEAD 写到 dist/.built-from，启动时对比当前
+    HEAD。云上 git pull 之后 HEAD 一定变，能可靠触发重建——而 mtime 比较在
+    某些 git 版本下不可靠（git 不更新文件 mtime）。
+
+    fallback：没有 git 或 .built-from 时退回 mtime 比对（dist/index.html 旧
+    于 src/ 树或 package.json 等关键文件）。
     """
     dist_index = WEB_DIST / "index.html"
     if not dist_index.exists():
         return True
+
+    # 优先：git HEAD 比对
+    marker = WEB_DIST / ".built-from"
+    head = _current_git_head()
+    if head and marker.exists():
+        try:
+            built_from = marker.read_text(encoding="utf-8").strip()
+            return built_from != head
+        except OSError:
+            pass
+
+    # fallback：mtime 比对
     try:
         dist_mtime = dist_index.stat().st_mtime
         src_latest = max(
