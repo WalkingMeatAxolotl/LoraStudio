@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # AnimaStudio Linux/macOS shortcut -- forwards to: python -m studio
 # Usage:
-#   ./studio.sh [--mirror] [subcommand]
+#   ./studio.sh [--mirror] [--reinstall] [subcommand]
 #
-#   --mirror   Use Aliyun pip mirror during first-run setup.
-#              Without this flag, official PyPI is tried first; the mirror is
-#              used as a fallback if the official source fails.
+#   --mirror     Use Aliyun pip mirror during first-run setup.
+#                Without this flag, official PyPI is tried first; the mirror is
+#                used as a fallback if the official source fails.
+#
+#   --reinstall  DELETE venv/ and rebuild from scratch (studio_data/ kept).
+#                Use when venv is broken beyond repair (dep conflict / corrupt
+#                wheels / etc). Asks for confirmation.
 #
 #   subcommand: run (default) | dev | build | test
 #
@@ -24,18 +28,20 @@ cd "$SCRIPT_DIR" || { echo "studio.sh: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 export PYTHONUTF8=1
 export PYTHONIOENCODING=utf-8
 
-# Parse --mirror flag; collect remaining args to forward to Python.
+# Parse our flags; collect remaining args to forward to Python.
 _USE_MIRROR=0
+_REINSTALL=0
 _PASSTHROUGH=()
 for _arg in "$@"; do
-    if [ "$_arg" = "--mirror" ]; then
-        _USE_MIRROR=1
-    else
-        _PASSTHROUGH+=("$_arg")
-    fi
+    case "$_arg" in
+        --mirror)    _USE_MIRROR=1 ;;
+        --reinstall) _REINSTALL=1 ;;
+        *)           _PASSTHROUGH+=("$_arg") ;;
+    esac
 done
 
 _ALIYUN="https://mirrors.aliyun.com/pypi/simple/"
+_REQ_MARKER="venv/.studio-requirements.sha256"
 
 _pip_install() {
     # Usage: _pip_install [pip args...]
@@ -51,6 +57,21 @@ _pip_install() {
         }
     fi
 }
+
+# --reinstall: nuke venv before detection. studio_data/ is untouched.
+if [ "$_REINSTALL" = "1" ] && [ -d venv ]; then
+    echo "[studio] --reinstall: venv/ will be DELETED and rebuilt."
+    echo "[studio]   - studio_data/ (your projects + LoRA weights) is NOT touched"
+    echo "[studio]   - any user-installed pip packages outside requirements.txt will be lost"
+    printf "Continue? [y/N] "
+    read -r _ans
+    case "$_ans" in
+        [yY]*) ;;
+        *)     echo "[studio] --reinstall aborted"; exit 0 ;;
+    esac
+    echo "[studio] removing venv/..."
+    rm -rf venv || { echo "studio.sh: failed to remove venv" >&2; exit 1; }
+fi
 
 if [ -x "venv/bin/python" ]; then
     PYTHON="venv/bin/python"
@@ -88,6 +109,23 @@ else
         _pip_install -r requirements.txt || { echo "studio.sh: pip install failed" >&2; exit 1; }
     else
         echo "studio.sh: requirements.txt not found, skipping dependency install" >&2
+    fi
+    # PR-S1b: write hash marker after fresh install so future stale check is correct
+    "$PYTHON" tools/check_requirements_changed.py --marker "$_REQ_MARKER" --update-marker >/dev/null 2>&1 || true
+fi
+
+# PR-S1b: stale check. If requirements.txt content hash differs from the marker
+# (or no marker yet on an old venv), `pip install -r requirements.txt` to add
+# missing packages. NO --upgrade -- existing torch+cu128 etc stays untouched.
+_STALE="$("$PYTHON" tools/check_requirements_changed.py --marker "$_REQ_MARKER" 2>/dev/null || echo missing)"
+if [ "$_STALE" = "stale" ]; then
+    echo "[studio] requirements.txt changed since last sync; installing new deps (no upgrade)..."
+    if _pip_install -r requirements.txt; then
+        "$PYTHON" tools/check_requirements_changed.py --marker "$_REQ_MARKER" --update-marker >/dev/null 2>&1 || true
+        echo "[studio] dep sync complete"
+    else
+        echo "[studio] WARNING: dep sync failed; existing venv still works but may miss new deps" >&2
+        echo "[studio] try ./studio.sh --reinstall if errors persist" >&2
     fi
 fi
 
