@@ -66,7 +66,6 @@ export default function RegularizationPage() {
   const jobIdRef = useRef<number | null>(null)
   jobIdRef.current = job?.id ?? null
   const aiTaskIdRef = useRef<number | null>(null)
-  aiTaskIdRef.current = aiTask?.id ?? null
 
   // Tab：设置&日志 / 图片预览 / 模型生成。job done 时自动切到图片，让用户看成果。
   const [activeTab, setActiveTab] = useState<'config' | 'images' | 'ai'>('config')
@@ -81,6 +80,7 @@ export default function RegularizationPage() {
   const [aiLoras, setAiLoras] = useState<LoraEntry[]>([])
   const [aiIncremental, setAiIncremental] = useState(false)
   const [aiTask, setAiTask] = useState<Task | null>(null)
+  aiTaskIdRef.current = aiTask?.id ?? null
   const [aiBusy, setAiBusy] = useState(false)
   const [aiPickerIdx, setAiPickerIdx] = useState<number | null>(null)
 
