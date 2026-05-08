@@ -69,6 +69,7 @@ class OnnxTaggerBase:
         self._session = None
         self._input_name: Optional[str] = None
         self._output_names: Optional[list[str]] = None
+        self._model_path: Optional[Path] = None
 
     # -------------------- 子类实现 --------------------
 
@@ -94,6 +95,7 @@ class OnnxTaggerBase:
         副作用：设 `_session` / `_input_name` / `_output_names`，并 stash
         CUDA 错给 Settings UI（成功路径同时清掉旧错记录）。
         """
+        self._model_path = model_path
         try:
             import onnxruntime as ort
         except ImportError as exc:  # pragma: no cover - install hint
@@ -131,6 +133,29 @@ class OnnxTaggerBase:
 
         self._input_name = self._session.get_inputs()[0].name
         self._output_names = [o.name for o in self._session.get_outputs()]
+
+    def _fallback_to_cpu_session(self) -> bool:
+        """CUDA 推理失败后降级创建 CPU-only session；成功返回 True。"""
+        if self._model_path is None:
+            return False
+        try:
+            import onnxruntime as ort
+            logger.warning(
+                "%s CUDA 推理失败，降级 CPU InferenceSession（后续批次同样走 CPU）",
+                self.name,
+            )
+            self._session = ort.InferenceSession(
+                str(self._model_path), providers=["CPUExecutionProvider"]
+            )
+            self._input_name = self._session.get_inputs()[0].name
+            self._output_names = [o.name for o in self._session.get_outputs()]
+            onnxruntime_setup.record_cuda_load_error(
+                "CUDA 推理时发生 cuBLAS 错误，已自动降级 CPU 运行"
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.error("%s CPU session 降级失败: %s", self.name, exc)
+            return False
 
     # -------------------- batch + iteration --------------------
 
@@ -227,9 +252,26 @@ class OnnxTaggerBase:
                         self._output_names, {self._input_name: batch}
                     )[0]
                 except Exception as exc:  # noqa: BLE001
-                    for j in ok_idx:
-                        errs[j] = f"inference failed: {exc}"
-                    logits_batch = None
+                    exc_str = str(exc)
+                    # CUDA 推理失败（CUBLAS / cuDNN 错误）→ 自动降 CPU 重试一次
+                    if any(k in exc_str for k in ("CUBLAS", "CUDNN", "CUDA", "CUDAExecutionProvider")):
+                        if self._fallback_to_cpu_session():
+                            try:
+                                logits_batch = self._session.run(
+                                    self._output_names, {self._input_name: batch}
+                                )[0]
+                            except Exception as exc2:  # noqa: BLE001
+                                for j in ok_idx:
+                                    errs[j] = f"inference failed: {exc2}"
+                                logits_batch = None
+                        else:
+                            for j in ok_idx:
+                                errs[j] = f"inference failed: {exc}"
+                            logits_batch = None
+                    else:
+                        for j in ok_idx:
+                            errs[j] = f"inference failed: {exc}"
+                        logits_batch = None
             ok_pos = 0
             for j, p in enumerate(chunk):
                 if j in errs:
