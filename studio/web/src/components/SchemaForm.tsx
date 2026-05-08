@@ -39,9 +39,12 @@ export default function SchemaForm({
 
   const props = schema.schema.properties
 
-  // 按 group 分桶
+  // 按 group 分桶。hidden=true 的字段直接跳过：值仍由 ConfigData 透传（PUT 时不丢），
+  // 只是不在 UI 上渲染。如果一个组所有字段都 hidden，下面 `fields.length === 0`
+  // 会让整个 section 自动消失。
   const buckets = new Map<string, string[]>()
   for (const [name, prop] of Object.entries(props)) {
+    if (prop.hidden) continue
     const g = prop.group ?? 'misc'
     if (!buckets.has(g)) buckets.set(g, [])
     buckets.get(g)!.push(name)
