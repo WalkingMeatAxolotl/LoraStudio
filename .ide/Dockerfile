@@ -46,14 +46,16 @@ RUN git lfs install --system
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# 5. 安装 PyTorch（CUDA 12.x 预编译包）
+# 5. 安装 PyTorch（cu128 与系统 CUDA 12.9 版本更接近，减少 flash-attn 编译冲突）
 RUN pip install --no-cache-dir \
     torch \
     torchvision \
-    --index-url https://download.pytorch.org/whl/cu124
+    --index-url https://download.pytorch.org/whl/cu128
 
-# 5b. 编译安装 flash-attn（针对常见 GPU 架构预编译，避免首次运行时编译）
-# MAX_JOBS 限制并行编译进程数防止 OOM；TORCH_CUDA_ARCH_LIST 指定目标架构
+# 5b. 编译安装 flash-attn
+# CUDA_HOME 指向系统 CUDA toolkit；TORCH_CUDA_ARCH_LIST 指定目标架构；
+# MAX_JOBS 限制并行编译进程数防止 OOM
+ENV CUDA_HOME=/usr/local/cuda
 ENV TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0"
 RUN MAX_JOBS=4 pip install --no-cache-dir flash-attn --no-build-isolation
 
