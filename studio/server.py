@@ -149,17 +149,20 @@ def get_state(task_id: Optional[int] = None) -> JSONResponse:
         if row and row["monitor_state_path"]:
             target_path = Path(row["monitor_state_path"])
     else:
-        # 没给 task_id：先找 running 的 task；没 running 回退到最近的完成任务
+        # 没给 task_id：先找 running 的 train task；没 running 回退到最近的完成 train 任务
+        # generate/reg_ai 复用同一队列但没有 loss/LR 数据，不应显示在监控仪表板
         with db.connection_for() as conn:
             row = conn.execute(
                 "SELECT monitor_state_path FROM tasks WHERE status = 'running' "
+                "AND task_type = 'train' "
                 "AND monitor_state_path IS NOT NULL "
                 "ORDER BY started_at DESC LIMIT 1"
             ).fetchone()
             if not (row and row["monitor_state_path"]):
                 row = conn.execute(
                     "SELECT monitor_state_path FROM tasks "
-                    "WHERE monitor_state_path IS NOT NULL "
+                    "WHERE task_type = 'train' "
+                    "AND monitor_state_path IS NOT NULL "
                     "ORDER BY COALESCE(finished_at, started_at, created_at) DESC "
                     "LIMIT 1"
                 ).fetchone()
