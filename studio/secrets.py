@@ -19,6 +19,8 @@ SENSITIVE_FIELDS: tuple[str, ...] = (
     "gelbooru.api_key",
     "danbooru.api_key",
     "huggingface.token",
+    "wandb.api_key",
+    "llm_tagger.api_key",
 )
 
 
@@ -44,6 +46,13 @@ class HuggingFaceConfig(BaseModel):
     token: str = ""
 
 
+class WandBConfig(BaseModel):
+    api_key: str = ""
+    project: str = "AnimaLoraStudio"
+    entity: str = ""
+    base_url: str = ""
+
+
 class DownloadConfig(BaseModel):
     """全局下载偏好（跨渠道共享）。"""
     # 全局排除 tag：搜索时自动追加 -tag1 -tag2（gelbooru / danbooru 语法一致）
@@ -58,6 +67,140 @@ class JoyCaptionConfig(BaseModel):
     base_url: str = "http://localhost:8000/v1"
     model: str = "fancyfeast/llama-joycaption-beta-one-hf-llava"
     prompt_template: str = "Descriptive Caption"
+
+
+DEFAULT_LLM_STYLE_JSON_PROMPT = """You are an image captioning assistant for anime style LoRA training.
+
+Look at the image and produce JSON only. Do not wrap it in Markdown.
+
+Output schema:
+{
+  "quality": "",
+  "count": "1girl|1boy|solo|multiple girls|...",
+  "character": "",
+  "series": "",
+  "artist": "",
+  "appearance": ["visible character/style appearance tags"],
+  "tags": ["pose, expression, composition, clothing, medium, art style tags"],
+  "environment": ["background, lighting, scene, color palette tags"],
+  "nl": "one short English natural-language description"
+}
+
+Rules:
+- Use concise English Danbooru-style tags with spaces, not underscores.
+- For style LoRA, keep useful style, medium, lighting, color, and background tags.
+- Do not invent character, series, or artist names. Leave those fields empty unless visually explicit.
+- Do not include quality/resolution/source/noise tags such as best quality, masterpiece, normal quality, highres, hires, absurdres, lowres, artist name, signature, watermark, username, dated, commentary.
+- Do not include explanations or extra keys."""
+
+
+DEFAULT_LLM_GENERAL_JSON_PROMPT = """You are an image captioning assistant for LoRA training.
+
+Return JSON only, with keys:
+quality, count, character, series, artist, appearance, tags, environment, nl.
+
+Use concise English Danbooru-style tags with spaces. Describe only visible content.
+Keep appearance tags separate from action/composition tags and background tags.
+Leave unknown character, series, and artist fields empty.
+Avoid metadata, watermark, signature, username, date, and pure quality/resolution tags."""
+
+
+DEFAULT_LLM_TXT_TAGS_PROMPT = """You are an image tagger for LoRA training.
+
+Return JSON only in this exact schema:
+{"tags":["tag one","tag two","tag three"],"nl":""}
+
+Use concise English Danbooru-style tags with spaces, not underscores.
+Describe visible subject, style, medium, clothing, pose, expression, lighting, and background.
+Avoid metadata, watermark, signature, username, date, and pure quality/resolution tags."""
+
+
+class LLMPromptPresetConfig(BaseModel):
+    id: str
+    label: str
+    prompt: str
+
+
+def _default_llm_prompt_presets() -> list[LLMPromptPresetConfig]:
+    return [
+        LLMPromptPresetConfig(
+            id="style_json",
+            label="画风 LoRA JSON",
+            prompt=DEFAULT_LLM_STYLE_JSON_PROMPT,
+        ),
+        LLMPromptPresetConfig(
+            id="general_json",
+            label="通用 LoRA JSON",
+            prompt=DEFAULT_LLM_GENERAL_JSON_PROMPT,
+        ),
+        LLMPromptPresetConfig(
+            id="txt_tags",
+            label="TXT 标签列表",
+            prompt=DEFAULT_LLM_TXT_TAGS_PROMPT,
+        ),
+    ]
+
+
+class LLMTaggerConfig(BaseModel):
+    base_url: str = "http://localhost:8000/v1"
+    api_key: str = ""
+    model: str = ""
+    model_ids: list[str] = Field(default_factory=list)
+    endpoint: str = "chat_completions"  # chat_completions | responses
+    prompt_preset: str = "style_json"
+    prompt_presets: list[LLMPromptPresetConfig] = Field(
+        default_factory=_default_llm_prompt_presets
+    )
+    custom_prompt: str = ""
+    temperature: float = 0.2
+    max_tokens: int = 700
+    timeout: int = 60
+    max_retries: int = 3
+    max_side: int = 1280
+    jpeg_quality: int = 85
+
+    @model_validator(mode="after")
+    def _normalize_values(self) -> "LLMTaggerConfig":
+        if self.endpoint not in {"chat_completions", "responses"}:
+            self.endpoint = "chat_completions"
+        presets: list[LLMPromptPresetConfig] = []
+        seen: set[str] = set()
+        for preset in self.prompt_presets or _default_llm_prompt_presets():
+            preset.id = "".join(
+                ch if ch.isalnum() or ch in ("_", "-") else "_"
+                for ch in str(preset.id or "").strip()
+            ).strip("_")
+            preset.label = str(preset.label or preset.id).strip()
+            preset.prompt = str(preset.prompt or "").strip()
+            if not preset.id or not preset.prompt or preset.id in seen:
+                continue
+            seen.add(preset.id)
+            presets.append(preset)
+        if not presets:
+            presets = _default_llm_prompt_presets()
+        self.prompt_presets = presets
+        preset_ids = {p.id for p in self.prompt_presets}
+        if self.prompt_preset not in preset_ids and self.prompt_preset != "custom":
+            self.prompt_preset = self.prompt_presets[0].id
+        if self.model and self.model not in self.model_ids:
+            self.model_ids = [self.model, *self.model_ids]
+        model_seen: set[str] = set()
+        clean_model_ids: list[str] = []
+        for model_id in self.model_ids:
+            text = str(model_id or "").strip()
+            key = text.lower()
+            if not text or key in model_seen:
+                continue
+            model_seen.add(key)
+            clean_model_ids.append(text)
+        self.model_ids = clean_model_ids
+        self.temperature = max(0.0, min(float(self.temperature), 2.0))
+        self.max_tokens = max(64, int(self.max_tokens or 700))
+        self.timeout = max(5, int(self.timeout or 60))
+        self.max_retries = max(1, int(self.max_retries or 3))
+        self.max_side = max(64, int(self.max_side or 1280))
+        self.jpeg_quality = max(1, min(100, int(self.jpeg_quality or 85)))
+        return self
 
 
 # 默认 WD14 候选模型；用户可在「设置 → WD14 → 候选模型」里增删，
@@ -144,7 +287,9 @@ class Secrets(BaseModel):
     danbooru: DanbooruConfig = Field(default_factory=DanbooruConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
     huggingface: HuggingFaceConfig = Field(default_factory=HuggingFaceConfig)
+    wandb: WandBConfig = Field(default_factory=WandBConfig)
     joycaption: JoyCaptionConfig = Field(default_factory=JoyCaptionConfig)
+    llm_tagger: LLMTaggerConfig = Field(default_factory=LLMTaggerConfig)
     wd14: WD14Config = Field(default_factory=WD14Config)
     cltagger: CLTaggerConfig = Field(default_factory=CLTaggerConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)

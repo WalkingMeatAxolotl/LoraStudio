@@ -37,7 +37,8 @@ def test_schema_is_complete() -> None:
     for name in (
         "transformer_path", "data_dir", "lora_type", "lora_rank", "epochs",
         "optimizer_type", "prodigy_d_coef", "prodigy_safeguard_warmup",
-        "sample_prompt", "sample_prompts", "no_monitor",
+        "sample_prompt", "sample_prompts", "no_monitor", "wandb_enabled",
+        "wandb_project", "wandb_mode",
     ):
         assert name in fields, f"missing: {name}"
 
@@ -59,6 +60,8 @@ def test_schema_carries_ui_metadata(client: TestClient) -> None:
     assert props["transformer_path"]["group"] == "model"
     assert props["transformer_path"]["control"] == "path"
     assert "show_when" in props["prodigy_d_coef"]
+    assert props["wandb_enabled"]["group"] == "monitor"
+    assert props["wandb_project"]["show_when"] == "wandb_enabled==true"
 
 
 def test_extra_fields_are_forbidden() -> None:

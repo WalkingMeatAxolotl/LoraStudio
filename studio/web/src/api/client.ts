@@ -77,10 +77,52 @@ export interface HuggingFaceConfig {
   token: string
 }
 
+export interface WandBConfig {
+  api_key: string
+  project: string
+  entity: string
+  base_url: string
+}
+
 export interface JoyCaptionConfig {
   base_url: string
   model: string
   prompt_template: string
+}
+
+export interface LLMPromptPreset {
+  id: string
+  label: string
+  prompt: string
+}
+
+export interface LLMTaggerConfig {
+  base_url: string
+  api_key: string
+  model: string
+  model_ids: string[]
+  endpoint: 'chat_completions' | 'responses'
+  prompt_preset: string
+  prompt_presets: LLMPromptPreset[]
+  custom_prompt: string
+  temperature: number
+  max_tokens: number
+  timeout: number
+  max_retries: number
+  max_side: number
+  jpeg_quality: number
+}
+
+export interface LLMConnectionTestResult {
+  ok: boolean
+  endpoint: LLMTaggerConfig['endpoint']
+  endpoint_url: string
+  model: string
+  elapsed_ms: number
+  status_code: number | null
+  response_preview: string
+  error: string
+  request_shape: string
 }
 
 export interface WD14Config {
@@ -177,7 +219,9 @@ export interface Secrets {
   danbooru: DanbooruConfig
   download: DownloadGlobalConfig
   huggingface: HuggingFaceConfig
+  wandb: WandBConfig
   joycaption: JoyCaptionConfig
+  llm_tagger: LLMTaggerConfig
   wd14: WD14Config
   cltagger: CLTaggerConfig
   models: ModelsConfig
@@ -405,7 +449,7 @@ export interface CopyResult {
 
 // ---- tagging (PP4) --------------------------------------------------------
 
-export type TaggerName = 'wd14' | 'cltagger' | 'joycaption'
+export type TaggerName = 'wd14' | 'cltagger' | 'joycaption' | 'llm'
 
 export interface TaggerStatus {
   name: TaggerName
@@ -734,6 +778,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  refreshLLMModels: (body: { base_url?: string; api_key?: string; timeout?: number }) =>
+    req<{ items: string[]; secrets: Secrets }>('/api/llm-tagger/models/refresh', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  testLLMConnection: (body: Partial<Pick<LLMTaggerConfig, 'base_url' | 'api_key' | 'model' | 'endpoint' | 'timeout' | 'max_tokens' | 'temperature'>>) =>
+    req<LLMConnectionTestResult>('/api/llm-tagger/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   updateSecrets: (patch: SecretsPatch) =>
     req<Secrets>('/api/secrets', {
       method: 'PUT',
@@ -933,6 +987,7 @@ export const api = {
         add_model_tag?: boolean | null
         blacklist_tags?: string[] | null
       }
+      llm_overrides?: Omit<Partial<LLMTaggerConfig>, 'api_key' | 'model_ids' | 'prompt_presets'>
     }
   ) =>
     req<Job>(`/api/projects/${pid}/versions/${vid}/tag`, {
