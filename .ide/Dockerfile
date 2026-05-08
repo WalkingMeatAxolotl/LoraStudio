@@ -52,13 +52,6 @@ RUN pip install --no-cache-dir \
     torchvision \
     --index-url https://download.pytorch.org/whl/cu128
 
-# 5b. 编译安装 flash-attn
-# CUDA_HOME 指向系统 CUDA toolkit；TORCH_CUDA_ARCH_LIST 指定目标架构；
-# MAX_JOBS 限制并行编译进程数防止 OOM
-ENV CUDA_HOME=/usr/local/cuda
-ENV TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0"
-RUN MAX_JOBS=4 pip install --no-cache-dir flash-attn --no-build-isolation
-
 # 6. 安装其余 Python 依赖
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && \
