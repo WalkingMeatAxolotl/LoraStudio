@@ -964,6 +964,7 @@ function ModelsSection({ catalog, busy, start, startMs, reloadCatalog, catalogEr
                   <span style={{ flex: 1 }} />
                   <ModelStatusBadge exists={allExist} size={totalSize} status={dl?.status} fileCount={m.files.length} existsCount={m.files.filter((f) => f.exists).length} />
                   <DownloadButton exists={allExist} status={dl?.status} busy={busy.has(id)} onClick={() => void start(id)} />
+                  {id === 'qwen3' && <MsDownloadButton busy={busy.has(id)} onClick={() => void startMs(id)} />}
                 </div>
               </ModelGroupCard>
             )

@@ -47,6 +47,7 @@ LATEST_ANIMA = "preview3-base"
 ANIMA_VAE_PATH = "split_files/vae/qwen_image_vae.safetensors"
 
 QWEN_REPO = "Qwen/Qwen3-0.6B-Base"
+QWEN_MS_REPO = "Qwen/Qwen3-0.6B-Base"
 # 注：Qwen3 把 special tokens 直接塞进 tokenizer.json，所以 repo 里没有
 # `special_tokens_map.json`（旧 Qwen 版本有，照搬就 404）。
 QWEN_FILES = [
@@ -666,6 +667,14 @@ def download_anima_vae_ms(
     return _ms_download_file(ANIMA_REPO, ANIMA_VAE_PATH, target.parent, on_log)
 
 
+def download_qwen3_ms(root: Path, *, on_log: Callable[[str], None] = print) -> bool:
+    if not _ensure_modelscope(on_log):
+        return False
+    target_dir = qwen_dir(root)
+    on_log(f"\n📥 Qwen3-0.6B-Base (ModelScope, ~1.2 GB) → {target_dir}")
+    return _ms_download_repo(QWEN_MS_REPO, target_dir, on_log)
+
+
 def download_wd14_ms(
     model_id: str,
     root: Optional[Path] = None,
@@ -705,6 +714,10 @@ def trigger(model_id: str, variant: Optional[str] = None, source: str = "hugging
         if model_id == "anima_vae":
             key = "anima_vae"
             start_download_async(key, lambda log: download_anima_vae_ms(root, on_log=log))
+            return key
+        if model_id == "qwen3":
+            key = "qwen3"
+            start_download_async(key, lambda log: download_qwen3_ms(root, on_log=log))
             return key
         if model_id == "wd14":
             if not variant:
