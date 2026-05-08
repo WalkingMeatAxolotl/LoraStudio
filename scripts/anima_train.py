@@ -532,8 +532,31 @@ def load_anima_model(transformer_path, device, dtype, repo_root):
     model = model.to(device=device, dtype=dtype)
     model.requires_grad_(False)
 
+    # 自动启用 flash attention（已安装时优先于 SDPA）
+    _try_enable_flash_attn(cosmos_modeling, anima_modeling)
+
     logger.info(f"Anima 模型加载完成: {model_channels}ch, {num_blocks} blocks")
     return model
+
+
+def _try_enable_flash_attn(*modules) -> bool:
+    """在已加载的模型模块中启用 flash attention（若已安装）。"""
+    try:
+        import flash_attn  # noqa: F401
+    except ImportError:
+        return False
+    enabled = False
+    for mod in modules:
+        fn = getattr(mod, "set_flash_attn_enabled", None)
+        if fn:
+            try:
+                if fn(True):
+                    enabled = True
+            except Exception:
+                pass
+    if enabled:
+        logger.info("flash attention 已启用")
+    return enabled
 
 
 def load_vae(vae_path, device, dtype, repo_root):

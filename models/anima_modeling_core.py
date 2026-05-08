@@ -35,11 +35,25 @@ try:
 except Exception:
     xops = None
 
+_FLASH_ATTN_AVAILABLE = False
+_USE_FLASH_ATTN = False
+try:
+    from flash_attn import flash_attn_func as _flash_attn_func  # type: ignore
+    _FLASH_ATTN_AVAILABLE = True
+except Exception:
+    _flash_attn_func = None
+
 
 def set_xformers_enabled(enabled: bool) -> bool:
     global _USE_XFORMERS
     _USE_XFORMERS = bool(enabled) and _XFORMERS_AVAILABLE
     return _USE_XFORMERS
+
+
+def set_flash_attn_enabled(enabled: bool) -> bool:
+    global _USE_FLASH_ATTN
+    _USE_FLASH_ATTN = bool(enabled) and _FLASH_ATTN_AVAILABLE
+    return _USE_FLASH_ATTN
 
 
 def _rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -131,6 +145,12 @@ def torch_attention_op(q_B_S_H_D: torch.Tensor, k_B_S_H_D: torch.Tensor, v_B_S_H
     Returns:
         Attention output tensor with shape (batch, seq_len, n_heads * head_dim)
     """
+    if _USE_FLASH_ATTN and _flash_attn_func is not None:
+        try:
+            out = _flash_attn_func(q_B_S_H_D, k_B_S_H_D, v_B_S_H_D)
+            return rearrange(out, "b s h d -> b s (h d)")
+        except Exception:
+            pass
     if _USE_XFORMERS and xops is not None:
         try:
             out = xops.memory_efficient_attention(q_B_S_H_D, k_B_S_H_D, v_B_S_H_D)
@@ -1229,6 +1249,17 @@ class LLMAdapterAttention(nn.Module):
             query_states = apply_rotary_pos_emb_llm(query_states, cos, sin)
             cos, sin = position_embeddings_context
             key_states = apply_rotary_pos_emb_llm(key_states, cos, sin)
+
+        if _flash_attn_func is not None and _USE_FLASH_ATTN and mask is None:
+            try:
+                out = _flash_attn_func(
+                    query_states.transpose(1, 2),
+                    key_states.transpose(1, 2),
+                    value_states.transpose(1, 2),
+                )
+                return self.o_proj(out.reshape(*input_shape, -1).contiguous())
+            except Exception:
+                pass
 
         attn_output = F.scaled_dot_product_attention(query_states, key_states, value_states, attn_mask=mask)
 

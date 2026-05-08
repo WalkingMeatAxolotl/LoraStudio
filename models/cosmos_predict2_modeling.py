@@ -24,6 +24,20 @@ from torch import nn
 from torch.distributed import get_process_group_ranks
 from torchvision import transforms
 
+_FLASH_ATTN_AVAILABLE = False
+_USE_FLASH_ATTN = False
+try:
+    from flash_attn import flash_attn_func as _flash_attn_func  # type: ignore
+    _FLASH_ATTN_AVAILABLE = True
+except Exception:
+    _flash_attn_func = None
+
+
+def set_flash_attn_enabled(enabled: bool) -> bool:
+    global _USE_FLASH_ATTN
+    _USE_FLASH_ATTN = bool(enabled) and _FLASH_ATTN_AVAILABLE
+    return _USE_FLASH_ATTN
+
 
 def _rotate_half(x: torch.Tensor, interleaved: bool) -> torch.Tensor:
     """Change sign so the last dimension becomes [-odd, +even]
@@ -291,6 +305,14 @@ def torch_attention_op(q_B_S_H_D: torch.Tensor, k_B_S_H_D: torch.Tensor, v_B_S_H
     Returns:
         Attention output tensor with shape (batch, seq_len, n_heads * head_dim)
     """
+    # flash_attn expects bshd — same as our input format, no transpose needed
+    if _USE_FLASH_ATTN and _flash_attn_func is not None:
+        try:
+            out = _flash_attn_func(q_B_S_H_D, k_B_S_H_D, v_B_S_H_D)
+            return rearrange(out, "b s h d -> b s (h d)")
+        except Exception:
+            pass
+
     in_q_shape = q_B_S_H_D.shape
     in_k_shape = k_B_S_H_D.shape
     q_B_H_S_D = rearrange(q_B_S_H_D, "b ... h k -> b h ... k").view(in_q_shape[0], in_q_shape[-2], -1, in_q_shape[-1])

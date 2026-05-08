@@ -18,7 +18,8 @@ tqdm>=4.66.0
 omegaconf>=2.3.0
 einops>=0.7.0
 # xformers>=0.0.23       # Optional: memory efficient attention (may fail on Windows)
-# flash-attn>=2.4.0      # Optional: FlashAttention (usually Linux only)
+# flash-attn             # Optional: FlashAttention — included in Docker image via `--no-build-isolation`;
+#                        # to install manually: MAX_JOBS=4 pip install flash-attn --no-build-isolation
 lpips>=0.1.4
 pytorch-fid>=0.3.0
 pytorch-msssim>=0.2.1

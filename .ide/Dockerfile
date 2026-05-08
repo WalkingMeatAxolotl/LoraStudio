@@ -27,6 +27,7 @@ RUN apt-get update && \
     git \
     python3-dev \
     build-essential \
+    ninja-build \
     ca-certificates \
     gnupg \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
@@ -50,6 +51,11 @@ RUN pip install --no-cache-dir \
     torch \
     torchvision \
     --index-url https://download.pytorch.org/whl/cu124
+
+# 5b. 编译安装 flash-attn（针对常见 GPU 架构预编译，避免首次运行时编译）
+# MAX_JOBS 限制并行编译进程数防止 OOM；TORCH_CUDA_ARCH_LIST 指定目标架构
+ENV TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0"
+RUN MAX_JOBS=4 pip install --no-cache-dir flash-attn --no-build-isolation
 
 # 6. 安装其余 Python 依赖
 COPY requirements.txt /tmp/requirements.txt
