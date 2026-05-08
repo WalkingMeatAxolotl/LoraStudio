@@ -91,6 +91,25 @@ _PRELOAD_RESULT: Optional[dict[str, Any]] = None
 _CUDA_LOAD_ERROR: Optional[str] = None
 
 
+def _has_system_cuda_libs() -> bool:
+    """系统是否自带 CUDA 运行时 so（/usr/local/cuda、apt 装的 libcublas 等）。
+
+    有系统 CUDA 时跳过 preload：torch wheel 版本（cu128 → cuBLAS 12.8.x）与
+    onnxruntime-gpu 编译目标（CUDA 12.4）不同，RTLD_GLOBAL 覆盖会导致
+    cuBLAS API 不兼容，推理时报 CUBLAS_STATUS_INVALID_VALUE。
+    系统 CUDA 库由 nvidia docker 镜像提供，onnxruntime 能直接 dlopen 到正确版本。
+    """
+    import ctypes.util
+    cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or ""
+    if cuda_home and os.path.isdir(os.path.join(cuda_home, "lib64")):
+        return True
+    if os.path.isdir("/usr/local/cuda/lib64"):
+        return True
+    if ctypes.util.find_library("cublas"):
+        return True
+    return False
+
+
 def _preload_torch_cuda_libs() -> dict[str, Any]:
     """Linux 上 ctypes RTLD_GLOBAL 预加载 torch 自带的 CUDA runtime so。
 
@@ -101,11 +120,16 @@ def _preload_torch_cuda_libs() -> dict[str, Any]:
     `site-packages/nvidia/*/lib/`；提前 RTLD_GLOBAL 加载它们后，onnxruntime
     后续 dlopen 就能从已加载的全局符号表里解析。
 
+    **注意**：系统已有 CUDA（如 nvidia docker 镜像）时跳过 preload。torch wheel
+    的 CUDA 版本（cu128 = cuBLAS 12.8）与 onnxruntime-gpu 编译目标（CUDA 12.4）
+    不一致，强行 RTLD_GLOBAL 覆盖会导致推理时 CUBLAS_STATUS_INVALID_VALUE。
+
     只对**当前进程**生效；server 子进程必须自己再跑一次（本模块在 import 时
     自动跑）。
 
-    返回 `{"applied", "platform_skip", "preloaded", "errors", "candidates"}`：
+    返回 `{"applied", "platform_skip", "system_cuda_skip", "preloaded", "errors", "candidates"}`：
     - `platform_skip=True`：非 Linux，整体跳过（Windows / macOS 走别的路子）
+    - `system_cuda_skip=True`：检测到系统 CUDA，跳过 preload
     - `preloaded`：成功 dlopen 的绝对路径列表
     - `errors`：尝试 dlopen 但失败的 (path, reason) 列表
     - `candidates`：被检视的 nvidia.* 子包数（用来观测 venv 里是否有 torch CUDA）
@@ -114,6 +138,19 @@ def _preload_torch_cuda_libs() -> dict[str, Any]:
         return {
             "applied": False,
             "platform_skip": True,
+            "system_cuda_skip": False,
+            "preloaded": [],
+            "errors": [],
+            "candidates": 0,
+        }
+    if _has_system_cuda_libs():
+        logger.debug(
+            "[onnx_setup] 检测到系统 CUDA，跳过 torch wheel preload（避免 cuBLAS 版本错位）"
+        )
+        return {
+            "applied": False,
+            "platform_skip": False,
+            "system_cuda_skip": True,
             "preloaded": [],
             "errors": [],
             "candidates": 0,
@@ -145,6 +182,7 @@ def _preload_torch_cuda_libs() -> dict[str, Any]:
     return {
         "applied": True,
         "platform_skip": False,
+        "system_cuda_skip": False,
         "preloaded": preloaded,
         "errors": errors,
         "candidates": candidates,
@@ -164,6 +202,8 @@ def _ensure_preload() -> dict[str, Any]:
                     os.path.basename(p) for p in _PRELOAD_RESULT["preloaded"]
                 ),
             )
+        elif _PRELOAD_RESULT.get("system_cuda_skip"):
+            logger.info("[onnx_setup] 检测到系统 CUDA，跳过 torch wheel preload")
         elif _PRELOAD_RESULT["applied"] and _PRELOAD_RESULT["candidates"] == 0:
             logger.debug(
                 "[onnx_setup] 未发现 torch 自带 CUDA wheel；GPU EP 依赖系统 CUDA"
