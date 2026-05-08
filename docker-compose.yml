@@ -1,7 +1,8 @@
 services:
   studio:
-    image: saltycocoa/animalorastudio:latest
+    image: ${ANIMALORASTUDIO_IMAGE:-ghcr.io/saltysalrua/animalorastudio:latest}
     # 本地构建时可改为: build: { context: ., dockerfile: .ide/Dockerfile }
+    # 覆盖镜像: ANIMALORASTUDIO_IMAGE=ghcr.io/<owner>/animalorastudio:sha-<sha> docker compose up
     deploy:
       resources:
         reservations:
