@@ -265,6 +265,65 @@ def _spawn_browser_opener(url: str, *, delay: float = 1.0) -> None:
     t.start()
 
 
+def _check_torch_cuda() -> None:
+    """启动期检查 torch 是否能用 CUDA；CPU-only torch 跑训练 / 出图会极慢。
+
+    四种状态：
+    - CUDA 可用                       → 一行 OK
+    - torch 是 CPU-only build + 有 GPU → 大警告 + 重装命令（最常见误装）
+    - torch 是 CPU-only build + 无 GPU → 一行 info（用户确实在 CPU 机器上）
+    - torch 是 CUDA build 但 cuda 不可用 → 警告（驱动 / WSL 问题）
+
+    `torch.version.cuda` 在 CPU-only wheel 上是 None；在 cu* wheel 上是 "12.8" 等。
+    用它区分误装与驱动问题。
+    """
+    try:
+        import torch  # noqa: PLC0415
+    except ImportError:
+        return  # _ensure_python_deps 会在更早路径处理
+
+    if torch.cuda.is_available():
+        try:
+            name = torch.cuda.get_device_name(0)
+        except Exception:  # noqa: BLE001
+            name = "?"
+        print(f"[studio] torch {torch.__version__}（GPU: {name}）")
+        return
+
+    cuda_build = getattr(torch.version, "cuda", None)
+    if cuda_build is None:
+        # CPU-only wheel：进一步判断本机是否其实有 NVIDIA GPU（误装）
+        try:
+            from studio.services import onnxruntime_setup  # noqa: PLC0415
+            has_gpu = bool(onnxruntime_setup.detect_cuda().get("available"))
+        except Exception:  # noqa: BLE001
+            has_gpu = False
+        if has_gpu:
+            print(
+                f"[studio] 警告：检测到 NVIDIA GPU，但当前安装的是 CPU-only 版 PyTorch "
+                f"({torch.__version__})。\n"
+                f"        训练 / 出图将跑在 CPU 上，速度极慢（单步常需数十秒）。\n"
+                f"        请卸载后重装 CUDA 版：\n"
+                f"          pip uninstall torch torchvision -y\n"
+                f"          # 按你的 CUDA 版本选；如 CUDA 12.8：\n"
+                f"          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"[studio] torch {torch.__version__}（CPU-only build，未检测到 NVIDIA GPU）"
+            )
+        return
+
+    # CUDA build 但运行时不可用：驱动 / WSL / 容器问题
+    print(
+        f"[studio] 警告：torch {torch.__version__}（CUDA {cuda_build} build），"
+        f"但 torch.cuda.is_available()=False。\n"
+        f"        可能原因：NVIDIA 驱动未安装 / 版本过低 / WSL 缺 CUDA 支持。",
+        file=sys.stderr,
+    )
+
+
 def _bootstrap_onnxruntime() -> None:
     """PP8 — 启动期检测 GPU 后按需装 onnxruntime / onnxruntime-gpu。
 
@@ -394,6 +453,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             rc = cmd_build(args)
             if rc != 0:
                 return rc
+    _check_torch_cuda()
     _bootstrap_onnxruntime()
     url = f"http://{args.host}:{args.port}/studio/"
     print(f"[studio] 启动后端 → {url}")
@@ -415,6 +475,7 @@ def cmd_dev(args: argparse.Namespace) -> int:
     rc = npm_install_if_missing(npm)
     if rc != 0:
         return rc
+    _check_torch_cuda()
     _bootstrap_onnxruntime()
 
     pg = ProcGroup()
