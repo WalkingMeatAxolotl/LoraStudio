@@ -51,6 +51,51 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def _patch_lycoris_lokr_device():
+    """修复 lycoris-lora 3.4.0 LokrModule.get_weight 的 rank_dropout device bug。
+
+    原代码 torch.rand(weight.size(0)) 未指定 device，生成 CPU 张量后与 CUDA
+    weight 相乘抛 RuntimeError。此 patch 在 torch.rand 调用中加入 device=weight.device。
+    """
+    try:
+        from lycoris.modules.lokr import LokrModule, make_kron, rebuild_tucker
+    except Exception:
+        return
+
+    def _get_weight_fixed(self, shape):
+        weight = make_kron(
+            self.lokr_w1 if self.use_w1 else self.lokr_w1_a @ self.lokr_w1_b,
+            (
+                self.lokr_w2
+                if self.use_w2
+                else (
+                    rebuild_tucker(self.lokr_t2, self.lokr_w2_a, self.lokr_w2_b)
+                    if self.tucker
+                    else self.lokr_w2_a @ self.lokr_w2_b
+                )
+            ),
+            self.scale,
+        )
+        dtype = weight.dtype
+        if shape is not None:
+            weight = weight.view(shape)
+        if self.training and self.rank_dropout:
+            drop = (
+                torch.rand(weight.size(0), device=weight.device) > self.rank_dropout
+            ).to(dtype)
+            drop = drop.view(-1, *[1] * len(weight.shape[1:]))
+            if self.rank_dropout_scale:
+                drop /= drop.mean()
+            weight *= drop
+        return weight
+
+    LokrModule.get_weight = _get_weight_fixed
+    logger.info("已 patch LokrModule.get_weight（rank_dropout device 修复）")
+
+
+_patch_lycoris_lokr_device()
+
+
 # ============================================================================
 # 依赖检测
 # ============================================================================
