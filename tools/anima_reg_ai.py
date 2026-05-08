@@ -328,6 +328,7 @@ def main() -> None:
                 dtype=dtype,
             )
             img.save(out_path)
+            out_path.with_suffix(".txt").write_text(prompt, encoding="utf-8")
             actual_count += 1
             logger.info(f"  已保存: {out_path}")
 
