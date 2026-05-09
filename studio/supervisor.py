@@ -730,13 +730,23 @@ class Supervisor:
             })
 
     def _on_daemon_task_event(self, event: dict[str, Any]) -> None:
-        """daemon 推回的 task 级事件（image_done / done / error）。"""
+        """daemon 推回的 task 级事件（image_done / done / error / preview_step）。"""
         kind = event.get("kind")
         tid = int(event.get("task_id") or 0)
         if kind == "started":
             self._emit_daemon_state()
             return
         if kind in ("image_done", "image_error"):
+            return
+        if kind == "preview_step":
+            # commit 14：中间步预览 → 转发 SSE，前端覆盖主图 src
+            self._on_event({
+                "type": "generate_preview_step",
+                "task_id": tid,
+                "step": event.get("step"),
+                "total": event.get("total"),
+                "image_b64": event.get("image_b64"),
+            })
             return
         if kind == "done":
             self._finalize_daemon_task(tid, status="done")

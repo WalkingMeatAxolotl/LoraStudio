@@ -343,7 +343,10 @@ class InferenceDaemon:
             logger.warning("event for unknown request: %s", msg_id)
             return
 
-        # commit 10：image_done 含 base64 PNG → 入 cache，转发瘦身版
+        # commit 10：image_done 含 base64 PNG → 入 cache，转发瘦身版（无 b64）
+        # commit 14：preview_step 含 base64 JPEG → 直接透传给 callback（不入 cache，
+        #   前端 SSE 收到立刻 <img src="data:..."> 显示当前步预览；done/最终图
+        #   会替换它）
         forward_msg = msg
         if kind == "image_done" and "image_b64" in msg:
             filename = msg.get("filename") or ""

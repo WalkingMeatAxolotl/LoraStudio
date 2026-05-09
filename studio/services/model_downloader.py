@@ -62,6 +62,15 @@ T5_FILES = [
     "special_tokens_map.json",
 ]
 
+# TAEFlux：1.6MB 的 tiny autoencoder for Flux/Anima，daemon 预览中间步用。
+# 用 diffusers.AutoencoderTiny.from_pretrained 加载 → 需要同时拿 config.json
+# + safetensors 两个文件。
+TAEFLUX_REPO = "madebyollin/taef1"
+TAEFLUX_FILES = [
+    "diffusion_pytorch_model.safetensors",
+    "config.json",
+]
+
 # CLTagger 子目录布局：仓库内 cl_tagger_1_02/model.onnx 等。新版本（1.03 等）
 # 出现时往这里加一行；UI 自动作为 radio 选项暴露。
 # label → (model_path, tag_mapping_path)
@@ -117,6 +126,33 @@ def qwen_dir(root: Path) -> Path:
 
 def t5_tokenizer_dir(root: Path) -> Path:
     return root / "t5_tokenizer"
+
+
+def taeflux_dir(root: Optional[Path] = None) -> Path:
+    """TAEFlux 本地目录。daemon 用 AutoencoderTiny.from_pretrained 加载。"""
+    r = root or models_root()
+    return r / "taeflux"
+
+
+def taeflux_available(root: Optional[Path] = None) -> bool:
+    """两个文件都到位才算就绪。"""
+    d = taeflux_dir(root)
+    return all((d / f).exists() for f in TAEFLUX_FILES)
+
+
+def download_taeflux(
+    *, root: Optional[Path] = None,
+    on_log: Callable[[str], None] = print,
+) -> bool:
+    """同步下载 TAEFlux（config + weights）到本地。任意一个文件失败则返 False。"""
+    target_dir = taeflux_dir(root)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    ok = True
+    for f in TAEFLUX_FILES:
+        target = target_dir / f
+        if not download_flat(TAEFLUX_REPO, f, target, on_log=on_log):
+            ok = False
+    return ok
 
 
 def wd14_target_dir(root: Path, model_id: str) -> Path:

@@ -731,10 +731,16 @@ def _sample_er_sde_const_x0(
     seed: int | None = None,
     s_noise: float = 1.0,
     max_stage: int = 3,
+    step_callback=None,
 ):
     """
     Extended Reverse-Time SDE solver（ER-SDE-Solver-3）在 CONST(flow) 噪声日程下的实现。
     参考 ComfyUI 的 k_diffusion_sampling.sample_er_sde（删去 model_patcher 依赖）。
+
+    step_callback：可选钩子（仅 daemon 中间步预览用，commit 14）。签名
+        callback(step:int, total:int, denoised:torch.Tensor) → None。每步算
+        完 x0 估计（denoised）调一次；同步阻塞返回 —— 调用方应做轻量解码 +
+        异步 push，不在 callback 内阻塞。默认 None 时行为完全等价旧版。
     """
     sigmas = sigmas.to(device=x.device, dtype=torch.float32)
     if sigmas.numel() <= 1:
@@ -762,6 +768,12 @@ def _sample_er_sde_const_x0(
     for i in range(len(sigmas) - 1):
         sigma = sigmas[i]
         denoised = denoise_fn(x, sigma)
+
+        if step_callback is not None:
+            try:
+                step_callback(i, len(sigmas) - 1, denoised)
+            except Exception:
+                pass  # 预览失败不该影响采样
 
         stage_used = min(int(max_stage), i + 1)
         if sigmas[i + 1] == 0:
@@ -1522,12 +1534,13 @@ class CachedLatentDataset(Dataset):
 @torch.no_grad()
 def sample_image(
     model, vae, qwen_model, qwen_tokenizer, t5_tokenizer,
-    prompt, height=1024, width=1024, steps=25, cfg_scale=4.0, 
+    prompt, height=1024, width=1024, steps=25, cfg_scale=4.0,
     negative_prompt=None,
     sampler_name: str = "er_sde",
     scheduler: str = "simple",
     device="cuda",
     dtype=torch.bfloat16,
+    step_callback=None,
 ):
     """训练时采样预览（尽量对齐 ComfyUI KSampler）
     
@@ -1616,13 +1629,23 @@ def sample_image(
     logger.info(f"[Debug] Sampler={sampler_name_l}, Scheduler=simple, steps={steps}, cfg={cfg_scale}")
 
     if sampler_name_l == "er_sde":
-        x = _sample_er_sde_const_x0(denoise_fn, x, sigmas, seed=None, s_noise=1.0, max_stage=3)
+        x = _sample_er_sde_const_x0(
+            denoise_fn, x, sigmas,
+            seed=None, s_noise=1.0, max_stage=3,
+            step_callback=step_callback,
+        )
     else:
         # fallback: 简化 Euler ODE（deterministic），与 flow 兼容
-        for i in range(len(sigmas) - 1):
+        total = len(sigmas) - 1
+        for i in range(total):
             sigma = float(sigmas[i])
             sigma_next = float(sigmas[i + 1])
             denoised = denoise_fn(x, sigmas[i])
+            if step_callback is not None:
+                try:
+                    step_callback(i, total, denoised)
+                except Exception:
+                    pass
             d = (x - denoised) / max(sigma, 1e-6)
             x = x + d * (sigma_next - sigma)
 

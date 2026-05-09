@@ -50,6 +50,8 @@ export default function GeneratePage() {
   const [busy, setBusy] = useState(false)
   const [currentTask, setCurrentTask] = useState<Task | null>(null)
   const [monitorState, setMonitorState] = useState<MonitorState | null>(null)
+  // commit 14：中间步预览（仅 single 模式有意义；XY/对比 cell 多预览意义小）
+  const [previewStep, setPreviewStep] = useState<{ step: number; total: number; dataUrl: string } | null>(null)
   const taskIdRef = useRef<number | null>(null)
   taskIdRef.current = currentTask?.id ?? null
 
@@ -104,8 +106,24 @@ export default function GeneratePage() {
       && evt.state
     ) {
       setMonitorState(evt.state as MonitorState)
+    } else if (
+      evt.type === 'generate_preview_step'
+      && String(evt.task_id) === String(tid)
+      && typeof evt.image_b64 === 'string'
+    ) {
+      // commit 14：中间步预览。data URL 直接覆盖主图 src 直到下一步或最终图来
+      setPreviewStep({
+        step: Number(evt.step) || 0,
+        total: Number(evt.total) || 0,
+        dataUrl: `data:image/jpeg;base64,${evt.image_b64}`,
+      })
     }
   })
+
+  // task 切换 / 完成 / 切 mode 时清掉中间预览（最终图覆盖）
+  useEffect(() => {
+    setPreviewStep(null)
+  }, [currentTask?.id, mode, samples.length])
 
   const handleGenerate = async () => {
     if (!prompts.some((p) => p.trim())) {
@@ -305,6 +323,17 @@ export default function GeneratePage() {
                   onCellClick={handleCellClick}
                   selectedIndices={selectedIndices}
                 />
+              ) : samples.length === 0 && previewStep ? (
+                <div className="flex flex-col items-center gap-2">
+                  <img
+                    src={previewStep.dataUrl}
+                    alt={`step ${previewStep.step}/${previewStep.total}`}
+                    style={{ maxWidth: '100%', maxHeight: 600, borderRadius: 6 }}
+                  />
+                  <div className="text-xs text-fg-tertiary">
+                    采样 {previewStep.step} / {previewStep.total}（中间步预览）
+                  </div>
+                </div>
               ) : (
                 <SampleGallery samples={samples} taskId={currentTask.id} />
               )}

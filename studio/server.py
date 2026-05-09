@@ -1863,8 +1863,15 @@ def enqueue_generate(body: GenerateRequest) -> dict[str, Any]:
         xy_matrix=body.xy_matrix.model_dump() if body.xy_matrix else None,
     )
 
+    # commit 14：注入 daemon 端用的 preview 节流参数（settings 全局开关）
+    cfg_dict = cfg.model_dump()
+    try:
+        cfg_dict["preview_every_n_steps"] = int(secrets.load().generate.preview_every_n_steps or 0)
+    except Exception:
+        cfg_dict["preview_every_n_steps"] = 0
+
     cfg_path = tempdir / "config.json"
-    cfg_path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+    cfg_path.write_text(json.dumps(cfg_dict, indent=2, ensure_ascii=False), encoding="utf-8")
 
     with db.connection_for() as conn:
         db.update_task(conn, task_id, config_path=str(cfg_path))
@@ -1887,6 +1894,30 @@ def get_generate_task(task_id: int) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # /api/generate/daemon — 测试 daemon 状态查询 + 手动卸载（commit 13）
 # ---------------------------------------------------------------------------
+
+
+@app.get("/api/generate/taeflux/status")
+def get_taeflux_status() -> dict[str, Any]:
+    """commit 14：查询 TAEFlux 模型是否就绪（中间步预览依赖）。"""
+    from .services import model_downloader as _md
+    d = _md.taeflux_dir()
+    return {
+        "available": _md.taeflux_available(),
+        "dir": str(d),
+        "files": _md.TAEFLUX_FILES,
+    }
+
+
+@app.post("/api/generate/taeflux/install")
+def install_taeflux() -> dict[str, Any]:
+    """同步下载 TAEFlux（~1.6MB，秒级）。已存在直接返回 OK。"""
+    from .services import model_downloader as _md
+    if _md.taeflux_available():
+        return {"ok": True, "noop": True}
+    ok = _md.download_taeflux()
+    if not ok:
+        raise HTTPException(500, "download failed; check server log")
+    return {"ok": True}
 
 
 @app.get("/api/generate/daemon/status")

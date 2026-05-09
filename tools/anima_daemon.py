@@ -86,6 +86,8 @@ class ModelCache:
     第一次 task 进来 load_model_paths()；之后路径不变则复用；adapters
     在 lora_configs 改变时才重 inject（commit 9 简化：每次都重 inject，
     成本 ~1-2s/LoRA，相比 30s+ model load 可忽略；后续 commit 优化）。
+
+    commit 14：lazy 加载 TAEFlux（中间步预览用），失败不阻塞主流程。
     """
 
     def __init__(self) -> None:
@@ -105,6 +107,31 @@ class ModelCache:
         # adapters 必须保持引用，否则 forward hook 失效（lycoris closure）
         self.adapters: list[Any] = []
         self.last_lora_specs: list[LoRASpec] = []
+        # commit 14：TAEFlux for preview
+        self.taeflux: Any = None
+        self.taeflux_attempted: bool = False  # 失败后不再重试
+
+    def ensure_taeflux(self) -> Any:
+        """lazy 加载 TAEFlux。已加载或上次失败 → 返回缓存（可能是 None）。"""
+        if self.taeflux is not None or self.taeflux_attempted:
+            return self.taeflux
+        self.taeflux_attempted = True
+        try:
+            from studio.services import model_downloader as _md
+            if not _md.taeflux_available():
+                logger.info("taeflux not available; preview disabled")
+                return None
+            from diffusers import AutoencoderTiny
+            tae = AutoencoderTiny.from_pretrained(
+                str(_md.taeflux_dir()), torch_dtype=self.dtype,
+            ).to(self.device)
+            tae.eval()
+            self.taeflux = tae
+            logger.info("taeflux loaded")
+        except Exception as e:
+            logger.warning("taeflux load failed: %s; preview disabled", e)
+            self.taeflux = None
+        return self.taeflux
 
     @property
     def loaded(self) -> bool:
@@ -247,6 +274,9 @@ class ModelCache:
         self.t5_tok = None
         self.adapters = []
         self.last_lora_specs = []
+        # taeflux 也卸（占很小但保持一致）
+        self.taeflux = None
+        self.taeflux_attempted = False
         try:
             import gc
             gc.collect()
@@ -334,6 +364,69 @@ def _encode_png(img: Any) -> tuple[str, int]:
     return base64.b64encode(raw).decode("ascii"), len(raw)
 
 
+def _encode_jpeg(img: Any, quality: int = 80) -> tuple[str, int]:
+    """中间步预览编码：JPEG 80% 默认，比 PNG 小 ~5x。返回 (b64_str, byte_size)。"""
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=quality)
+    raw = buf.getvalue()
+    return base64.b64encode(raw).decode("ascii"), len(raw)
+
+
+def _build_preview_callback(req_id: str, every_n: int) -> Any:
+    """commit 14：返回一个 step_callback，每 N 步通过 TAEFlux 解码一次推 stdout。
+
+    callback 在 daemon 主线程同步执行（采样循环里）；TAEFlux decode + JPEG
+    encode 单步 ~10-20ms 可接受。模型缺失或 decode 失败时 callback 静默跳
+    过（采样不受影响）。
+    """
+    def _cb(step: int, total: int, latent: Any) -> None:
+        # 节流：每 N 步推一次（含末步）
+        if step % every_n != 0 and step != total - 1:
+            return
+        tae = CACHE.ensure_taeflux()
+        if tae is None:
+            return
+        img = _decode_taeflux_preview(tae, latent, CACHE.dtype)
+        if img is None:
+            return
+        b64, byte_size = _encode_jpeg(img, quality=80)
+        _emit_for(
+            req_id, "preview_step",
+            step=step + 1, total=total,
+            image_b64=b64, byte_size=byte_size,
+        )
+    return _cb
+
+
+def _decode_taeflux_preview(taeflux: Any, latent: Any, dtype: Any) -> Optional[Any]:
+    """latent → TAEFlux decode → PIL.Image (256px)。失败返 None（preview 不阻塞）。
+
+    Anima latent shape：[B, 16, F=1, H, W]；TAEFlux 期望 [B, 16, H, W]。
+    """
+    try:
+        import numpy as np
+        from PIL import Image
+        with torch.no_grad():
+            # 去掉 frame 维 (F=1)，转 dtype
+            x = latent[:, :, 0].to(dtype=dtype)
+            decoded = taeflux.decode(x).sample  # [B, 3, H, W] in [-1, 1]
+            decoded = (decoded.clamp(-1, 1) + 1) / 2
+            arr = decoded[0].permute(1, 2, 0).cpu().float().numpy()
+            arr = (arr * 255).clip(0, 255).astype(np.uint8)
+            img = Image.fromarray(arr)
+            # 缩到 256px（保持比例）
+            w, h = img.size
+            scale = 256.0 / max(w, h)
+            img = img.resize(
+                (max(1, int(w * scale)), max(1, int(h * scale))),
+                Image.BILINEAR,
+            )
+            return img
+    except Exception:
+        logger.exception("taeflux decode failed")
+        return None
+
+
 def _virtual_path(task_id: int, filename: str) -> str:
     """前端只用 split+pop 拿 filename，所以给个看起来像绝对路径的字符串。"""
     return f"/anima_gen_{task_id}/{filename}"
@@ -354,6 +447,11 @@ def _run_generate(req_id: str, task_id: int, cfg: dict[str, Any], output_dir: Pa
 
     CACHE.ensure_loaded(cfg)
     adapters = CACHE.apply_loras(cfg.get("lora_configs", []))
+
+    # commit 14：中间步预览（TAEFlux）。preview_every_n_steps=0 关；>0 时
+    # 每 N 步推一次 preview_step 事件。模型缺失自动跳过。
+    preview_every = int(cfg.get("preview_every_n_steps", 0) or 0)
+    preview_callback = _build_preview_callback(req_id, preview_every) if preview_every > 0 else None
 
     prompts: list[str] = cfg.get("prompts") or [
         "newest, safe, 1girl, masterpiece, best quality"
@@ -407,6 +505,7 @@ def _run_generate(req_id: str, task_id: int, cfg: dict[str, Any], output_dir: Pa
                     scheduler=scheduler,
                     device=CACHE.device,
                     dtype=CACHE.dtype,
+                    step_callback=preview_callback,
                 )
                 fname = f"gen_{img_idx:04d}_p{pi}_c{ci}_s{seed}.png"
                 vpath = _virtual_path(task_id, fname)
