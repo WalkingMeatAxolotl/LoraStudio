@@ -1,16 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type MonitorState } from '../../../api/client'
 import FullscreenViewer from './FullscreenViewer'
 import { AXIS_LABELS, formatAxisValue, type XYAxisDraft } from './xy'
 
-type Density = 'compact' | 'standard' | 'large'
+const ZOOM_MIN = 60
+const ZOOM_MAX = 480
+const ZOOM_DEFAULT = 160
+const ZOOM_STEP = 16
 
-/** 紧凑/标准/大图 → 单 cell 最小宽度（px）；多余空间按 1fr 均分到所有列。
- * 用 minmax(MIN, 1fr)，让 cell 同时撑满容器宽度 + 不至于太小。 */
-const DENSITY_MIN: Record<Density, number> = {
-  compact: 80,
-  standard: 160,
-  large: 280,
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v))
 }
 
 /** XY 模式预览网格：按 monitorState.samples[].xy 排成 N×M（CSS grid）。
@@ -31,8 +30,64 @@ export default function PreviewXYGrid({
   onCellClick?: (sampleIdx: number) => void
   selectedIndices?: number[]
 }) {
-  const [density, setDensity] = useState<Density>('standard')
+  const [zoomMinW, setZoomMinW] = useState(ZOOM_DEFAULT)
   const [fullscreenIdx, setFullscreenIdx] = useState<number | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // pan 状态。movedRef 让"拖动过"的 mouseup 不触发 cell click（capture 阶段拦截）
+  const dragRef = useRef<{ startX: number; startY: number; sX: number; sY: number } | null>(null)
+  const movedRef = useRef(false)
+
+  // wheel 必须 native + passive=false 才能 preventDefault
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      // shift+wheel 让浏览器原生横滚，不 zoom
+      if (e.shiftKey) return
+      e.preventDefault()
+      const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
+      setZoomMinW((prev) => clamp(prev + delta, ZOOM_MIN, ZOOM_MAX))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  const onMouseDown: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    if (e.button !== 0) return
+    // cell button 按下不进入 pan，让 button 自己处理 click
+    if ((e.target as HTMLElement).closest('button')) return
+    e.preventDefault()
+    if (!scrollRef.current) return
+    dragRef.current = {
+      startX: e.clientX, startY: e.clientY,
+      sX: scrollRef.current.scrollLeft,
+      sY: scrollRef.current.scrollTop,
+    }
+    movedRef.current = false
+  }
+
+  const onMouseMove: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    const d = dragRef.current
+    if (!d || !scrollRef.current) return
+    const dx = e.clientX - d.startX
+    const dy = e.clientY - d.startY
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) movedRef.current = true
+    scrollRef.current.scrollLeft = d.sX - dx
+    scrollRef.current.scrollTop = d.sY - dy
+  }
+
+  const onMouseUp = () => {
+    dragRef.current = null
+  }
+
+  // capture 阶段拦截 click：拖动过的 mouseup 不让 cell button 触发 click
+  const onClickCapture: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    if (movedRef.current) {
+      e.stopPropagation()
+      e.preventDefault()
+      movedRef.current = false
+    }
+  }
 
   const xValues = useMemo(
     () => xDraft.raw.split(',').map((s) => s.trim()).filter(Boolean),
@@ -53,7 +108,7 @@ export default function PreviewXYGrid({
     return m
   }, [samples])
 
-  const minW = DENSITY_MIN[density]
+  const minW = zoomMinW
   const selSet = new Set(selectedIndices ?? [])
 
   // grid 列：左 axis label 列 + N 个图 cell 列。yDraft 不存在时省略 label 列。
@@ -71,21 +126,29 @@ export default function PreviewXYGrid({
             <span className="text-fg-tertiary"> · 已出 {samples.length}</span>
           )}
         </span>
-        <div className="flex items-center gap-1" role="tablist" aria-label="网格密度">
-          {(['compact', 'standard', 'large'] as Density[]).map((d) => (
-            <button
-              key={d}
-              onClick={() => setDensity(d)}
-              className={`btn btn-sm text-xs ${density === d ? 'btn-primary' : 'btn-ghost text-fg-secondary'}`}
-            >
-              {d === 'compact' ? '紧凑' : d === 'standard' ? '标准' : '大图'}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 text-2xs text-fg-tertiary font-mono">
+          <span>滚轮缩放 · 拖动平移 · shift+滚轮横滚</span>
+          <button
+            onClick={() => setZoomMinW(ZOOM_DEFAULT)}
+            className="btn btn-ghost text-xs"
+            title="重置缩放"
+          >
+            {Math.round((zoomMinW / ZOOM_DEFAULT) * 100)}%
+          </button>
         </div>
       </div>
 
-      {/* grid 自带横向滚动（X 列太多撑爆容器时） */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      {/* grid 自带横向滚动（X 列太多撑爆容器时）+ 滚轮 zoom + 拖动 pan */}
+      <div
+        ref={scrollRef}
+        className="flex-1 min-h-0 overflow-auto"
+        style={{ cursor: dragRef.current ? 'grabbing' : 'grab' }}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseUp}
+        onClickCapture={onClickCapture}
+      >
         <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 2 }}>
           {/* 表头：左上角空白（仅当有 yDraft）+ X 标签 */}
           {yDraft && <div />}

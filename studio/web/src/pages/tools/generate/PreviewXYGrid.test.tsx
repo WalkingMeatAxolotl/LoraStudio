@@ -82,17 +82,14 @@ describe('PreviewXYGrid', () => {
     expect(onCellClick).toHaveBeenCalledWith(1)
   })
 
-  it('density toggle changes thumbnail size', async () => {
-    const user = userEvent.setup()
+  it('shows zoom percentage button (replaces old density toggle)', () => {
     const samples = [makeSample(0, 0, 20, null)]
     render(
       <PreviewXYGrid samples={samples} taskId={99} xDraft={xDraft} yDraft={null} />
     )
-    // 默认 standard 选中
-    const compactBtn = screen.getByRole('button', { name: '紧凑' })
-    expect(compactBtn).toHaveClass('btn-ghost')
-    await user.click(compactBtn)
-    expect(compactBtn).toHaveClass('btn-primary')
+    // 默认 100%
+    const zoomBtn = screen.getByRole('button', { name: '100%' })
+    expect(zoomBtn).toBeInTheDocument()
   })
 
   it('highlights selected cells via selectedIndices', () => {
