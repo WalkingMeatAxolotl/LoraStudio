@@ -15,7 +15,6 @@ import DaemonControls from './generate/DaemonControls'
 import NumField from './generate/NumField'
 import PreviewCompare from './generate/PreviewCompare'
 import PreviewHistoryRail from './generate/PreviewHistoryRail'
-import SeedCluster from './generate/SeedCluster'
 import { makeThumbnail, useGenerateHistory, type HistoryEntry } from './generate/useGenerateHistory'
 import PreviewXYGrid from './generate/PreviewXYGrid'
 import PromptList from './generate/PromptList'
@@ -41,7 +40,6 @@ export default function GeneratePage() {
   const [cfgScale, setCfgScale] = useState(4.0)
   const [count, setCount] = useState(1)
   const [seed, setSeed] = useState(0)
-  const [seedLocked, setSeedLocked] = useState(false)
   const [loras, setLoras] = useState<LoraEntry[]>([])
   // commit C: attention backend 已从 Generate 页移到 Settings；server 端
   // enqueue_generate 会自动从 secrets.generate.attention_backend 注入。
@@ -357,14 +355,14 @@ export default function GeneratePage() {
                     <NumField label="每 prompt" value={count} onChange={setCount} min={1} max={32} />
                   )}
                 </div>
-                <div>
-                  <label className="caption block mb-1.5">种子</label>
-                  <SeedCluster
-                    value={seed}
-                    onChange={setSeed}
-                    locked={seedLocked}
-                    onToggleLock={() => setSeedLocked(!seedLocked)}
-                  />
+                <NumField
+                  label="种子（0 = 随机）"
+                  value={seed}
+                  onChange={setSeed}
+                  min={0}
+                />
+                <div className="text-2xs text-fg-tertiary font-mono" style={{ marginTop: -4 }}>
+                  填具体数字 → 固定可复现；0 → 每次随机
                 </div>
               </div>
             </div>
