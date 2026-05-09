@@ -284,7 +284,7 @@ export default function GeneratePage() {
       : '开始生成'
 
   return (
-    <div className="fade-in flex flex-col" style={{ height: '100vh', overflow: 'hidden' }}>
+    <div className="fade-in flex flex-col" style={{ height: '100%', overflow: 'hidden' }}>
       <PageHeader
         eyebrow="工具"
         title="测试"
