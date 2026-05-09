@@ -64,7 +64,7 @@ describe('PreviewXYGrid', () => {
     expect(placeholders.length).toBe(4)
   })
 
-  it('calls onCellClick with sample index when an image is clicked', async () => {
+  it('calls onCellClick only with Ctrl+click (普通点击让位给 pan 拖动)', async () => {
     const user = userEvent.setup()
     const onCellClick = vi.fn()
     const samples = [makeSample(0, 0, 20, null), makeSample(1, 0, 25, null)]
@@ -78,7 +78,13 @@ describe('PreviewXYGrid', () => {
       />
     )
     const imgs = screen.getAllByRole('img')
-    await user.click(imgs[1])  // 第 2 张图（索引 1）
+    // 普通点击 → 不触发（让位 pan）
+    await user.click(imgs[1])
+    expect(onCellClick).not.toHaveBeenCalled()
+    // Ctrl+点击 → 触发
+    await user.keyboard('{Control>}')
+    await user.click(imgs[1])
+    await user.keyboard('{/Control}')
     expect(onCellClick).toHaveBeenCalledWith(1)
   })
 

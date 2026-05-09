@@ -56,8 +56,8 @@ export default function PreviewXYGrid({
 
   const onMouseDown: React.MouseEventHandler<HTMLDivElement> = (e) => {
     if (e.button !== 0) return
-    // cell button 按下不进入 pan，让 button 自己处理 click
-    if ((e.target as HTMLElement).closest('button')) return
+    // 所有区域（含 cell button）都进 pan；普通 click 已改成 Ctrl+click 才选
+    // cell，普通点击让位给拖动手势。preventDefault 阻止浏览器原生 img drag。
     e.preventDefault()
     if (!scrollRef.current) return
     dragRef.current = {
@@ -130,7 +130,7 @@ export default function PreviewXYGrid({
           )}
         </span>
         <div className="flex items-center gap-2 text-2xs text-fg-tertiary font-mono">
-          <span>滚轮缩放 · 拖动平移 · shift+滚轮横滚</span>
+          <span>滚轮缩放 · 拖动平移 · Ctrl+点击选中 · 双击全屏</span>
           <button
             onClick={() => setCellW(ZOOM_DEFAULT)}
             className="btn btn-ghost text-xs"
@@ -242,7 +242,7 @@ function Row({
         const isSel = idx != null && selSet.has(idx)
         const tooltip = (!yDraft
           ? `${AXIS_LABELS[xDraft.axis]}=${formatAxisValue(xDraft.axis, xv)}`
-          : `${AXIS_LABELS[xDraft.axis]}=${formatAxisValue(xDraft.axis, xv)} · ${AXIS_LABELS[yDraft.axis]}=${formatAxisValue(yDraft.axis, yv ?? '')}`) + ' · 双击全屏'
+          : `${AXIS_LABELS[xDraft.axis]}=${formatAxisValue(xDraft.axis, xv)} · ${AXIS_LABELS[yDraft.axis]}=${formatAxisValue(yDraft.axis, yv ?? '')}`) + ' · 双击全屏 · Ctrl+点击选中'
         return (
           <GridCell
             key={`c-${yi}-${xi}`}
@@ -285,20 +285,25 @@ function GridCell({
   }
   return (
     <button
-      onClick={() => sampleIdx != null && onClick?.(sampleIdx)}
+      onClick={(e) => {
+        // 普通 click 让位给 pan（拖动场景）；Ctrl/Cmd+click 才选 cell
+        if (sampleIdx == null) return
+        if (e.ctrlKey || e.metaKey) onClick?.(sampleIdx)
+      }}
       onDoubleClick={() => sampleIdx != null && onDoubleClick?.(sampleIdx)}
-      className={`block p-0 cursor-pointer overflow-hidden rounded-sm border-2 bg-sunken ${
+      className={`block p-0 overflow-hidden rounded-sm border-2 bg-sunken ${
         isSelected ? 'border-accent' : 'border-transparent hover:border-dim'
       }`}
       title={tooltip}
       style={{ minHeight: 80 }}
     >
-      {/* h-auto: 按图实际宽高，避免 1:1 强制（用户场景图常竖版 832×1216） */}
+      {/* h-auto: 按图实际宽高；draggable=false 阻止浏览器原生 img drag */}
       <img
         src={api.generateSampleUrl(taskId, filename)}
-        className="block w-full h-auto"
+        className="block w-full h-auto pointer-events-none"
         alt={filename}
         loading="lazy"
+        draggable={false}
         onError={() => setErrored(true)}
         onLoad={() => setErrored(false)}
       />
