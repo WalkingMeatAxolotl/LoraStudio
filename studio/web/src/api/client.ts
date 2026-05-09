@@ -595,6 +595,23 @@ export interface RegBuildRequest {
   postprocess_max_crop_ratio?: number
 }
 
+/** PR-9 — 先验生成（base 模型反向出 reg 集，无 LoRA）。 */
+export interface RegAiRequest {
+  excluded_tags?: string[]
+  negative_prompt?: string
+  width?: number
+  height?: number
+  steps?: number
+  cfg_scale?: number
+  sampler_name?: string
+  scheduler?: string
+  seed?: number
+  incremental?: boolean
+  mixed_precision?: string
+  xformers?: boolean
+  flash_attn?: boolean
+}
+
 export type TaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'canceled'
 
 export interface Task {
@@ -1080,6 +1097,15 @@ export const api = {
     req<{ path: string; tags: string[] }>(
       `/api/projects/${pid}/versions/${vid}/reg/caption?path=${encodeURIComponent(path)}`
     ),
+  /** PR-9 — 启动先验生成 task（base 模型对每张 train 图反向出对照图）。 */
+  enqueueRegPrior: (pid: number, vid: number, body: RegAiRequest) =>
+    req<Task>(`/api/projects/${pid}/versions/${vid}/reg/generate-prior`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  /** 查询先验生成 task 状态。 */
+  getRegPriorTask: (pid: number, vid: number, taskId: number) =>
+    req<Task>(`/api/projects/${pid}/versions/${vid}/reg/generate-prior/${taskId}`),
 
   // Train config (PP6.2) -------------------------------------------------
   getVersionConfig: (pid: number, vid: number) =>
