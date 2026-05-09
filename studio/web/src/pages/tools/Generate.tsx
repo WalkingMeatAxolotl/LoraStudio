@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   api,
   type AttentionBackend,
@@ -12,6 +12,7 @@ import PageHeader from '../../components/PageHeader'
 import { useToast } from '../../components/Toast'
 import { useEventStream } from '../../lib/useEventStream'
 import NumField from './generate/NumField'
+import PreviewCompare from './generate/PreviewCompare'
 import PreviewXYGrid from './generate/PreviewXYGrid'
 import PromptList from './generate/PromptList'
 import SampleGallery from './generate/SampleGallery'
@@ -42,14 +43,33 @@ export default function GeneratePage() {
   const [xDraft, setXDraft] = useState<XYAxisDraft>({ axis: 'steps', raw: '20, 25, 30', loraIndex: null })
   const [yDraft, setYDraft] = useState<XYAxisDraft | null>(null)
 
+  // 双图对比：选中的 2 个 sample 索引（从 PreviewXYGrid cell click 收集）
+  const [selectedIndices, setSelectedIndices] = useState<number[]>([])
+
   const [busy, setBusy] = useState(false)
   const [currentTask, setCurrentTask] = useState<Task | null>(null)
   const [monitorState, setMonitorState] = useState<MonitorState | null>(null)
   const taskIdRef = useRef<number | null>(null)
   taskIdRef.current = currentTask?.id ?? null
 
-  // XY 完成 + 选 2 张 → compare 模式可用（commit 6 接通；当前占位 false）
-  const compareEnabled = false
+  // 切到 single 时清掉 XY 选择（与 XY 结果绑定，单图模式无意义）
+  useEffect(() => {
+    if (mode === 'single') setSelectedIndices([])
+  }, [mode])
+
+  // 选 2 张 → 自动切到 compare；toggle 已选项；满 2 时新点替换最旧
+  const handleCellClick = (idx: number) => {
+    setSelectedIndices((prev) => {
+      if (prev.includes(idx)) return prev.filter((i) => i !== idx)
+      if (prev.length >= 2) return [prev[1], idx]
+      const next = [...prev, idx]
+      if (next.length === 2) setMode('compare')
+      return next
+    })
+  }
+
+  const compareEnabled =
+    (mode === 'xy' && selectedIndices.length === 2) || mode === 'compare'
 
   const projectLoras = useProjectLoras()
   const samples = monitorState?.samples ?? []
@@ -114,6 +134,7 @@ export default function GeneratePage() {
     setBusy(true)
     setCurrentTask(null)
     setMonitorState(null)
+    setSelectedIndices([])  // 新一轮生成 — 旧选择已失效
     try {
       const body: GenerateRequest = {
         prompts: prompts.filter((p) => p.trim()),
@@ -267,12 +288,23 @@ export default function GeneratePage() {
                 >
                   填写参数后点击「开始生成」
                 </div>
+              ) : mode === 'compare' && selectedIndices.length === 2 ? (
+                <PreviewCompare
+                  samples={samples}
+                  taskId={currentTask.id}
+                  selectedIndices={selectedIndices as [number, number]}
+                  xDraft={xDraft}
+                  yDraft={yDraft}
+                  onBack={() => setMode('xy')}
+                />
               ) : mode === 'xy' ? (
                 <PreviewXYGrid
                   samples={samples}
                   taskId={currentTask.id}
                   xDraft={xDraft}
                   yDraft={yDraft}
+                  onCellClick={handleCellClick}
+                  selectedIndices={selectedIndices}
                 />
               ) : (
                 <SampleGallery samples={samples} taskId={currentTask.id} />
