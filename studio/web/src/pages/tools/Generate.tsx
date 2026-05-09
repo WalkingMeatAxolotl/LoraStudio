@@ -10,13 +10,13 @@ import {
 import PageHeader from '../../components/PageHeader'
 import { useToast } from '../../components/Toast'
 import { useEventStream } from '../../lib/useEventStream'
-import LoraList from './generate/LoraList'
 import NumField from './generate/NumField'
 import PromptList from './generate/PromptList'
 import SampleGallery from './generate/SampleGallery'
+import SidebarLoras from './generate/SidebarLoras'
 import StatusBadge from './generate/StatusBadge'
 import { DEFAULT_NEG } from './generate/types'
-import { useRecentLoras } from './generate/useRecentLoras'
+import { useProjectLoras } from './generate/useProjectLoras'
 
 export default function GeneratePage() {
   const { toast } = useToast()
@@ -38,7 +38,7 @@ export default function GeneratePage() {
   const taskIdRef = useRef<number | null>(null)
   taskIdRef.current = currentTask?.id ?? null
 
-  const recentLoras = useRecentLoras()
+  const projectLoras = useProjectLoras()
   const samples = monitorState?.samples ?? []
 
   // SSE：task_state_changed 触发 task refresh；monitor_state_updated 推 sample 列表。
@@ -147,7 +147,7 @@ export default function GeneratePage() {
 
             <div className="card" style={{ padding: 18 }}>
               <div className="text-md font-semibold mb-3">LoRA</div>
-              <LoraList loras={loras} onChange={setLoras} recent={recentLoras} />
+              <SidebarLoras loras={loras} onChange={setLoras} projectLoras={projectLoras} />
             </div>
 
             <div className="flex flex-col gap-1">
