@@ -540,24 +540,9 @@ export default function SettingsPage() {
       </>)}
 
       {tab === 'testing' && (<>
-        <SettingsSection title="注意力后端">
-          <SettingsField
-            label="测试出图用的 attention"
-            desc="默认 auto：装了什么用什么（flash_attn > xformers > SDPA）。极端场景（debug / 对比）才需要显式指定。安装管理在『训练』tab 的 Flash Attention / xformers section。"
-          >
-            <select
-              className="input"
-              value={draft.generate.attention_backend}
-              onChange={(e) => update('generate', 'attention_backend', e.target.value as 'auto' | 'none' | 'xformers' | 'flash_attn')}
-            >
-              <option value="auto">auto（按装了什么用，推荐）</option>
-              <option value="flash_attn">强制 Flash Attention</option>
-              <option value="xformers">强制 xformers</option>
-              <option value="none">强制无（PyTorch SDPA）</option>
-            </select>
-          </SettingsField>
-        </SettingsSection>
-
+        {/* attention 后端走全局 auto-detect，UI 不暴露切换；想强制覆盖
+            的高级用户改 secrets.json 的 generate.attention_backend
+            （flash_attn / xformers / none）。安装管理在『训练』tab。 */}
         <TaeFluxSection draft={draft} update={update} />
       </>)}
 
@@ -1746,8 +1731,6 @@ function TaeFluxSection({
 }) {
   const [status, setStatus] = useState<TaeFluxStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const { toast } = useToast()
 
   const refresh = useCallback(async () => {
     try {
@@ -1759,19 +1742,6 @@ function TaeFluxSection({
   }, [])
 
   useEffect(() => { void refresh() }, [refresh])
-
-  const install = async () => {
-    setBusy(true)
-    try {
-      const r = await api.installTaeFlux()
-      toast(r.noop ? 'TAEFlux 已就绪' : 'TAEFlux 下载完成', 'success')
-      await refresh()
-    } catch (e) {
-      toast(`下载失败: ${e}`, 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
 
   const n = draft.generate.preview_every_n_steps
   const enabled = n > 0
@@ -1794,33 +1764,22 @@ function TaeFluxSection({
         <div className="rounded-sm border border-subtle bg-sunken p-2 flex items-center gap-2 text-xs">
           <span className="text-fg-tertiary shrink-0">TAEFlux:</span>
           <code className="font-mono text-fg-primary">
-            {status?.available ? '已下载' : '未下载'}
+            {status?.available ? '已下载' : '未下载（首次开启预览自动下）'}
           </code>
           {status?.available && <StatusLabel bg="bg-ok-soft" fg="text-ok" text="就绪" />}
-        </div>
-
-        <p className="text-2xs text-fg-tertiary m-0 leading-relaxed">
-          TAEFlux 是 1.6MB 的 tiny autoencoder，daemon 用它把每步 latent 解码成 256px
-          JPEG 推回前端（类似 ComfyUI 的逐步可见）。<strong>开启预览后首次生成会
-          自动下载</strong>（~1-2s，用 HF mirror 配置）；本按钮供手动重下 / 排查用。
-          单图模式生成时实时显示中间步；XY 矩阵不开预览。
-        </p>
-
-        <div className="flex gap-2">
-          <button
-            onClick={() => void install()}
-            disabled={busy || status?.available}
-            className="btn btn-primary btn-sm"
-          >
-            {busy ? '下载中…' : status?.available ? '已下载' : '下载 TAEFlux'}
-          </button>
           <button
             onClick={() => void refresh()}
-            disabled={busy}
-            className="btn btn-ghost btn-sm"
+            className="btn btn-ghost btn-sm ml-auto"
             title="刷新状态"
           >↻</button>
         </div>
+
+        <p className="text-2xs text-fg-tertiary m-0 leading-relaxed">
+          TAEFlux 是 1.6MB 的 tiny autoencoder，daemon 用它把每步 latent 解码成
+          256px JPEG 推回前端（类似 ComfyUI 的逐步可见）。开启预览（节流 N&gt;0）
+          后首次生成<strong>自动下载</strong>（~1-2s，用 HF mirror 配置）。单图
+          模式生成时实时显示；XY 矩阵不开预览。
+        </p>
 
         <SettingsField label="节流（每 N 步推一次预览）" desc="0 = 关闭中间步预览；推荐 3-5">
           <div className="flex items-center gap-2">
@@ -1832,12 +1791,9 @@ function TaeFluxSection({
               onChange={(e) => update('generate', 'preview_every_n_steps', Number(e.target.value) || 0)}
               className="input"
               style={{ width: 80 }}
-              disabled={!status?.available && n === 0}
             />
             <span className="text-2xs text-fg-tertiary">
-              {!status?.available && n > 0
-                ? '需要先下载 TAEFlux'
-                : enabled ? `每 ${n} 步推一张 256px JPEG（~10KB/步）` : '不推预览（0）'}
+              {enabled ? `每 ${n} 步推一张 256px JPEG（~10KB/步）` : '不推预览（0）'}
             </span>
           </div>
         </SettingsField>
