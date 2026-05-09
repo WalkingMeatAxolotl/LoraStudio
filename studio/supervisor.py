@@ -29,6 +29,11 @@ from typing import Any, Callable, Optional
 from . import db, project_jobs, secrets as _secrets
 from .log_tail import LogTailer, MonitorStatePoller
 from .paths import LOGS_DIR, REPO_ROOT, STUDIO_DATA, STUDIO_DB, USER_PRESETS_DIR
+from .services.inference_daemon import (
+    InferenceDaemon,
+    STATE_STOPPED as _DAEMON_STOPPED,
+    get_daemon,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +217,14 @@ class Supervisor:
         ]
         self._log_seq = itertools.count()
 
+        # commit 9：generate task 走 daemon，不占任何 _Slot；用单独字段跟踪。
+        # daemon 一次只跑一个 task；模型 lazy load + 跨 task 复用。
+        self._daemon_lock = threading.Lock()
+        self._daemon_active_task_id: Optional[int] = None
+        self._daemon_state_poller: Optional[MonitorStatePoller] = None
+        self._daemon_cancel_pending: bool = False
+        self._daemon_listener_registered = False
+
     # ------------------------------------------------------------------ 控制
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -227,6 +240,11 @@ class Supervisor:
         for slot in self._slots:
             if slot.busy:
                 self._terminate_slot(slot)
+        # 关 inference daemon（如果起着）。失败不影响 supervisor 本身退出。
+        try:
+            get_daemon().stop(timeout=timeout)
+        except Exception:
+            logger.exception("inference daemon stop failed")
         if self._thread:
             self._thread.join(timeout=timeout)
 
@@ -260,6 +278,16 @@ class Supervisor:
             if slot is not None:
                 self._signal_terminate_async(slot)
                 return True
+            # daemon 上跑的 generate task：kill daemon 进程让它带着丢 cache 退出，
+            # 下次 generate task 再 lazy spawn。粗暴但可接受（用户主动取消低频）。
+            with self._daemon_lock:
+                if self._daemon_active_task_id == task_id:
+                    self._daemon_cancel_pending = True
+            try:
+                get_daemon().stop(timeout=3.0)
+            except Exception:
+                logger.exception("failed to stop daemon for cancel")
+            return True
         return False
 
     def cancel_job(self, job_id: int) -> bool:
@@ -357,12 +385,35 @@ class Supervisor:
             elif slot.name == SLOT_DATA:
                 self._dispatch_data(slot)
 
-    def _dispatch_train(self, slot: _Slot) -> None:
-        """TRAIN 槽：只跑 db.tasks 表里的训练 task。"""
+        # 3) 派 generate task 给 daemon（独立资源，不占 _Slot）
+        self._dispatch_generate()
+
+    # ---- pending task 选择 ----------------------------------------------------
+    def _next_pending_task_in(self, types: tuple[str, ...]) -> Optional[dict[str, Any]]:
+        """从 pending 队列里找第一条匹配 task_type 的任务。"""
         with db.connection_for(self._db_path) as conn:
-            task = db.next_pending(conn)
+            pending = db.list_tasks(conn, status="pending")
+        for t in pending:
+            tt = t.get("task_type") or "train"
+            if tt in types:
+                return t
+        return None
+
+    def _dispatch_train(self, slot: _Slot) -> None:
+        """TRAIN 槽：跑 train / reg_ai task。generate 走 daemon，不在这。"""
+        task = self._next_pending_task_in(("train", "reg_ai"))
         if task:
             self._spawn_task(slot, task)
+
+    def _dispatch_generate(self) -> None:
+        """commit 9：把 generate pending task 提交给 daemon，daemon idle 时执行。"""
+        with self._daemon_lock:
+            if self._daemon_active_task_id is not None:
+                return
+        task = self._next_pending_task_in(("generate",))
+        if task is None:
+            return
+        self._submit_to_daemon(task)
 
     def _dispatch_data(self, slot: _Slot) -> None:
         """DATA 槽：跑 project_jobs（download / tag / reg_build）。
@@ -551,6 +602,197 @@ class Supervisor:
             jid, slot.name, kind, proc.pid,
         )
 
+    # ----------------------------------------------- daemon 路径 (commit 9)
+    def _submit_to_daemon(self, task: dict[str, Any]) -> None:
+        """把一条 generate task 推给 inference daemon。
+
+        和 _spawn_task 平行的入口；没有 _Slot 概念，daemon 自己管 active task。
+        """
+        import json as _json
+
+        task_id = int(task["id"])
+        cfg_path_str = task.get("config_path")
+        cfg_path = Path(cfg_path_str) if cfg_path_str else None
+        if cfg_path is None or not cfg_path.exists():
+            self._fail_daemon_task(
+                task_id, f"config not found: {cfg_path_str or '<none>'}",
+            )
+            return
+
+        try:
+            cfg = _json.loads(cfg_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            self._fail_daemon_task(task_id, f"failed to read config: {e}")
+            return
+
+        # output_dir：cfg 里给的（enqueue_generate 写到 anima_gen_{tid}）兜底也行
+        output_dir = (
+            cfg.get("output_dir")
+            or str(STUDIO_DATA / "monitors" / f"task_{task_id}")
+        )
+
+        # monitor_state.json：让 daemon 写文件，supervisor 起 poller 推 SSE
+        monitor_state_path = _resolve_monitor_state_path(task)
+        cfg["__monitor_state_file"] = str(monitor_state_path)
+
+        daemon = get_daemon()
+        if daemon.state == _DAEMON_STOPPED:
+            try:
+                daemon.start()
+            except Exception as e:
+                logger.exception("daemon start failed")
+                self._fail_daemon_task(task_id, f"daemon start failed: {e}")
+                return
+
+        if not self._daemon_listener_registered:
+            daemon.add_global_listener(self._on_daemon_global_event)
+            self._daemon_listener_registered = True
+
+        with self._daemon_lock:
+            self._daemon_active_task_id = task_id
+            self._daemon_cancel_pending = False
+
+        # poller：daemon 写 monitor_state.json → SSE monitor_state_updated
+        def _on_state(state: dict[str, Any]) -> None:
+            self._on_event({
+                "type": "monitor_state_updated",
+                "task_id": task_id,
+                "state": state,
+            })
+
+        self._daemon_state_poller = MonitorStatePoller(monitor_state_path, _on_state)
+        self._daemon_state_poller.start()
+
+        with db.connection_for(self._db_path) as conn:
+            db.update_task(
+                conn,
+                task_id,
+                status="running",
+                started_at=time.time(),
+                monitor_state_path=str(monitor_state_path),
+            )
+        self._on_event({
+            "type": "task_state_changed",
+            "task_id": task_id,
+            "status": "running",
+        })
+
+        try:
+            daemon.submit_task(
+                task_id=task_id,
+                config=cfg,
+                output_dir=output_dir,
+                on_event=self._on_daemon_task_event,
+            )
+            logger.info("submitted generate task %d to daemon", task_id)
+        except Exception as e:
+            logger.exception("daemon submit failed")
+            self._on_daemon_task_event({
+                "kind": "error",
+                "task_id": task_id,
+                "message": f"daemon submit failed: {e}",
+            })
+
+    def _on_daemon_task_event(self, event: dict[str, Any]) -> None:
+        """daemon 推回的 task 级事件（image_done / done / error）。
+
+        commit 9：image_done 不动（前端通过 monitor_state.json + poller SSE
+        拿到 sample_path）；commit 10 改成把 PNG bytes 入 server.generate_cache。
+        """
+        kind = event.get("kind")
+        tid = int(event.get("task_id") or 0)
+        if kind in ("started", "image_done", "image_error"):
+            return
+        if kind == "done":
+            self._finalize_daemon_task(tid, status="done")
+        elif kind == "error":
+            self._finalize_daemon_task(
+                tid, status="failed", error_msg=str(event.get("message") or "daemon error"),
+            )
+
+    def _on_daemon_global_event(self, event: dict[str, Any]) -> None:
+        """daemon 进程级事件（loaded / unloaded / stopped）。"""
+        kind = event.get("kind")
+        if kind == "stopped":
+            with self._daemon_lock:
+                tid = self._daemon_active_task_id
+                cancel_pending = self._daemon_cancel_pending
+            if tid is not None:
+                if cancel_pending:
+                    self._finalize_daemon_task(tid, status="canceled")
+                else:
+                    self._finalize_daemon_task(
+                        tid, status="failed",
+                        error_msg=f"daemon exited (rc={event.get('rc')})",
+                    )
+
+    def _finalize_daemon_task(
+        self,
+        task_id: int,
+        *,
+        status: str,
+        error_msg: Optional[str] = None,
+    ) -> None:
+        """daemon 上 task 终态收尾：标 db 状态 + 停 poller + 清 active 标记。
+
+        commit 9 仍调 cleanup_generate_tempdir（兼容现有 tempdir 写盘路径）；
+        commit 10 把磁盘缓存路径删掉后这里也跟着改。
+        """
+        with self._daemon_lock:
+            if self._daemon_active_task_id == task_id:
+                self._daemon_active_task_id = None
+                self._daemon_cancel_pending = False
+            poller = self._daemon_state_poller
+            self._daemon_state_poller = None
+        if poller is not None:
+            try:
+                poller.stop()
+            except Exception:
+                pass
+
+        fields: dict[str, Any] = {
+            "status": status,
+            "finished_at": time.time(),
+            "pid": None,
+        }
+        if error_msg:
+            fields["error_msg"] = error_msg
+        with db.connection_for(self._db_path) as conn:
+            db.update_task(conn, task_id, **fields)
+
+        try:
+            from .services.inference_core import cleanup_generate_tempdir
+            cleanup_generate_tempdir(task_id)
+        except Exception as e:
+            logger.warning("cleanup generate tempdir failed: %s", e)
+
+        self._on_event({
+            "type": "task_state_changed",
+            "task_id": task_id,
+            "status": status,
+        })
+        logger.info("daemon task %d finished: %s", task_id, status)
+
+    def _fail_daemon_task(self, task_id: int, msg: str) -> None:
+        """generate task 在派给 daemon 之前的失败（config 缺失等）。"""
+        with self._daemon_lock:
+            if self._daemon_active_task_id == task_id:
+                self._daemon_active_task_id = None
+        with db.connection_for(self._db_path) as conn:
+            db.update_task(
+                conn, task_id,
+                status="failed",
+                started_at=time.time(),
+                finished_at=time.time(),
+                error_msg=msg,
+            )
+        self._on_event({
+            "type": "task_state_changed",
+            "task_id": task_id,
+            "status": "failed",
+        })
+
+    # ---- 子进程通用 -----------------------------------------------------------
     def _popen(self, cmd: list[str], log_fp: Any) -> subprocess.Popen:
         creationflags = 0
         if os.name == "nt":
