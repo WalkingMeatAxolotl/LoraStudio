@@ -14,6 +14,8 @@ import { useEventStream } from '../../lib/useEventStream'
 import DaemonControls from './generate/DaemonControls'
 import NumField from './generate/NumField'
 import PreviewCompare from './generate/PreviewCompare'
+import PreviewHistoryRail from './generate/PreviewHistoryRail'
+import { makeThumbnail, useGenerateHistory, type HistoryEntry } from './generate/useGenerateHistory'
 import PreviewXYGrid from './generate/PreviewXYGrid'
 import PromptList from './generate/PromptList'
 import SampleGallery from './generate/SampleGallery'
@@ -52,8 +54,12 @@ export default function GeneratePage() {
   const [monitorState, setMonitorState] = useState<MonitorState | null>(null)
   // commit 14：中间步预览（仅 single 模式有意义；XY/对比 cell 多预览意义小）
   const [previewStep, setPreviewStep] = useState<{ step: number; total: number; dataUrl: string } | null>(null)
+  // commit 16：图片历史栏。点击历史项 → 主预览替换为该项封面
+  const history = useGenerateHistory()
+  const [historyOverride, setHistoryOverride] = useState<HistoryEntry | null>(null)
   const taskIdRef = useRef<number | null>(null)
   taskIdRef.current = currentTask?.id ?? null
+  const lastSnapshotRef = useRef<{ taskId: number; mode: ViewMode } | null>(null)
 
   // 切到 single 时清掉 XY 选择（与 XY 结果绑定，单图模式无意义）
   useEffect(() => {
@@ -124,6 +130,62 @@ export default function GeneratePage() {
   useEffect(() => {
     setPreviewStep(null)
   }, [currentTask?.id, mode, samples.length])
+
+  // 切 task / 切 mode 时清掉历史回看 override（让主预览跟着走当前 task）
+  useEffect(() => {
+    setHistoryOverride(null)
+  }, [currentTask?.id, mode])
+
+  // task done + 有样本 → 入库历史。lastSnapshotRef 防同 task 多次触发
+  useEffect(() => {
+    if (!currentTask || currentTask.status !== 'done') return
+    if (samples.length === 0) return
+    const snap = lastSnapshotRef.current
+    if (snap && snap.taskId === currentTask.id && snap.mode === mode) return
+    lastSnapshotRef.current = { taskId: currentTask.id, mode }
+    const taskId = currentTask.id
+    // 选封面 sample
+    let coverIdx = 0
+    if (mode === 'compare' && selectedIndices.length === 2) {
+      coverIdx = selectedIndices[0]
+    }
+    // XY：找 (xi=0, yi=0) 那张；找不到 fallback 0
+    if (mode === 'xy') {
+      const found = samples.findIndex(
+        (s) => s.xy && s.xy.xi === 0 && s.xy.yi === 0
+      )
+      if (found >= 0) coverIdx = found
+    }
+    const cover = samples[coverIdx]
+    if (!cover) return
+    const filename = (cover.path.split(/[\\/]/).pop() ?? '')
+    if (!filename) return
+    // badge
+    let badge = ''
+    if (mode === 'xy') {
+      const xs = new Set(samples.map((s) => s.xy?.xi).filter((x) => x !== undefined))
+      const ys = new Set(samples.map((s) => s.xy?.yi).filter((x) => x !== undefined))
+      badge = `XY ${xs.size}×${ys.size || 1}`
+    } else if (mode === 'compare') {
+      badge = '2×'
+    }
+    const filenames = samples
+      .map((s) => s.path.split(/[\\/]/).pop() ?? '')
+      .filter(Boolean)
+    void makeThumbnail(api.generateSampleUrl(taskId, filename), 256)
+      .then((dataUrl) => history.add({
+        mode,
+        taskId,
+        thumbnailDataUrl: dataUrl,
+        filenames,
+        badge: badge || undefined,
+      }))
+      .catch(() => { /* thumbnail 失败 — 不入库（避免无封面 entry） */ })
+  }, [currentTask, samples, mode, selectedIndices, history])
+
+  const handleHistorySelect = (entry: HistoryEntry) => {
+    setHistoryOverride(entry)
+  }
 
   const handleGenerate = async () => {
     if (!prompts.some((p) => p.trim())) {
@@ -279,7 +341,7 @@ export default function GeneratePage() {
             </div>
           </div>
 
-          {/* 右：结果 */}
+          {/* 中：结果 */}
           <div className="flex-1 min-w-0">
             <div className="card" style={{ padding: 18 }}>
               <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
@@ -298,7 +360,31 @@ export default function GeneratePage() {
                 <ViewModeTabs mode={mode} onModeChange={setMode} compareEnabled={compareEnabled} />
               </div>
 
-              {!currentTask ? (
+              {historyOverride ? (
+                <div className="flex flex-col items-center gap-2">
+                  <img
+                    key={historyOverride.id}
+                    src={api.generateSampleUrl(historyOverride.taskId, historyOverride.filenames[0] ?? '')}
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = historyOverride.thumbnailDataUrl
+                      ;(e.currentTarget as HTMLImageElement).title = '原图已释放，仅缩略图可见'
+                    }}
+                    alt={`history #${historyOverride.taskId}`}
+                    style={{ maxWidth: '100%', maxHeight: 600, borderRadius: 6 }}
+                  />
+                  <div className="text-xs text-fg-tertiary">
+                    历史 #{historyOverride.taskId}
+                    {historyOverride.badge ? ` · ${historyOverride.badge}` : ''}
+                    <button
+                      className="btn btn-ghost text-xs ml-2"
+                      style={{ padding: '2px 8px' }}
+                      onClick={() => setHistoryOverride(null)}
+                    >
+                      返回当前
+                    </button>
+                  </div>
+                </div>
+              ) : !currentTask ? (
                 <div
                   className="grid place-items-center rounded-md border border-subtle bg-sunken text-fg-tertiary text-sm"
                   style={{ minHeight: 260 }}
@@ -339,6 +425,15 @@ export default function GeneratePage() {
               )}
             </div>
           </div>
+
+          {/* 右：图片历史栏（commit 16，按当前 mode 分桶） */}
+          <PreviewHistoryRail
+            entries={history.entries}
+            mode={mode}
+            onSelect={handleHistorySelect}
+            onRemove={(id) => { void history.remove(id) }}
+            onClear={() => { void history.clearByMode(mode) }}
+          />
       </div>
     </div>
   )
