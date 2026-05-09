@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   api,
-  type AttentionBackend,
   type GenerateRequest,
   type LoraEntry,
   type MonitorState,
@@ -44,8 +43,8 @@ export default function GeneratePage() {
   const [seed, setSeed] = useState(0)
   const [seedLocked, setSeedLocked] = useState(false)
   const [loras, setLoras] = useState<LoraEntry[]>([])
-  // commit C: attention backend 移到 Settings；这里先暂留默认值，后续从 secrets 读
-  const attentionBackend: AttentionBackend = 'flash_attn'
+  // commit C: attention backend 已从 Generate 页移到 Settings；server 端
+  // enqueue_generate 会自动从 secrets.generate.attention_backend 注入。
 
   // XY 模式 state（mode='single' 时不参与 enqueue）
   const [xDraft, setXDraft] = useState<XYAxisDraft>({ axis: 'steps', raw: '20, 25, 30', loraIndex: null })
@@ -230,7 +229,7 @@ export default function GeneratePage() {
         seed,
         cfg_scale: cfgScale,
         lora_configs: loras.filter((l) => l.path.trim()),
-        attention_backend: attentionBackend,
+        // attention_backend 不带：server 自动从 secrets.generate.attention_backend 读
         xy_matrix,
       }
       const t = await api.enqueueGenerate(body)

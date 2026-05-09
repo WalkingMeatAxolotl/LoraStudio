@@ -73,7 +73,8 @@ describe('GeneratePage 端到端 smoke', () => {
     expect(body.xy_matrix).toBeNull()
     expect(body.prompts).toEqual(['newest, safe, 1girl, masterpiece, best quality'])
     expect(body.count).toBe(1)
-    expect(body.attention_backend).toBe('flash_attn')
+    // commit C: attention_backend 从 Generate 页移到 Settings；不再随 enqueue 发
+    expect(body.attention_backend).toBeUndefined()
   })
 
   it('mode=xy 默认 X=steps 20,25,30：按钮显示「开始生成 · 3 张」并 enqueue 正确 xy_matrix', async () => {

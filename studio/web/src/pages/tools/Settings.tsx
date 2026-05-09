@@ -98,7 +98,7 @@ const EMPTY: Secrets = {
   },
   models: { root: null, selected_anima: 'preview3-base' },
   queue: { allow_gpu_during_train: false },
-  generate: { preview_every_n_steps: 0 },
+  generate: { preview_every_n_steps: 0, attention_backend: 'flash_attn' },
 }
 
 const textInputClass = 'w-full px-2 py-1 outline-none rounded-sm bg-sunken border border-subtle text-sm text-fg-primary focus:border-accent'
@@ -520,6 +520,23 @@ export default function SettingsPage() {
               WD14 打标推理 onnxruntime-gpu 大约占 ~2 GB；确认训练之外的剩余显存够再打开，否则 OOM
             </span>
           </div>
+        </SettingsField>
+      </SettingsSection>
+
+      <SettingsSection title="测试出图">
+        <SettingsField
+          label="注意力后端"
+          desc="测试出图默认用的 attention 实现。每次生成不必再选；Flash Attention 性能最好（sm_80+），xformers 兼容广，无走 PyTorch SDPA。"
+        >
+          <select
+            className="input"
+            value={draft.generate.attention_backend}
+            onChange={(e) => update('generate', 'attention_backend', e.target.value as 'none' | 'xformers' | 'flash_attn')}
+          >
+            <option value="flash_attn">Flash Attention</option>
+            <option value="xformers">xformers</option>
+            <option value="none">无（PyTorch SDPA）</option>
+          </select>
         </SettingsField>
       </SettingsSection>
 

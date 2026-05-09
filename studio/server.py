@@ -1817,7 +1817,9 @@ class GenerateRequest(BaseModel):
     seed: int = 0
     lora_configs: list[LoraEntry] = []
     mixed_precision: str = "bf16"
-    attention_backend: AttentionBackend = "flash_attn"
+    # commit C：attention_backend 默认从 secrets.generate.attention_backend 读，
+    # 前端 Generate 页不再发这个字段；保留 Optional 兼容老客户端 / 临时覆盖。
+    attention_backend: Optional[AttentionBackend] = None
     # XY 矩阵：None=单图模式；设值时 schema 强制 prompts 单条 + count=1
     xy_matrix: Optional[XYMatrixSpec] = None
 
@@ -1844,6 +1846,16 @@ def enqueue_generate(body: GenerateRequest) -> dict[str, Any]:
     tempdir = generate_tempdir(task_id)
     tempdir.mkdir(parents=True, exist_ok=True)
 
+    # commit C：attention_backend 默认从 secrets 读；body 给值则覆盖（兼容旧客户端）
+    try:
+        gen_cfg = secrets.load().generate
+        attn_default = gen_cfg.attention_backend
+        preview_n = int(gen_cfg.preview_every_n_steps or 0)
+    except Exception:
+        attn_default = "flash_attn"
+        preview_n = 0
+    attn = body.attention_backend or attn_default
+
     cfg = GenerateConfig(
         **model_paths,
         output_dir=str(tempdir),
@@ -1859,16 +1871,13 @@ def enqueue_generate(body: GenerateRequest) -> dict[str, Any]:
         seed=body.seed,
         lora_configs=[lc.model_dump() for lc in body.lora_configs],
         mixed_precision=body.mixed_precision,
-        attention_backend=body.attention_backend,
+        attention_backend=attn,
         xy_matrix=body.xy_matrix.model_dump() if body.xy_matrix else None,
     )
 
     # commit 14：注入 daemon 端用的 preview 节流参数（settings 全局开关）
     cfg_dict = cfg.model_dump()
-    try:
-        cfg_dict["preview_every_n_steps"] = int(secrets.load().generate.preview_every_n_steps or 0)
-    except Exception:
-        cfg_dict["preview_every_n_steps"] = 0
+    cfg_dict["preview_every_n_steps"] = preview_n
 
     cfg_path = tempdir / "config.json"
     cfg_path.write_text(json.dumps(cfg_dict, indent=2, ensure_ascii=False), encoding="utf-8")

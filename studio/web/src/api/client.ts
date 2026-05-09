@@ -243,6 +243,9 @@ export interface GenerateSecretsConfig {
   /** TAEFlux 中间步预览节流。0=关；>0 → daemon 每 N 步推 256px JPEG。
    * 模型缺失时 daemon 静默回退（无预览不影响出图）。 */
   preview_every_n_steps: number
+  /** 注意力后端默认值（design 决策：用户配置一次，不每次出图都改）。
+   * Generate 页 enqueue 自动注入；Settings 训练 tab 切换。 */
+  attention_backend: AttentionBackend
 }
 
 export interface Secrets {
