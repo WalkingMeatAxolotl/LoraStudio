@@ -22,6 +22,7 @@ import io
 import json
 import logging
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -102,16 +103,55 @@ async def _lifespan(app_: FastAPI) -> AsyncIterator[None]:
     """启动绑定 event bus 到当前 loop 并起 supervisor；关闭时停 supervisor。"""
     # 测试出图 tempdir 遗留清扫（防 supervisor crash 泄漏 anima_gen_* 目录）
     from .services.inference_core import cleanup_stale_generate_tempdirs
+    from .services import generate_cache
     cleanup_stale_generate_tempdirs()
 
     bus.attach_loop(asyncio.get_running_loop())
+
+    # commit 11：SSE 客户端断连 + 30s 缓冲后清 generate cache。
+    # 防刷新/短抖动：用户重连（_on_first_subscribe）取消计时器。
+    _disconnect_timer: dict[str, Optional[threading.Timer]] = {"t": None}
+
+    def _on_last_unsubscribe() -> None:
+        # 已有 timer 不重置（多个客户端各自 unsubscribe 时，最后一个才是关键）
+        if _disconnect_timer["t"] is not None:
+            return
+        timer = threading.Timer(30.0, _flush_cache)
+        timer.daemon = True
+        _disconnect_timer["t"] = timer
+        timer.start()
+
+    def _on_first_subscribe() -> None:
+        timer = _disconnect_timer.get("t")
+        if timer is not None:
+            timer.cancel()
+            _disconnect_timer["t"] = None
+
+    def _flush_cache() -> None:
+        n = generate_cache.total_count()
+        if n:
+            generate_cache.clear_all()
+            logger.info("flushed generate cache (%d images) after SSE idle", n)
+        _disconnect_timer["t"] = None
+
+    bus.set_connection_callbacks(
+        on_first_subscribe=_on_first_subscribe,
+        on_last_unsubscribe=_on_last_unsubscribe,
+    )
+
     sup = Supervisor(on_event=bus.publish)
     sup.start()
     app_.state.supervisor = sup
     try:
         yield
     finally:
+        # 取消可能挂着的 disconnect timer，shutdown 阶段不需要再延迟
+        timer = _disconnect_timer.get("t")
+        if timer is not None:
+            timer.cancel()
         sup.stop()
+        # commit 11：lifespan shutdown 清掉所有图 cache（释放内存 + 干净退出）
+        generate_cache.clear_all()
 
 
 app = FastAPI(title="AnimaStudio", version="0.1.0", lifespan=_lifespan)
