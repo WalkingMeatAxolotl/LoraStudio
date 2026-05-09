@@ -76,6 +76,7 @@ export default function App() {
             <Route path="/tools/generate" element={<GeneratePage />} />
             <Route path="/tools/monitor" element={<MonitorPage />} />
             <Route path="/tools/settings" element={<SettingsPage />} />
+            <Route path="/tools/generate" element={<GeneratePage />} />
 
             {/* 旧 → 新 路由兼容（PP0 重构）。下个 minor 版本删除。 */}
             <Route

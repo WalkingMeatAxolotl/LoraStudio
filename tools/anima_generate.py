@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-"""独立图片生成脚本 —— 复用 anima_train.sample_image() 推理链路。
+"""测试出图 — 独立运行推理，复用 anima_train.sample_image 推理链路 + inference_core 多 LoRA。
 
 用法：
-    python anima_generate.py --config generate_config.json [--monitor-state-file state.json]
+    python tools/anima_generate.py --config generate_config.json [--monitor-state-file state.json]
 
 JSON 配置字段见 studio.schema.GenerateConfig。
+
+关键：
+  - 多 LoRA 加载走 studio.services.inference_core.apply_loras —— 每份 LoRA 独立
+    inject 一份 AnimaLycorisAdapter，rank/alpha 从 ss_network_args 读，用
+    multiplier=scale 控制贡献权重。**修复 PR #17 作者的 P0 bug**：硬编码
+    rank=32 + tensor 直加 LoKr 子矩阵会出错图。
+  - 输出图写到 cfg.output_dir（Studio 模式由 server 填 tempfile.gettempdir() /
+    anima_gen_{task_id}，task 结束清掉 —— 用户视角"不保存"）。
+  - 进度通过 train_monitor 推 SSE，前端按 sample_path 拉单图显示。
 """
 from __future__ import annotations
 
@@ -17,16 +26,18 @@ from pathlib import Path
 
 import torch
 
-# 本文件在 tools/；anima_train 在 scripts/，train_monitor 在同一 tools/ 目录
+# anima_train 在 scripts/，train_monitor 在同一 tools/ 目录
 _THIS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _THIS_DIR.parent
-for _p in (_THIS_DIR, _REPO_ROOT / "scripts"):
-    _ps = str(_p)
-    if _ps not in sys.path:
-        sys.path.insert(0, _ps)
+_SCRIPTS_DIR = _REPO_ROOT / "scripts"
+for _p in (_THIS_DIR, _SCRIPTS_DIR, _REPO_ROOT):
+    s = str(_p)
+    if s not in sys.path:
+        sys.path.insert(0, s)
 
-# 复用 anima_train 的模型加载/采样函数（无副作用，main() 在 __name__=='__main__' 里）
-import anima_train as _T
+import anima_train as _T  # noqa: E402
+
+from studio.services.inference_core import LoRASpec, apply_loras  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,54 +48,10 @@ logger = logging.getLogger("anima_generate")
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Anima 独立图片生成")
+    p = argparse.ArgumentParser(description="Anima 测试出图")
     p.add_argument("--config", required=True, help="JSON 配置文件路径")
     p.add_argument("--monitor-state-file", default="", help="进度状态文件路径")
     return p.parse_args()
-
-
-def _read_lora_meta(lora_path: str) -> dict:
-    """从 safetensors metadata 读取 LoRA 训练参数。"""
-    from safetensors import safe_open
-    try:
-        with safe_open(lora_path, framework="pt", device="cpu") as f:
-            meta = f.metadata() or {}
-        return json.loads(meta.get("ss_network_args", "{}"))
-    except Exception:
-        return {}
-
-
-def load_loras(model, lora_configs: list[dict], device: str, dtype) -> None:
-    """加载并合并多个 LoRA（按 scale 加权叠加权重）。"""
-    valid = [c for c in lora_configs if c.get("path") and Path(c["path"]).exists()]
-    if not valid:
-        return
-
-    from safetensors import safe_open
-
-    merged: dict = {}
-    first_meta: dict = {}
-    for lora_cfg in valid:
-        path = lora_cfg["path"]
-        scale = float(lora_cfg.get("scale", 1.0))
-        meta = _read_lora_meta(path)
-        if not first_meta:
-            first_meta = meta
-        with safe_open(path, framework="pt", device="cpu") as f:
-            for k in f.keys():
-                t = f.get_tensor(k).to(device=device, dtype=dtype) * scale
-                merged[k] = merged[k] + t if k in merged else t
-
-    if not merged:
-        return
-
-    algo = first_meta.get("algo", "lokr")
-    factor = int(first_meta.get("factor", 8))
-    from utils.lycoris_adapter import AnimaLycorisAdapter
-    injector = AnimaLycorisAdapter(algo=algo, rank=32, alpha=32.0, factor=factor)
-    injector.inject(model)
-    injector.load_state_dict(merged, strict=False)
-    logger.info(f"已加载 {len(valid)} 个 LoRA")
 
 
 def main() -> None:
@@ -99,9 +66,7 @@ def main() -> None:
         cfg = json.load(f)
 
     output_dir = Path(cfg.get("output_dir", "./generate_output"))
-    sample_subdir: str = cfg.get("sample_subdir", "samples")
-    sample_dir = output_dir / sample_subdir
-    sample_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     prompts: list[str] = cfg.get("prompts") or ["newest, safe, 1girl, masterpiece, best quality"]
     negative_prompt: str = cfg.get("negative_prompt", "")
@@ -115,15 +80,20 @@ def main() -> None:
     base_seed: int = int(cfg.get("seed", 0))
     lora_configs: list[dict] = cfg.get("lora_configs", [])
     mixed_precision: str = cfg.get("mixed_precision", "bf16")
-    xformers: bool = bool(cfg.get("xformers", False))
-    flash_attn: bool = bool(cfg.get("flash_attn", True))
+    # 兼容老 cfg 的 xformers/flash_attn 双 bool（migrate_legacy_attention 默认值与
+    # schema.GenerateConfig.attention_backend 默认 "flash_attn" 一致）
+    from studio.schema import migrate_legacy_attention
+    cfg = migrate_legacy_attention(cfg)
+    backend: str = cfg.get("attention_backend", "flash_attn")
+    use_flash = (backend == "flash_attn")
+    use_xformers = (backend == "xformers")
 
     transformer_path: str = cfg["transformer_path"]
     vae_path: str = cfg["vae_path"]
     text_encoder_path: str = cfg["text_encoder_path"]
     t5_tokenizer_path: str = cfg.get("t5_tokenizer_path", "")
 
-    # monitor state
+    # monitor
     state_file = args.monitor_state_file or str(output_dir / "monitor_state.json")
     _update_monitor = None
     try:
@@ -143,21 +113,18 @@ def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if mixed_precision == "bf16" else torch.float32
 
-    # 路径解析（相对路径相对于 repo root）
+    # 路径解析
     repo_root = _T.find_diffusion_pipe_root()
-    script_dir = Path(__file__).resolve().parent
-    bases = [Path.cwd(), script_dir, repo_root]
+    bases = [Path.cwd(), _THIS_DIR, repo_root]
     transformer_path = _T.resolve_path_best_effort(transformer_path, bases)
     vae_path = _T.resolve_path_best_effort(vae_path, bases)
     text_encoder_path = _T.resolve_path_best_effort(text_encoder_path, bases)
     if t5_tokenizer_path:
         t5_tokenizer_path = _T.resolve_path_best_effort(t5_tokenizer_path, bases)
 
-    # 加载模型
     logger.info("加载 Transformer...")
-    use_flash = flash_attn and not xformers
     model = _T.load_anima_model(transformer_path, device, dtype, repo_root, flash_attn=use_flash)
-    if xformers:
+    if use_xformers:
         _T.enable_xformers(model)
 
     logger.info("加载 VAE...")
@@ -165,11 +132,16 @@ def main() -> None:
 
     logger.info("加载文本编码器...")
     qwen_model, qwen_tok, t5_tok = _T.load_text_encoders(
-        text_encoder_path, t5_tokenizer_path or None, device, dtype
+        text_encoder_path, t5_tokenizer_path or None, device, dtype,
     )
 
-    # 可选 LoRA（支持多个）
-    load_loras(model, lora_configs, device, dtype)
+    # 多 LoRA：每份独立 inject + multiplier=scale。adapters 必须保持引用，否则
+    # 被 GC 后 forward hook 失效（lycoris 通过 closure 持有 network）。
+    specs = [
+        LoRASpec(path=str(lc.get("path", "")), scale=float(lc.get("scale", 1.0)))
+        for lc in lora_configs
+    ]
+    _adapters = apply_loras(model, specs, device, dtype)  # noqa: F841 — 保持引用
 
     model.eval()
 
@@ -200,7 +172,7 @@ def main() -> None:
                     dtype=dtype,
                 )
                 fname = f"gen_{img_idx:04d}_p{pi}_c{ci}_s{seed}.png"
-                out_path = sample_dir / fname
+                out_path = output_dir / fname
                 img.save(out_path)
                 logger.info(f"已保存: {out_path}")
                 if _update_monitor:

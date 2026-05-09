@@ -1,8 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type GenerateRequest, type LoraEntry, type MonitorState, type Task } from '../../api/client'
+import {
+  api,
+  type AttentionBackend,
+  type GenerateRequest,
+  type LoraEntry,
+  type MonitorState,
+  type Task,
+} from '../../api/client'
 import PageHeader from '../../components/PageHeader'
 import PathPicker from '../../components/PathPicker'
 import { useToast } from '../../components/Toast'
+import { useEventStream } from '../../lib/useEventStream'
+
+interface RecentLora {
+  label: string
+  path: string
+  createdAt: number
+}
 
 // ── SampleGallery ─────────────────────────────────────────────────────────────
 
@@ -28,11 +42,10 @@ function SampleGallery({ samples, taskId }: {
 
   const cur = samples[active]
   const filename = cur.path.split(/[\\/]/).pop() ?? cur.path
-  const fullUrl = api.sampleImageUrl(filename, taskId)
+  const fullUrl = api.generateSampleUrl(taskId, filename)
 
   return (
     <div className="flex flex-col gap-2">
-      {/* 缩略图条 */}
       <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: 'thin' }}>
         {samples.map((s, i) => {
           const fn = s.path.split(/[\\/]/).pop() ?? s.path
@@ -44,12 +57,11 @@ function SampleGallery({ samples, taskId }: {
                 i === active ? 'border-accent' : 'border-transparent hover:border-dim'
               }`}
             >
-              <img src={api.sampleImageUrl(fn, taskId, 112)} className="w-full h-full object-cover" alt="" />
+              <img src={api.generateSampleUrl(taskId, fn)} className="w-full h-full object-cover" alt="" />
             </button>
           )
         })}
       </div>
-      {/* 主图 */}
       <a href={fullUrl} target="_blank" rel="noreferrer">
         <img
           src={fullUrl}
@@ -65,11 +77,13 @@ function SampleGallery({ samples, taskId }: {
 
 // ── LoraList ──────────────────────────────────────────────────────────────────
 
-function LoraList({ loras, onChange }: {
+function LoraList({ loras, onChange, recent }: {
   loras: LoraEntry[]
   onChange: (l: LoraEntry[]) => void
+  recent: RecentLora[]
 }) {
   const [pickerIdx, setPickerIdx] = useState<number | null>(null)
+  const [recentOpenIdx, setRecentOpenIdx] = useState<number | null>(null)
 
   const add = () => onChange([...loras, { path: '', scale: 1.0 }])
   const del = (i: number) => onChange(loras.filter((_, idx) => idx !== i))
@@ -92,6 +106,15 @@ function LoraList({ loras, onChange }: {
               value={l.path}
               onChange={(e) => setPath(i, e.target.value)}
             />
+            {recent.length > 0 && (
+              <button
+                onClick={() => setRecentOpenIdx(recentOpenIdx === i ? null : i)}
+                className="btn btn-ghost btn-sm text-xs shrink-0 px-1.5 text-fg-tertiary"
+                title="最近训出的 LoRA"
+              >
+                最近
+              </button>
+            )}
             <button
               onClick={() => setPickerIdx(i)}
               className="btn btn-ghost btn-sm text-xs shrink-0 px-1.5"
@@ -118,6 +141,34 @@ function LoraList({ loras, onChange }: {
       <button onClick={add} className="btn btn-ghost btn-sm self-start text-xs text-fg-tertiary">
         + 添加 LoRA
       </button>
+
+      {/* 最近 LoRA 浮层（按行下方展开） */}
+      {recentOpenIdx !== null && recent.length > 0 && (
+        <div className="rounded-md border border-subtle bg-overlay px-2 py-1.5 flex flex-col gap-px text-sm">
+          <div className="caption pb-1">最近训出的 LoRA</div>
+          {recent.slice(0, 12).map((r) => (
+            <button
+              key={r.path}
+              onClick={() => {
+                setPath(recentOpenIdx, r.path)
+                setRecentOpenIdx(null)
+              }}
+              className="flex items-center gap-2 text-left px-2 py-1 rounded text-xs cursor-pointer border-none bg-transparent text-fg-secondary hover:bg-surface"
+            >
+              <span className="flex-1 truncate">{r.label}</span>
+              <span className="font-mono text-fg-tertiary text-2xs truncate" style={{ maxWidth: 280 }}>
+                {r.path}
+              </span>
+            </button>
+          ))}
+          <button
+            onClick={() => setRecentOpenIdx(null)}
+            className="btn btn-ghost btn-sm self-end text-2xs text-fg-tertiary mt-1"
+          >
+            关闭
+          </button>
+        </div>
+      )}
 
       {pickerIdx !== null && (
         <PathPicker
@@ -222,87 +273,110 @@ export default function GeneratePage() {
   const [count, setCount] = useState(1)
   const [seed, setSeed] = useState(0)
   const [loras, setLoras] = useState<LoraEntry[]>([])
-  const [flashAttn, setFlashAttn] = useState(true)
+  const [attentionBackend, setAttentionBackend] = useState<AttentionBackend>('flash_attn')
 
   const [busy, setBusy] = useState(false)
   const [currentTask, setCurrentTask] = useState<Task | null>(null)
   const [monitorState, setMonitorState] = useState<MonitorState | null>(null)
-  const [history, setHistory] = useState<Task[]>([])
+  const taskIdRef = useRef<number | null>(null)
+  taskIdRef.current = currentTask?.id ?? null
+
+  // 最近训出的 LoRA：listProjects → 并行 getProject → 收集 output_lora_path。
+  // 用户场景下 project 数 < 20，N+1 调用可接受；不在乎实时性，启动加载一次即可。
+  const [recentLoras, setRecentLoras] = useState<RecentLora[]>([])
+  useEffect(() => {
+    void (async () => {
+      try {
+        const projects = await api.listProjects()
+        const details = await Promise.all(
+          projects.map((p) => api.getProject(p.id).catch(() => null))
+        )
+        const items: RecentLora[] = []
+        for (const d of details) {
+          if (!d) continue
+          for (const v of d.versions) {
+            if (v.output_lora_path) {
+              items.push({
+                label: `${d.title} / ${v.label}`,
+                path: v.output_lora_path,
+                createdAt: v.created_at,
+              })
+            }
+          }
+        }
+        items.sort((a, b) => b.createdAt - a.createdAt)
+        setRecentLoras(items)
+      } catch {
+        /* 启动失败不阻塞 — 用户仍可手敲 / PathPicker */
+      }
+    })()
+  }, [])
 
   const samples = monitorState?.samples ?? []
 
-  const loadHistory = async () => {
-    try { setHistory(await api.listGenerateTasks()) } catch { /* ignore */ }
-  }
-
-  useEffect(() => { void loadHistory() }, [])
-
-  // 轮询 monitor state（依赖 taskId 避免 exhaustive-deps 警告）
-  const taskId = currentTask?.id
-  useEffect(() => {
-    if (taskId == null) return
-    let active = true
-
-    const poll = async () => {
-      if (!active) return
-      try {
-        const state = await api.getMonitorState(taskId)
-        if (!active) return
-        setMonitorState(state)
-        const refreshed = await api.getGenerateTask(taskId)
-        if (!active) return
-        setCurrentTask(refreshed)
-        if (['done', 'failed', 'canceled'].includes(refreshed.status)) {
+  // SSE：task_state_changed 触发 task refresh；monitor_state_updated 推 sample 列表。
+  // 不用 setInterval（与 dev 4e31c44 全 SSE 原则一致）。
+  useEventStream((evt) => {
+    const tid = taskIdRef.current
+    if (tid == null) return
+    if (evt.type === 'task_state_changed' && evt.task_id === tid) {
+      void api.getGenerateTask(tid).then((t) => {
+        setCurrentTask(t)
+        if (t.status === 'done' || t.status === 'failed' || t.status === 'canceled') {
           setBusy(false)
-          void loadHistory()
         }
-      } catch { /* ignore */ }
+      }).catch(() => { /* task 已清也走这里 */ })
+    } else if (
+      evt.type === 'monitor_state_updated'
+      && String(evt.task_id) === String(tid)
+      && evt.state
+    ) {
+      setMonitorState(evt.state as MonitorState)
     }
-
-    void poll()
-    const interval = setInterval(poll, 2000)
-    return () => { active = false; clearInterval(interval) }
-  }, [taskId])
-
-  const handleSelect = async (t: Task) => {
-    setCurrentTask(t)
-    setBusy(false)
-    setMonitorState(null)
-    try {
-      const state = await api.getMonitorState(t.id)
-      setMonitorState(state)
-    } catch { /* ignore */ }
-  }
+  })
 
   const handleGenerate = async () => {
-    if (!prompts.some(p => p.trim())) {
-      toast('请输入至少一条提示词', 'error'); return
+    if (!prompts.some((p) => p.trim())) {
+      toast('请输入至少一条提示词', 'error')
+      return
     }
     setBusy(true)
     setCurrentTask(null)
     setMonitorState(null)
     try {
       const body: GenerateRequest = {
-        prompts: prompts.filter(p => p.trim()),
+        prompts: prompts.filter((p) => p.trim()),
         negative_prompt: negPrompt,
         width, height, steps, count, seed,
         cfg_scale: cfgScale,
-        lora_configs: loras.filter(l => l.path.trim()),
-        flash_attn: flashAttn,
+        lora_configs: loras.filter((l) => l.path.trim()),
+        attention_backend: attentionBackend,
       }
-      const task = await api.enqueueGenerate(body)
-      setCurrentTask(task)
-      toast(`生成任务 #${task.id} 已入队`, 'success')
-      void loadHistory()
+      const t = await api.enqueueGenerate(body)
+      setCurrentTask(t)
+      toast(`测试任务 #${t.id} 已入队`, 'success')
     } catch (e) {
       toast(String(e), 'error')
       setBusy(false)
     }
   }
 
+  const handleCancel = async () => {
+    if (!currentTask) return
+    try {
+      await api.cancelTask(currentTask.id)
+      toast(`已请求取消 #${currentTask.id}`, 'info')
+    } catch (e) {
+      toast(String(e), 'error')
+    }
+  }
+
+  const cancelable = currentTask
+    && (currentTask.status === 'pending' || currentTask.status === 'running')
+
   return (
     <div className="fade-in">
-      <PageHeader eyebrow="工具" title="图片生成" subtitle="独立运行推理，复用训练采样逻辑" />
+      <PageHeader eyebrow="工具" title="测试" subtitle="独立运行推理，复用训练采样逻辑（出图不保存，关页面即丢）" />
 
       <div className="p-6 flex flex-col gap-4">
 
@@ -347,43 +421,32 @@ export default function GeneratePage() {
 
             <div className="card" style={{ padding: 18 }}>
               <div className="text-md font-semibold mb-3">LoRA</div>
-              <LoraList loras={loras} onChange={setLoras} />
+              <LoraList loras={loras} onChange={setLoras} recent={recentLoras} />
             </div>
 
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={flashAttn} onChange={(e) => setFlashAttn(e.target.checked)} />
-              <span className="text-fg-secondary">Flash Attention</span>
-            </label>
+            <div className="flex flex-col gap-1">
+              <label className="caption">加速</label>
+              <select
+                className="input"
+                value={attentionBackend}
+                onChange={(e) => setAttentionBackend(e.target.value as AttentionBackend)}
+              >
+                <option value="flash_attn">Flash Attention</option>
+                <option value="xformers">xformers</option>
+                <option value="none">无（PyTorch SDPA）</option>
+              </select>
+            </div>
 
-            <button className="btn btn-primary w-full" onClick={handleGenerate} disabled={busy}>
-              {busy ? '生成中…' : '开始生成'}
-            </button>
-
-            {/* 历史任务 */}
-            {history.length > 0 && (
-              <div className="card" style={{ padding: 14 }}>
-                <div className="caption mb-2">历史任务</div>
-                <div className="flex flex-col gap-px">
-                  {history.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => handleSelect(t)}
-                      className={`flex items-center gap-2 text-left px-2 py-1.5 rounded text-sm cursor-pointer border-none transition-colors ${
-                        currentTask?.id === t.id
-                          ? 'bg-accent-soft text-accent font-medium'
-                          : 'bg-transparent text-fg-secondary hover:bg-overlay'
-                      }`}
-                    >
-                      <StatusBadge status={t.status} />
-                      <span className="font-mono text-xs text-fg-tertiary flex-1">#{t.id}</span>
-                      <span className="text-xs text-fg-disabled shrink-0">
-                        {t.created_at ? new Date(t.created_at * 1000).toLocaleTimeString() : ''}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            <div className="flex gap-2">
+              <button className="btn btn-primary flex-1" onClick={handleGenerate} disabled={busy}>
+                {busy ? '生成中…' : '开始生成'}
+              </button>
+              {cancelable && (
+                <button className="btn btn-ghost" onClick={handleCancel} title="取消当前任务">
+                  取消
+                </button>
+              )}
+            </div>
           </div>
 
           {/* 右：结果 */}

@@ -6,18 +6,11 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-logger = logging.getLogger(__name__)
-_FLASH_ATTN_WARNED = False
-
-from models.cosmos_predict2_modeling import MiniTrainDIT, set_flash_attn_enabled  # noqa: F401
-
-# Flash attn availability is tracked in cosmos_predict2_modeling; re-export for
-# callers that want to enable it via this module.
-try:
-    from models.cosmos_predict2_modeling import _FLASH_ATTN_AVAILABLE, _flash_attn_func  # type: ignore
-except ImportError:
-    _FLASH_ATTN_AVAILABLE = False
-    _flash_attn_func = None
+from models.cosmos_predict2_modeling import (
+    MiniTrainDIT,
+    set_flash_attn_enabled,  # noqa: F401  re-export for callers that import via this module
+    try_flash_attn,
+)
 
 
 def rotate_half(x):
@@ -93,22 +86,17 @@ class LLMAdapterAttention(nn.Module):
             cos, sin = position_embeddings_context
             key_states = apply_rotary_pos_emb(key_states, cos, sin)
 
-        # flash_attn doesn't support arbitrary masks; only use it for the maskless case
-        if _flash_attn_func is not None and mask is None:
-            try:
-                from models.cosmos_predict2_modeling import _USE_FLASH_ATTN
-                if _USE_FLASH_ATTN:
-                    out = _flash_attn_func(
-                        query_states.transpose(1, 2),
-                        key_states.transpose(1, 2),
-                        value_states.transpose(1, 2),
-                    )
-                    return self.o_proj(out.reshape(*input_shape, -1).contiguous())
-            except Exception as _e:
-                global _FLASH_ATTN_WARNED
-                if not _FLASH_ATTN_WARNED:
-                    logger.warning("flash_attn 推理失败，回退 SDPA（后续不再重复提示）: %s", _e)
-                    _FLASH_ATTN_WARNED = True
+        # flash_attn 不支持任意 mask；只在 mask=None（cross-attention 默认情形）时尝试。
+        # 状态判断 + warn-once 由 try_flash_attn 统一处理。
+        if mask is None:
+            out, used = try_flash_attn(
+                query_states.transpose(1, 2),
+                key_states.transpose(1, 2),
+                value_states.transpose(1, 2),
+                "LLMAdapterAttention",
+            )
+            if used:
+                return self.o_proj(out.reshape(*input_shape, -1).contiguous())
 
         attn_output = F.scaled_dot_product_attention(query_states, key_states, value_states, attn_mask=mask)
 

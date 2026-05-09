@@ -451,11 +451,11 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
             </button>
           )}
         </div>
-      ) : (
+      ) : data && !data.output_dir ? (
         <div className="text-fg-tertiary text-sm shrink-0 py-2">
           该任务没有 project / version 关联，找不到输出目录
         </div>
-      )}
+      ) : null}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         {error ? (

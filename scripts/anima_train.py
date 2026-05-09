@@ -25,6 +25,15 @@ import types
 from pathlib import Path
 from typing import Optional
 
+# 脚本搬到 scripts/ 后仍按裸脚本启动（`python scripts/anima_train.py`）。
+# 把仓库根 + tools/ 注入 sys.path，让 `import utils.*` / `import train_monitor` 等
+# 不需要改成包导入。
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+for _p in (_REPO_ROOT, _REPO_ROOT / "tools"):
+    _ps = str(_p)
+    if _ps not in sys.path:
+        sys.path.insert(0, _ps)
+
 # Windows 控制台默认 cp936，logging / print 写中文会 UnicodeEncodeError，
 # 默认 handler 的 errors='backslashreplace' 会把中文转成 \uXXXX 形式 ——
 # 这就是 task log 里看到的「检查 VAE」之类乱码的来源。
@@ -175,10 +184,15 @@ def apply_yaml_config(args, config):
     实现走 studio.argparse_bridge.merge_yaml_into_namespace —— 字段名 / 默认值
     都从 studio.schema.TrainingConfig 这一份单一权威源派生，避免与 parse_args
     脱节。未在 schema 中的 YAML 键会被忽略（拼写错误一目了然）。
+
+    在 merge 前调用 migrate_legacy_attention 兜底老 yaml 的 xformers/flash_attn
+    双 bool —— argparse_bridge 不走 pydantic validator，schema 层的迁移逻辑
+    无法生效，所以这里显式做一次。
     """
     from studio.argparse_bridge import merge_yaml_into_namespace
-    from studio.schema import TrainingConfig
-    return merge_yaml_into_namespace(args, config or {}, TrainingConfig)
+    from studio.schema import TrainingConfig, migrate_legacy_attention
+    config = migrate_legacy_attention(dict(config or {}))
+    return merge_yaml_into_namespace(args, config, TrainingConfig)
 
 
 # Lazy imports after dependency check
@@ -329,10 +343,21 @@ def enable_xformers(model):
 # ============================================================================
 
 def find_diffusion_pipe_root():
-    """查找 diffusion-pipe 模型代码路径"""
-    _here = Path(__file__).resolve().parent  # scripts/
-    _repo = _here.parent                     # repo root
+    """查找 diffusion-pipe 模型代码路径。
+
+    候选顺序（首个命中即返回）：
+      1. 脚本同目录 `diffusion_models/` / `models/`（CLI 直接 cd 进 scripts/ 跑）
+      2. 仓库根 `models/` / `diffusion_models/`（训练脚本搬到 scripts/ 后的 repo
+         layout：repo_root/scripts/anima_train.py → ../models/anima_modeling.py）
+      3. 环境变量 `DIFFUSION_PIPE_ROOT`（覆盖路径用）
+    """
+    script_dir = Path(__file__).parent
+    repo_root = script_dir.parent
     candidates = [
+        script_dir / "diffusion_models",
+        script_dir / "models",
+        repo_root / "models",
+        repo_root / "diffusion_models",
         Path(os.environ.get("DIFFUSION_PIPE_ROOT", "")) if os.environ.get("DIFFUSION_PIPE_ROOT") else None,
         _repo / "models",
         _here / "models",
@@ -510,8 +535,13 @@ def ensure_models_namespace(repo_root):
         sys.path.insert(0, str(repo_root.parent))
 
 
-def load_anima_model(transformer_path, device, dtype, repo_root, flash_attn: bool = True):
-    """加载 Anima transformer 模型"""
+def load_anima_model(transformer_path, device, dtype, repo_root, *, flash_attn: bool = True):
+    """加载 Anima transformer 模型。
+
+    `flash_attn=False` 显式禁用 flash_attn fast path（attention_backend=xformers/none
+    时由 caller 传入），让 caller 完全决定 attention 实现 —— PR #17 那版默认
+    fn(True) 强制开 flash_attn 不让用户关，与 cfg.attention_backend 解耦不彻底。
+    """
     from safetensors import safe_open
 
     ensure_models_namespace(repo_root)
@@ -526,6 +556,20 @@ def load_anima_model(transformer_path, device, dtype, repo_root, flash_attn: boo
         repo_root / "anima_modeling.py",
     )
     Anima = anima_modeling.Anima
+
+    # flash_attn 全局开关：set_flash_attn_enabled 内部检查 _FLASH_ATTN_AVAILABLE，
+    # 未装时返回 False 不抛错（idempotent）。用 caller 传入的 flash_attn 而不是
+    # 强制 True，让 attention_backend=none/xformers 时显式关掉。
+    fn = getattr(cosmos_modeling, "set_flash_attn_enabled", None)
+    if fn is not None:
+        try:
+            if fn(flash_attn):
+                logger.info("flash_attn 启用（训练 + sample 走 fast path）")
+            else:
+                logger.info("flash_attn 关闭（attention_backend=%s 或包未安装）",
+                            "flash_attn" if flash_attn else "non-flash")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("flash_attn 启用失败，继续走 SDPA fallback: %s", exc)
 
     # 从 checkpoint 推断配置
     with safe_open(transformer_path, framework="pt", device="cpu") as f:
@@ -1958,13 +2002,22 @@ def main():
     if reg_data_dir:
         args.reg_data_dir = resolve_path_best_effort(reg_data_dir, bases)
 
-    # 加载模型（flash_attn 在 load 内部自动启用；xformers 互斥，优先 flash_attn）
-    logger.info("加载 Transformer...")
-    use_flash = getattr(args, "flash_attn", True) and not getattr(args, "xformers", False)
-    model = load_anima_model(args.transformer_path, device, dtype, repo_root, flash_attn=use_flash)
+    # 按 attention_backend 决策：xformers / flash_attn / none。
+    # load_anima_model 内部按 flash_attn 参数设 flash_attn 全局开关；
+    # xformers 是 model 层面的额外注入（与 flash_attn 互斥）。
+    backend = getattr(args, "attention_backend", "flash_attn")
+    use_flash = (backend == "flash_attn")
 
-    if getattr(args, "xformers", False):
+    # 加载模型
+    logger.info("加载 Transformer...")
+    model = load_anima_model(
+        args.transformer_path, device, dtype, repo_root, flash_attn=use_flash,
+    )
+
+    if backend == "xformers":
         enable_xformers(model)
+    elif backend == "none":
+        logger.info("attention_backend=none，flash_attn / xformers 都不启用，走 PyTorch SDPA")
 
     logger.info("加载 VAE...")
     vae = load_vae(args.vae_path, device, dtype, repo_root)

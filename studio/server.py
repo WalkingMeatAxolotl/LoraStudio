@@ -1,7 +1,7 @@
 """AnimaStudio 守护服务（FastAPI）。
 
 P1 范围（本文件目前实现）：
-    - GET  /                   302 跳转到 /studio/（旧监控页搬到 /monitor_smooth.html）
+    - GET  /                   302 跳转到 /studio/
     - GET  /api/health         健康检查
     - GET  /api/state          读取 task 的 per-task monitor state
     - GET  /samples/{name}     代理采样图（按 task_id 解析到 version 目录）
@@ -37,7 +37,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from . import (
     browse,
@@ -59,18 +59,19 @@ from .services import (
     flash_attention_setup,
     presets as preset_flow,
     model_downloader,
+    flash_attention_setup,
     onnxruntime_setup,
+    pending_install,
+    torch_setup,
     reg_builder,
     tagedit,
     train_io,
     uploads as uploads_svc,
     version_config,
+    xformers_setup,
 )
 from .services.tagger import VALID_TAGGER_NAMES, get_tagger
 from .paths import (
-    GENERATE_CONFIGS_DIR,
-    GENERATE_JOBS_DIR,
-    LEGACY_MONITOR_HTML,
     LOGS_DIR,
     OUTPUT_DIR,
     REPO_ROOT,
@@ -79,7 +80,15 @@ from .paths import (
     WEB_DIST,
     ensure_dirs,
 )
-from .schema import GROUP_ORDER, GenerateConfig, RegAiConfig, TrainingConfig
+from .schema import (
+    GROUP_ORDER,
+    AttentionBackend,
+    GenerateConfig,
+    LoraEntry,
+    RegAiConfig,
+    TrainingConfig,
+    migrate_legacy_attention,
+)
 from .supervisor import Supervisor
 
 ensure_dirs()
@@ -91,6 +100,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def _lifespan(app_: FastAPI) -> AsyncIterator[None]:
     """启动绑定 event bus 到当前 loop 并起 supervisor；关闭时停 supervisor。"""
+    # 测试出图 tempdir 遗留清扫（防 supervisor crash 泄漏 anima_gen_* 目录）
+    from .services.inference_core import cleanup_stale_generate_tempdirs
+    cleanup_stale_generate_tempdirs()
+
     bus.attach_loop(asyncio.get_running_loop())
     sup = Supervisor(on_event=bus.publish)
     sup.start()
@@ -1192,22 +1205,66 @@ def wd14_install(body: WD14InstallRequest) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# /api/flash-attention
-# ---------------------------------------------------------------------------
+# PyTorch 运行时 / 重装（PR-S2）-------------------------------------------
+
+
+@app.get("/api/torch/status")
+def torch_status() -> dict[str, Any]:
+    """返回 torch 当前状态 + 驱动检测 + 推荐 cu tag + 误装诊断 flag。
+
+    UI 用 `is_cpu_with_gpu` 决定是否显著提示「检测到 GPU 但装的是 CPU 版」。
+    `is_cuda_build_unavailable` 标志驱动 / WSL 问题（不是 pip 能修的，UI 给文档链接）。
+    """
+    return torch_setup.current_status()
+
+
+class TorchReinstallRequest(BaseModel):
+    target: str = "auto"  # "auto" | "cu128" | "cu126" | "cu124" | "cu118" | "cpu"
+
+
+@app.post("/api/torch/reinstall")
+def torch_reinstall(body: TorchReinstallRequest) -> dict[str, Any]:
+    """注册 torch 重装请求；下次 Studio 启动时由 launcher 进程执行。
+
+    为什么不直接装：server 进程已 import 了 torch（flash_attention_setup 等间接拉
+    上的），Windows 上 `torch\\_C.cp311-win_amd64.pyd` 被锁，pip uninstall / replace
+    会撞 [WinError 5] 拒绝访问。改成写 marker → 用户 Ctrl+C 重启 → cli.py 启动
+    时还没 import torch，pip 能正常替换文件。
+
+    返回 `{pending: true, target, tag, message}`，UI 显示「请关闭并重启 Studio」。
+    """
+    try:
+        tag = torch_setup._decide_target_tag(body.target)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    pending_install.register_torch_reinstall(body.target)
+    return {
+        "pending": True,
+        "target": body.target,
+        "tag": tag,
+        "message": "重装请求已注册。请 Ctrl+C 关闭 Studio 后重新运行 studio.bat / studio.sh —— 启动时会自动安装 torch（~3 GB，5-30 分钟），然后正常起 server。",
+    }
+
+
+# FlashAttention runtime（PR-7b）-----------------------------------------
 
 
 class FlashAttnInstallRequest(BaseModel):
-    url: Optional[str] = None
+    url: Optional[str] = None  # None = 自动从 GitHub Releases 选最优
 
 
 @app.get("/api/flash-attention/status")
 def flash_attn_status() -> dict[str, Any]:
-    """返回 flash_attn 安装状态 + 当前环境检测 + GitHub 候选 wheel 列表。"""
+    """返回 flash_attn 安装状态 + 当前环境检测 + GitHub 候选 wheel 列表。
+
+    candidates 里 score / tags 等 UI 不需要的字段已剥掉，只保留 url/name/notes/usable。
+    候选最多取前 20 个，避免 GitHub 历史 release 一大坨刷屏。
+    fetch_error 非 None 表示 GitHub API 请求失败（限流 / 网络 / 国内防火墙）；
+    UI 要展示这条让用户能选择手动粘 URL。
+    """
     status = flash_attention_setup.current_status()
     env = flash_attention_setup.detect_env()
     candidates, fetch_error = flash_attention_setup.find_candidates(env)
-    # 只传 url/name/notes/usable，score/tags 前端不需要
     slim = [
         {"url": c["url"], "name": c["name"], "notes": c["notes"], "usable": c["usable"]}
         for c in candidates[:20]
@@ -1217,13 +1274,41 @@ def flash_attn_status() -> dict[str, Any]:
 
 @app.post("/api/flash-attention/install")
 def flash_attn_install(body: FlashAttnInstallRequest) -> dict[str, Any]:
-    """安装 flash_attn wheel。url=null 则自动从 GitHub Releases 查匹配 wheel。
+    """安装 flash_attn wheel；url=null 走 service 的自动匹配。
 
-    同步 pip install，几分钟级；前端按钮必须带 loading 状态。
-    安装完成后必须重启 Studio（C extension 不能热替换）。
+    同步 pip install（远端 wheel ~150MB），可能几分钟；UI 按钮必须带 loading。
+    flash_attn 是 C extension，装完必须重启 Studio 才能切换；返回 restart_required=True。
     """
     try:
         return flash_attention_setup.install(body.url)
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
+# xformers runtime ------------------------------------------------------
+
+
+@app.get("/api/xformers/status")
+def xformers_status() -> dict[str, Any]:
+    """返回 xformers 安装状态。
+
+    比 flash_attention/status 简洁很多 —— xformers 走 PyPI 直装，不需要 GitHub
+    候选 wheel 列表 / 环境检测细节（status 里 installed/version 已经够用）。
+    """
+    return xformers_setup.current_status()
+
+
+@app.post("/api/xformers/install")
+def xformers_install() -> dict[str, Any]:
+    """pip install xformers --index-url <torch-cu-index>。
+
+    同步执行；远端 wheel 通常几十到几百 MB，几分钟级。装失败抛 500，message
+    含 stderr 末尾（多数失败 = 上游 wheel 没覆盖当前 torch+cu 组合）。
+
+    xformers 是 C extension，装完返回 restart_required=True 让 UI 提示重启。
+    """
+    try:
+        return xformers_setup.install()
     except RuntimeError as exc:
         raise HTTPException(500, str(exc)) from exc
 
@@ -1566,6 +1651,207 @@ def get_reg_caption(pid: int, vid: int, path: str) -> dict[str, Any]:
     if not img.exists() or img.suffix.lower() not in datasets.IMAGE_EXTS:
         raise HTTPException(404, "image not found")
     return {"path": path, "tags": tagedit.read_tags(img)}
+
+
+def _resolve_anima_model_paths() -> dict[str, str]:
+    """解析 base 模型默认路径（先验生成 / 测试出图共用）。
+
+    与 version_config 的 model 字段对齐。用户用别的 base 模型时，
+    在 Settings → 模型 里改 selected_anima 影响这里的 anima 主权重路径。
+    """
+    from .services.model_downloader import models_root
+    root = models_root()
+    return {
+        "transformer_path": str(root / "diffusion_models" / "anima-preview3-base.safetensors"),
+        "vae_path": str(root / "vae" / "qwen_image_vae.safetensors"),
+        "text_encoder_path": str(root / "text_encoders"),
+        "t5_tokenizer_path": str(root / "t5_tokenizer"),
+    }
+
+
+class RegAiRequest(BaseModel):
+    """先验生成请求 —— 不含 lora_configs，先验生成不带 LoRA。"""
+    excluded_tags: list[str] = []
+    negative_prompt: str = ""
+    width: int = 1024
+    height: int = 1024
+    steps: int = 25
+    cfg_scale: float = 4.0
+    sampler_name: str = "er_sde"
+    scheduler: str = "simple"
+    seed: int = 0
+    incremental: bool = False
+    mixed_precision: str = "bf16"
+    attention_backend: AttentionBackend = "flash_attn"
+
+    # 兼容老前端送 xformers / flash_attn 双 bool（自动映射成 attention_backend）
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_attention(cls, data: Any) -> Any:
+        return migrate_legacy_attention(data)
+
+
+@app.post("/api/projects/{pid}/versions/{vid}/reg/generate-prior")
+def reg_generate_prior(pid: int, vid: int, body: RegAiRequest) -> dict[str, Any]:
+    """启动先验生成 task —— base 模型给每张 train 图的 tag 反向出对照图。"""
+    model_paths = _resolve_anima_model_paths()
+    _, _, vdir = _version_dir_or_404(pid, vid)
+    train = vdir / "train"
+    has_image = train.exists() and any(
+        f.is_file() and f.suffix.lower() in datasets.IMAGE_EXTS
+        for f in train.rglob("*")
+    )
+    if not has_image:
+        raise HTTPException(400, "train 还没有图片，请先完成 Step 1（下载）或 Step 2（筛选）")
+
+    rdir = _reg_dir(vdir)
+    rdir.mkdir(parents=True, exist_ok=True)
+
+    cfg = RegAiConfig(
+        **model_paths,
+        train_dir=str(train),
+        reg_dir=str(rdir),
+        excluded_tags=list(body.excluded_tags),
+        negative_prompt=body.negative_prompt,
+        width=body.width,
+        height=body.height,
+        steps=body.steps,
+        cfg_scale=body.cfg_scale,
+        sampler_name=body.sampler_name,
+        scheduler=body.scheduler,
+        seed=body.seed,
+        incremental=body.incremental,
+        mixed_precision=body.mixed_precision,
+        attention_backend=body.attention_backend,
+    )
+
+    cfg_dir = STUDIO_DATA / "reg_ai_configs"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+
+    with db.connection_for() as conn:
+        task_id = db.create_task(
+            conn, name=f"reg-prior p{pid}v{vid}", config_name="reg_ai", priority=0,
+        )
+        db.update_task(
+            conn, task_id, task_type="reg_ai", project_id=pid, version_id=vid,
+        )
+
+    cfg_path = cfg_dir / f"reg_ai_{task_id}.json"
+    cfg_path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+
+    with db.connection_for() as conn:
+        db.update_task(conn, task_id, config_path=str(cfg_path))
+        task = db.get_task(conn, task_id)
+
+    bus.publish({"type": "task_state_changed", "task_id": task_id, "status": "pending"})
+    return task or {"id": task_id}
+
+
+@app.get("/api/projects/{pid}/versions/{vid}/reg/generate-prior/{task_id}")
+def get_reg_prior_task(pid: int, vid: int, task_id: int) -> dict[str, Any]:
+    with db.connection_for() as conn:
+        task = db.get_task(conn, task_id)
+    if not task or task.get("task_type") != "reg_ai":
+        raise HTTPException(404)
+    return task
+
+
+# ---------------------------------------------------------------------------
+# /api/generate — 测试出图（独立工具页，多 LoRA + multi-prompt）
+# ---------------------------------------------------------------------------
+#
+# 用户决策："测试" 出图不保存：图写到 tempfile.gettempdir() / anima_gen_{task_id}/，
+# task 结束 supervisor 自动清；启动时扫清遗留。前端没有 history 列表 —— 看完即丢。
+
+
+class GenerateRequest(BaseModel):
+    prompts: list[str] = ["newest, safe, 1girl, masterpiece, best quality"]
+    negative_prompt: str = ""
+    width: int = 1024
+    height: int = 1024
+    steps: int = 25
+    cfg_scale: float = 4.0
+    sampler_name: str = "er_sde"
+    scheduler: str = "simple"
+    count: int = 1
+    seed: int = 0
+    lora_configs: list[LoraEntry] = []
+    mixed_precision: str = "bf16"
+    attention_backend: AttentionBackend = "flash_attn"
+
+    # 兼容老前端送 xformers / flash_attn 双 bool（自动映射成 attention_backend）
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_attention(cls, data: Any) -> Any:
+        return migrate_legacy_attention(data)
+
+
+@app.post("/api/generate")
+def enqueue_generate(body: GenerateRequest) -> dict[str, Any]:
+    """启动测试出图 task。"""
+    from .services.inference_core import generate_tempdir
+
+    model_paths = _resolve_anima_model_paths()
+
+    with db.connection_for() as conn:
+        task_id = db.create_task(
+            conn, name="generate", config_name="generate", priority=0,
+        )
+        db.update_task(conn, task_id, task_type="generate")
+
+    tempdir = generate_tempdir(task_id)
+    tempdir.mkdir(parents=True, exist_ok=True)
+
+    cfg = GenerateConfig(
+        **model_paths,
+        output_dir=str(tempdir),
+        prompts=body.prompts,
+        negative_prompt=body.negative_prompt,
+        width=body.width,
+        height=body.height,
+        steps=body.steps,
+        cfg_scale=body.cfg_scale,
+        sampler_name=body.sampler_name,
+        scheduler=body.scheduler,
+        count=body.count,
+        seed=body.seed,
+        lora_configs=[lc.model_dump() for lc in body.lora_configs],
+        mixed_precision=body.mixed_precision,
+        attention_backend=body.attention_backend,
+    )
+
+    cfg_path = tempdir / "config.json"
+    cfg_path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+
+    with db.connection_for() as conn:
+        db.update_task(conn, task_id, config_path=str(cfg_path))
+        task = db.get_task(conn, task_id)
+
+    bus.publish({"type": "task_state_changed", "task_id": task_id, "status": "pending"})
+    return task or {"id": task_id}
+
+
+@app.get("/api/generate/{task_id}")
+def get_generate_task(task_id: int) -> dict[str, Any]:
+    """查询测试 task 状态。"""
+    with db.connection_for() as conn:
+        task = db.get_task(conn, task_id)
+    if not task or task.get("task_type") != "generate":
+        raise HTTPException(404)
+    return task
+
+
+@app.get("/api/generate/{task_id}/sample/{filename}")
+def get_generate_sample(task_id: int, filename: str) -> Any:
+    """读 generate task 的输出图（task 还在跑或刚结束时；清理后 404）。"""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(400, "invalid filename")
+    from fastapi.responses import FileResponse
+    from .services.inference_core import generate_tempdir
+    img = generate_tempdir(task_id) / filename
+    if not img.exists() or img.suffix.lower() not in datasets.IMAGE_EXTS:
+        raise HTTPException(404)
+    return FileResponse(str(img))
 
 
 @app.delete("/api/projects/{pid}/versions/{vid}/reg")
@@ -2497,7 +2783,6 @@ if WEB_DIST.exists():
 def root() -> RedirectResponse | JSONResponse:
     """根路径 302 跳转到 React 应用 `/studio/`。
 
-    旧监控页仍可通过 `/monitor_smooth.html` 直达（QueueMonitor iframe 用）。
     若前端尚未构建（dist 缺失），返回 JSON 提示。"""
     if WEB_DIST.exists():
         return RedirectResponse(url="/studio/", status_code=302)
@@ -2507,14 +2792,6 @@ def root() -> RedirectResponse | JSONResponse:
             "(npm install && npm run build) to enable the new UI."
         }
     )
-
-
-@app.get("/monitor_smooth.html", response_model=None, include_in_schema=False)
-def monitor_smooth_html() -> FileResponse:
-    """直接路径访问 monitor_smooth.html（PP6.1：QueueMonitor iframe 走这里）。"""
-    if not LEGACY_MONITOR_HTML.exists():
-        raise HTTPException(404, "monitor_smooth.html not found")
-    return FileResponse(LEGACY_MONITOR_HTML)
 
 
 # ---------------------------------------------------------------------------

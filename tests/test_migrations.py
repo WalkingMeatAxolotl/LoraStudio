@@ -40,6 +40,24 @@ def test_v2_creates_tables_and_extends_tasks(tmp_path: Path) -> None:
         assert {"project_id", "version_id"} <= cols
 
 
+def test_v5_adds_task_type_column(tmp_path: Path) -> None:
+    """v5: tasks 加 task_type 列，旧 task 自动 fallback 到 'train'。"""
+    dbfile = tmp_path / "fresh.db"
+    db.init_db(dbfile)
+    with _open(dbfile) as c:
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(tasks)")}
+        assert "task_type" in cols
+        # 新建一个 task，default 应该是 'train'
+        c.execute(
+            "INSERT INTO tasks(name, config_name, status, priority, created_at) "
+            "VALUES (?, ?, 'pending', 0, ?)",
+            ("legacy_task", "cfg", time.time()),
+        )
+        c.commit()
+        row = c.execute("SELECT task_type FROM tasks").fetchone()
+        assert row["task_type"] == "train"
+
+
 def test_v1_db_upgrades_in_place_preserving_tasks(tmp_path: Path) -> None:
     """模拟 PP0 之前留下来的 v1 库（只有 tasks 表）：执行 init_db 应升到 v2 且数据不丢。"""
     dbfile = tmp_path / "legacy.db"
