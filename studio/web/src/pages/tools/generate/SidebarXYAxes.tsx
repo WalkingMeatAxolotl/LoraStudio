@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, type LoraCkpt, type LoraEntry, type XYAxisType } from '../../../api/client'
-import SidebarLoras from './SidebarLoras'
+import PathPicker from '../../../components/PathPicker'
+import InlineLoraPicker from './InlineLoraPicker'
 import type { ProjectLora } from './types'
 import { AXIS_LABELS, AXIS_VALUE_TYPE, REQUIRES_LORA_INDEX, type XYAxisDraft } from './xy'
 
-// LoRA 和权重最常用，放最上；steps / cfg 是次要数值轴
 const ALL_AXES: XYAxisType[] = ['lora_ckpt', 'lora_scale', 'cfg_scale', 'steps']
 
 function placeholderFor(axis: XYAxisType): string {
@@ -13,11 +13,11 @@ function placeholderFor(axis: XYAxisType): string {
   return '0.6, 0.8, 1.0'
 }
 
-/** 把 raw 字符串解析成 path 数组。"/a.safetensors, /b.safetensors" → ["/a.safetensors", "/b.safetensors"] */
 function parsePathList(raw: string): string[] {
   return raw.split(',').map((s) => s.trim()).filter(Boolean)
 }
 
+/** axis=lora_ckpt 时绑定的 LoRA 在该 axis 内显示 + ckpt 多选区。 */
 function CkptMultiPicker({
   versionId, projectId, raw, onChange,
 }: {
@@ -32,10 +32,7 @@ function CkptMultiPicker({
     let cancelled = false
     setLoaded(false)
     void api.listVersionLoraCkpts(projectId, versionId)
-      .then((items) => {
-        if (cancelled) return
-        setCkpts(items); setLoaded(true)
-      })
+      .then((items) => { if (!cancelled) { setCkpts(items); setLoaded(true) } })
       .catch(() => { if (!cancelled) { setCkpts([]); setLoaded(true) } })
     return () => { cancelled = true }
   }, [projectId, versionId])
@@ -47,11 +44,9 @@ function CkptMultiPicker({
     onChange(Array.from(next).join(', '))
   }
 
-  if (!loaded) {
-    return <div className="text-2xs text-fg-tertiary">加载 ckpt…</div>
-  }
+  if (!loaded) return <div className="text-2xs text-fg-tertiary">加载 ckpt…</div>
   if (ckpts.length === 0) {
-    return <div className="text-2xs text-fg-tertiary">该 LoRA 没扫到 ckpt 文件（output/ 下需有 *.safetensors）</div>
+    return <div className="text-2xs text-fg-tertiary">该 LoRA 没扫到 ckpt 文件（output/ 下需 *.safetensors）</div>
   }
   return (
     <div className="flex flex-wrap gap-1">
@@ -64,9 +59,7 @@ function CkptMultiPicker({
             onClick={() => toggle(c.path)}
             className="font-mono"
             style={{
-              fontSize: 11,
-              padding: '3px 9px',
-              borderRadius: 999,
+              fontSize: 11, padding: '3px 9px', borderRadius: 999,
               border: on ? '1px solid transparent' : '1px solid var(--border-subtle)',
               background: on ? 'var(--accent-soft)' : 'var(--bg-sunken)',
               color: on ? 'var(--accent)' : 'var(--fg-secondary)',
@@ -82,21 +75,127 @@ function CkptMultiPicker({
   )
 }
 
+/** Axis 内嵌 LoRA picker：选完一个 LoRA 后加进 loras + 设 axis.lora_index。 */
+function AxisLoraPicker({
+  loras, onLorasChange, projectLoras,
+  loraIndex, onLoraIndexChange,
+}: {
+  loras: LoraEntry[]
+  onLorasChange: (l: LoraEntry[]) => void
+  projectLoras: ProjectLora[]
+  loraIndex: number | null
+  onLoraIndexChange: (i: number | null) => void
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [externalOpen, setExternalOpen] = useState(false)
+  const selectedPaths = useMemo(() => new Set(loras.map((l) => l.path)), [loras])
+
+  const addAndBind = (path: string, projectId: number | null, versionId: number | null) => {
+    const idx = loras.findIndex((l) => l.path === path)
+    if (idx >= 0) {
+      onLoraIndexChange(idx)
+    } else {
+      onLorasChange([
+        ...loras,
+        { path, scale: 1.0, project_id: projectId, version_id: versionId },
+      ])
+      onLoraIndexChange(loras.length)
+    }
+    setPickerOpen(false)
+    setExternalOpen(false)
+  }
+
+  // 已绑 LoRA：show summary + 「换 LoRA」按钮
+  const bound = loraIndex !== null && loraIndex < loras.length ? loras[loraIndex] : null
+  if (bound && !pickerOpen) {
+    const matched = projectLoras.find((p) => p.versionId === bound.version_id)
+    const label = matched
+      ? `${matched.projectTitle} / ${matched.versionLabel}`
+      : (bound.path.split(/[\\/]/).pop() ?? bound.path)
+    return (
+      <div
+        className="flex items-center gap-2 text-xs"
+        style={{
+          padding: '6px 10px',
+          borderRadius: 'var(--r-md)',
+          border: '1px solid var(--border-subtle)',
+          background: 'var(--bg-elevated)',
+        }}
+      >
+        <span className="text-fg-tertiary shrink-0">绑定:</span>
+        <span className="font-medium truncate flex-1" title={bound.path}>{label}</span>
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          className="btn btn-ghost btn-sm font-mono text-2xs shrink-0"
+          style={{ padding: '2px 8px' }}
+        >
+          换 LoRA
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {!pickerOpen ? (
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          className="font-mono inline-flex items-center gap-1.5 self-start"
+          style={{
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-sunken)',
+            borderRadius: 'var(--r-md)',
+            padding: '6px 10px',
+            fontSize: 12,
+            color: 'var(--fg-tertiary)',
+            cursor: 'pointer',
+          }}
+        >
+          + 添加 LoRA
+        </button>
+      ) : (
+        <InlineLoraPicker
+          projectLoras={projectLoras}
+          selectedPaths={selectedPaths}
+          onPick={(path) => {
+            const matched = projectLoras.find((p) => p.path === path)
+            addAndBind(path, matched?.projectId ?? null, matched?.versionId ?? null)
+          }}
+          onClose={() => setPickerOpen(false)}
+          onPickExternal={() => setExternalOpen(true)}
+        />
+      )}
+      {externalOpen && (
+        <PathPicker
+          dirOnly={false}
+          onPick={(p) => addAndBind(p, null, null)}
+          onClose={() => setExternalOpen(false)}
+        />
+      )}
+    </>
+  )
+}
+
 function AxisCard({
-  label, draft, onChange, onRemove, loras,
+  label, draft, onChange, onRemove, loras, onLorasChange, projectLoras,
 }: {
   label: 'X' | 'Y'
   draft: XYAxisDraft
   onChange: (d: XYAxisDraft) => void
   onRemove?: () => void
   loras: LoraEntry[]
+  onLorasChange: (l: LoraEntry[]) => void
+  projectLoras: ProjectLora[]
 }) {
   const needsLora = REQUIRES_LORA_INDEX.has(draft.axis)
   const isCkpt = draft.axis === 'lora_ckpt'
-  const boundLora =
+  const bound =
     draft.loraIndex !== null && draft.loraIndex < loras.length
       ? loras[draft.loraIndex]
       : null
+
   return (
     <div className="bg-sunken border border-subtle rounded-md px-2.5 py-2 flex flex-col gap-2">
       <div className="flex items-center gap-2">
@@ -132,20 +231,29 @@ function AxisCard({
         )}
       </div>
 
-      {/* lora_ckpt 用 checkbox 多选；其他轴用 text input */}
+      {/* 需绑 LoRA 的轴：内嵌 LoRA picker 选 / 切 */}
+      {needsLora && (
+        <AxisLoraPicker
+          loras={loras}
+          onLorasChange={onLorasChange}
+          projectLoras={projectLoras}
+          loraIndex={draft.loraIndex}
+          onLoraIndexChange={(i) => onChange({ ...draft, loraIndex: i })}
+        />
+      )}
+
+      {/* 数值轴（steps/cfg）& lora_scale：text input；lora_ckpt：ckpt 多选 */}
       {isCkpt ? (
-        boundLora && boundLora.version_id && boundLora.project_id ? (
+        bound && bound.version_id && bound.project_id ? (
           <CkptMultiPicker
-            projectId={boundLora.project_id}
-            versionId={boundLora.version_id}
+            projectId={bound.project_id}
+            versionId={bound.version_id}
             raw={draft.raw}
             onChange={(raw) => onChange({ ...draft, raw })}
           />
-        ) : (
-          <div className="text-2xs text-fg-tertiary">
-            选一个绑定到项目的 LoRA（外部文件不行）
-          </div>
-        )
+        ) : bound ? (
+          <div className="text-2xs text-fg-tertiary">外部文件 LoRA 没法列 ckpt（要 picker 选项目里的）</div>
+        ) : null
       ) : (
         <input
           type="text"
@@ -155,35 +263,16 @@ function AxisCard({
           onChange={(e) => onChange({ ...draft, raw: e.target.value })}
         />
       )}
-
-      {needsLora && (
-        <select
-          className="input text-xs"
-          value={draft.loraIndex ?? ''}
-          onChange={(e) =>
-            onChange({ ...draft, loraIndex: e.target.value === '' ? null : Number(e.target.value) })
-          }
-        >
-          {loras.length === 0 ? (
-            <option value="">— 先在上方添加一个 LoRA —</option>
-          ) : (
-            loras.map((l, i) => (
-              <option key={i} value={i}>
-                LoRA #{i + 1} · {l.path.split(/[\\/]/).pop() ?? l.path}
-              </option>
-            ))
-          )}
-        </select>
-      )}
     </div>
   )
 }
 
 /** Sidebar 的 XY 轴配置区（仅 mode=xy 时渲染）。
  *
- * mode=xy 下独立 LoRA 卡片不渲染（用户决策）；LoRA 选择直接进 XY 卡片
- * 顶部，跟轴配置同框。LoRA 是 lora / 权重 轴的源数据，没 LoRA 这俩轴
- * 就空跑。
+ * mode=xy 下整页 LoRA 选择都收纳在这里，无独立 LoRA 卡片：
+ *   - axis 选项：LoRA / 权重 / CFG / 步数（前两个最常用）
+ *   - axis=LoRA / 权重 时，轴卡片内嵌 LoRA picker（+ 添加 LoRA）
+ *   - 添加完会 mutate Generate.tsx 的 loras state（共用 lora_configs）
  */
 export default function SidebarXYAxes({
   xDraft, yDraft, onXChange, onYChange,
@@ -192,7 +281,6 @@ export default function SidebarXYAxes({
   xDraft: XYAxisDraft
   yDraft: XYAxisDraft | null
   onXChange: (d: XYAxisDraft) => void
-  /** null = 移除 Y 轴退化到单轴 N×1；非 null = 添加/修改 Y */
   onYChange: (d: XYAxisDraft | null) => void
   loras: LoraEntry[]
   onLorasChange: (l: LoraEntry[]) => void
@@ -200,28 +288,20 @@ export default function SidebarXYAxes({
 }) {
   return (
     <div className="card" style={{ padding: 18 }}>
-      {/* 顶部：LoRA 选择（替代独立 LoRA 卡片） */}
-      <div className="flex items-baseline justify-between mb-3">
-        <div className="text-md font-semibold">LoRA</div>
-        <span className="text-xs text-fg-tertiary">XY 轴用，多选项目/版本</span>
-      </div>
-      <SidebarLoras loras={loras} onChange={onLorasChange} projectLoras={projectLoras} />
-
-      {/* 分隔 + XY 轴 */}
-      <div className="my-4" style={{ height: 1, background: 'var(--border-subtle)' }} />
-
       <div className="flex items-center justify-between mb-3">
         <div className="text-md font-semibold">XY 轴</div>
       </div>
       <div className="flex flex-col gap-2">
-        <AxisCard label="X" draft={xDraft} onChange={onXChange} loras={loras} />
+        <AxisCard
+          label="X" draft={xDraft} onChange={onXChange}
+          loras={loras} onLorasChange={onLorasChange} projectLoras={projectLoras}
+        />
         {yDraft ? (
           <AxisCard
-            label="Y"
-            draft={yDraft}
-            onChange={onYChange}
+            label="Y" draft={yDraft}
+            onChange={(d) => onYChange(d)}
             onRemove={() => onYChange(null)}
-            loras={loras}
+            loras={loras} onLorasChange={onLorasChange} projectLoras={projectLoras}
           />
         ) : (
           <button
