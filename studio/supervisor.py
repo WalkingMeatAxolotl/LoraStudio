@@ -400,10 +400,18 @@ class Supervisor:
         return None
 
     def _dispatch_train(self, slot: _Slot) -> None:
-        """TRAIN 槽：跑 train / reg_ai task。generate 走 daemon，不在这。"""
+        """TRAIN 槽：跑 train / reg_ai task。generate 走 daemon，不在这。
+
+        commit 12：派活前先要求 daemon 让位（unload 释放 VRAM），除非
+        secrets.queue.allow_gpu_during_train=true。daemon 在跑 generate
+        时不强中断，等下次 tick 它跑完再卸载。
+        """
         task = self._next_pending_task_in(("train", "reg_ai"))
-        if task:
-            self._spawn_task(slot, task)
+        if task is None:
+            return
+        if self._maybe_yield_daemon():
+            return  # daemon 还占 GPU，等下次 tick 派
+        self._spawn_task(slot, task)
 
     def _dispatch_generate(self) -> None:
         """commit 9：把 generate pending task 提交给 daemon，daemon idle 时执行。"""
@@ -415,28 +423,51 @@ class Supervisor:
             return
         self._submit_to_daemon(task)
 
+    def _maybe_yield_daemon(self) -> bool:
+        """commit 12：daemon 占着 GPU 且不许并行 → 触发 unload，调用方应跳过这次派发。
+
+        返回值：
+          - True：daemon 还占着 VRAM（在跑 generate 或刚发了 unload 请求），
+                  调用方不应该派 GPU 任务，等下次 tick 重检
+          - False：daemon 没占 GPU（未起 / 已 unloaded / 用户允许并行）
+                  调用方可立刻派
+        """
+        daemon = get_daemon()
+        if not daemon.is_model_loaded:
+            return False
+        if self._allow_gpu_during_train():
+            return False
+        if daemon.is_busy:
+            # 用户主动触发的 generate 不强中断；等它跑完
+            return True
+        try:
+            daemon.request_unload()
+            logger.info("requested daemon unload to yield GPU")
+        except Exception:
+            logger.exception("daemon unload request failed")
+        return True
+
     def _dispatch_data(self, slot: _Slot) -> None:
         """DATA 槽：跑 project_jobs（download / tag / reg_build）。
 
         - download 永远 OK（IO-only，不抢 GPU）
-        - tag / reg_build 是 GPU-bound：训练正在跑且未开
-          `secrets.queue.allow_gpu_during_train` → 跳过这条 job，等训练结束
-          再拉。下一条非 GPU job 仍可派。
+        - tag / reg_build 是 GPU-bound：
+            * 训练正在跑且未开 `allow_gpu_during_train` → 跳过
+            * daemon 占着 VRAM 且未开 `allow_gpu_during_train` → 触发 daemon
+              让位（_maybe_yield_daemon），跳过等下次 tick
         """
         train_busy = self._train_busy()
         allow_gpu = self._allow_gpu_during_train()
-        # 简单实现：取 next_pending 那一条；若 GPU-bound 且训练在跑，留着不动
-        # （让它仍然 pending），其他 IO-only job 会在下一次 tick 通过 next_pending
-        # 重新被取到（next_pending 按 id ASC，下一次同样会指向这条；所以需要
-        # 跳过）。这里用 list_jobs 选第一条**可跑**的。
         with db.connection_for(self._db_path) as conn:
             pending = project_jobs.list_jobs(conn, status="pending")
-        # list_jobs 默认 ORDER BY id DESC；按入队顺序应该 ASC
         pending.sort(key=lambda j: j["id"])
         for job in pending:
             kind = job["kind"]
-            if kind in GPU_BOUND_JOB_KINDS and train_busy and not allow_gpu:
-                continue  # 训练中暂缓 GPU job
+            if kind in GPU_BOUND_JOB_KINDS:
+                if train_busy and not allow_gpu:
+                    continue
+                if self._maybe_yield_daemon():
+                    continue  # daemon 还占 GPU，等
             self._spawn_job(slot, job)
             return
 

@@ -84,6 +84,7 @@ class InferenceDaemon:
         self._lock = threading.RLock()
         self._proc: Optional[subprocess.Popen] = None
         self._state: str = STATE_STOPPED
+        self._model_loaded: bool = False
         self._reader_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._active: Optional[_ActiveTask] = None
@@ -105,6 +106,12 @@ class InferenceDaemon:
     def is_alive(self) -> bool:
         with self._lock:
             return self._proc is not None and self._proc.poll() is None
+
+    @property
+    def is_model_loaded(self) -> bool:
+        """模型是否在 VRAM 里（commit 12 GPU 让位判定用）。"""
+        with self._lock:
+            return self._model_loaded
 
     def add_global_listener(self, cb: EventCallback) -> None:
         with self._lock:
@@ -207,6 +214,7 @@ class InferenceDaemon:
         with self._lock:
             self._proc = None
             self._state = STATE_STOPPED
+            self._model_loaded = False
             self._active = None
 
     # ----------------------------------------------------------------- 提交
@@ -315,10 +323,12 @@ class InferenceDaemon:
             with self._lock:
                 if kind == "ready":
                     self._state = STATE_IDLE
+                    self._model_loaded = False
                 elif kind == "loaded":
-                    pass  # 已在 IDLE，不变
+                    self._model_loaded = True  # 状态保持 IDLE
                 elif kind == "unloaded":
                     self._state = STATE_IDLE
+                    self._model_loaded = False
             for cb in list(self._global_listeners):
                 try:
                     cb(msg)
@@ -363,6 +373,7 @@ class InferenceDaemon:
             self._proc = None
             prev_state = self._state
             self._state = STATE_STOPPED
+            self._model_loaded = False
             active = self._active
             self._active = None
             listeners = list(self._global_listeners)
