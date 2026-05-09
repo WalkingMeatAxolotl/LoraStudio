@@ -11,10 +11,12 @@ import {
 import PageHeader from '../../components/PageHeader'
 import { useToast } from '../../components/Toast'
 import { useEventStream } from '../../lib/useEventStream'
+import AspectChips, { type AspectName } from './generate/AspectChips'
 import DaemonControls from './generate/DaemonControls'
 import NumField from './generate/NumField'
 import PreviewCompare from './generate/PreviewCompare'
 import PreviewHistoryRail from './generate/PreviewHistoryRail'
+import SeedCluster from './generate/SeedCluster'
 import { makeThumbnail, useGenerateHistory, type HistoryEntry } from './generate/useGenerateHistory'
 import PreviewXYGrid from './generate/PreviewXYGrid'
 import PromptList from './generate/PromptList'
@@ -33,12 +35,14 @@ export default function GeneratePage() {
   const [mode, setMode] = useState<ViewMode>('single')
   const [prompts, setPrompts] = useState<string[]>(['newest, safe, 1girl, masterpiece, best quality'])
   const [negPrompt, setNegPrompt] = useState(DEFAULT_NEG)
+  const [aspect, setAspect] = useState<AspectName>('1:1')
   const [width, setWidth] = useState(1024)
   const [height, setHeight] = useState(1024)
   const [steps, setSteps] = useState(25)
   const [cfgScale, setCfgScale] = useState(4.0)
   const [count, setCount] = useState(1)
   const [seed, setSeed] = useState(0)
+  const [seedLocked, setSeedLocked] = useState(false)
   const [loras, setLoras] = useState<LoraEntry[]>([])
   // commit C: attention backend 移到 Settings；这里先暂留默认值，后续从 secrets 读
   const attentionBackend: AttentionBackend = 'flash_attn'
@@ -304,10 +308,20 @@ export default function GeneratePage() {
 
             <div className="card" style={{ padding: 18 }}>
               <h3 className="m-0 text-md font-semibold mb-3">采样参数</h3>
-              <div className="flex flex-col gap-2.5">
+              <div className="flex flex-col gap-3">
+                <div>
+                  <label className="caption block mb-1.5">画幅</label>
+                  <AspectChips
+                    aspect={aspect}
+                    onPick={(a, w, h) => {
+                      setAspect(a)
+                      if (w && h) { setWidth(w); setHeight(h) }
+                    }}
+                  />
+                </div>
                 <div className="flex gap-2">
-                  <NumField label="宽度" value={width} onChange={setWidth} min={256} max={4096} step={64} />
-                  <NumField label="高度" value={height} onChange={setHeight} min={256} max={4096} step={64} />
+                  <NumField label="宽" value={width} onChange={(v) => { setWidth(v); setAspect('custom') }} min={256} max={4096} step={64} />
+                  <NumField label="高" value={height} onChange={(v) => { setHeight(v); setAspect('custom') }} min={256} max={4096} step={64} />
                 </div>
                 <div className="flex gap-2">
                   <NumField label="步数" value={steps} onChange={setSteps} min={1} max={150} />
@@ -316,8 +330,14 @@ export default function GeneratePage() {
                     <NumField label="每 prompt" value={count} onChange={setCount} min={1} max={32} />
                   )}
                 </div>
-                <div className="flex gap-2">
-                  <NumField label="种子（0=随机）" value={seed} onChange={setSeed} min={0} />
+                <div>
+                  <label className="caption block mb-1.5">种子</label>
+                  <SeedCluster
+                    value={seed}
+                    onChange={setSeed}
+                    locked={seedLocked}
+                    onToggleLock={() => setSeedLocked(!seedLocked)}
+                  />
                 </div>
               </div>
             </div>
