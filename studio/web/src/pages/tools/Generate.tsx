@@ -284,7 +284,7 @@ export default function GeneratePage() {
       : '开始生成'
 
   return (
-    <div className="fade-in flex flex-col" style={{ minHeight: '100vh' }}>
+    <div className="fade-in flex flex-col" style={{ height: '100vh', overflow: 'hidden' }}>
       <PageHeader
         eyebrow="工具"
         title="测试"
@@ -292,10 +292,11 @@ export default function GeneratePage() {
         actions={<DaemonControls />}
       />
 
+      {/* 三列各自独立滚动，整页固定高度 = viewport */}
       <div className="p-6 flex gap-4 items-stretch flex-wrap xl:flex-nowrap flex-1 min-h-0">
 
-          {/* 左：sidebar — 对齐 Test 重设计.html v1：LoRA → 提示词 → 参数 → Generate bar */}
-          <div className="flex flex-col gap-4 w-full xl:w-[420px] shrink-0">
+          {/* 左：sidebar 独立 scroll — LoRA → 提示词 → 参数 → Generate bar */}
+          <div className="flex flex-col gap-4 w-full xl:w-[420px] shrink-0 overflow-y-auto pr-2 self-stretch">
 
             {/* mode=single：独立 LoRA 卡片；mode=xy：LoRA 选择合并到 XY 卡片顶部 */}
             {mode === 'single' && (
@@ -429,9 +430,9 @@ export default function GeneratePage() {
             </div>
           </div>
 
-          {/* 中：结果（高度填满 viewport 剩余） */}
-          <div className="flex-1 min-w-0 flex flex-col">
-            <div className="card flex-1 flex flex-col" style={{ padding: 18 }}>
+          {/* 中：结果独立 scroll，card flex-1 占满列高 */}
+          <div className="flex-1 min-w-0 flex flex-col overflow-y-auto self-stretch">
+            <div className="card flex-1 flex flex-col" style={{ padding: 18, minHeight: 0 }}>
               <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
                 <div className="flex items-center gap-2">
                   <span className="text-md font-semibold">生成结果</span>
@@ -451,18 +452,26 @@ export default function GeneratePage() {
               <GenerateProgressBar busy={busy} progress={progress} />
 
               {historyOverride ? (
-                <div className="flex flex-col items-center gap-2">
-                  <img
-                    key={historyOverride.id}
-                    src={api.generateSampleUrl(historyOverride.taskId, historyOverride.filenames[0] ?? '')}
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).src = historyOverride.thumbnailDataUrl
-                      ;(e.currentTarget as HTMLImageElement).title = '原图已释放，仅缩略图可见'
-                    }}
-                    alt={`history #${historyOverride.taskId}`}
-                    style={{ maxWidth: '100%', maxHeight: 600, borderRadius: 6 }}
-                  />
-                  <div className="text-xs text-fg-tertiary">
+                <div className="flex-1 min-h-0 flex flex-col items-center gap-2">
+                  <a
+                    className="flex-1 min-h-0 flex items-center justify-center w-full"
+                    href={api.generateSampleUrl(historyOverride.taskId, historyOverride.filenames[0] ?? '')}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      key={historyOverride.id}
+                      src={api.generateSampleUrl(historyOverride.taskId, historyOverride.filenames[0] ?? '')}
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src = historyOverride.thumbnailDataUrl
+                        ;(e.currentTarget as HTMLImageElement).title = '原图已释放，仅缩略图可见'
+                      }}
+                      alt={`history #${historyOverride.taskId}`}
+                      className="rounded-md object-contain"
+                      style={{ maxWidth: '100%', maxHeight: '100%' }}
+                    />
+                  </a>
+                  <div className="text-xs text-fg-tertiary shrink-0">
                     历史 #{historyOverride.taskId}
                     {historyOverride.badge ? ` · ${historyOverride.badge}` : ''}
                     <button
@@ -497,15 +506,22 @@ export default function GeneratePage() {
                   selectedIndices={selectedIndices}
                 />
               ) : samples.length === 0 && previewStep ? (
-                <div className="flex flex-col items-center gap-2">
-                  <img
-                    src={previewStep.dataUrl}
-                    alt={`step ${previewStep.step}/${previewStep.total}`}
-                    style={{ maxWidth: '100%', maxHeight: 600, borderRadius: 6 }}
-                  />
-                  <div className="text-xs text-fg-tertiary">
+                <div className="flex-1 min-h-0 flex flex-col items-center gap-2">
+                  <div className="flex-1 min-h-0 w-full flex items-center justify-center">
+                    <img
+                      src={previewStep.dataUrl}
+                      alt={`step ${previewStep.step}/${previewStep.total}`}
+                      className="rounded-md object-contain"
+                      style={{ maxWidth: '100%', maxHeight: '100%' }}
+                    />
+                  </div>
+                  <div className="text-xs text-fg-tertiary shrink-0">
                     采样 {previewStep.step} / {previewStep.total}（中间步预览）
                   </div>
+                </div>
+              ) : samples.length === 0 ? (
+                <div className="flex-1 grid place-items-center rounded-md border border-subtle bg-sunken text-fg-tertiary text-sm">
+                  {busy ? '等待生成图…' : '已结束（无图）'}
                 </div>
               ) : (
                 <SampleGallery samples={samples} taskId={currentTask.id} />
