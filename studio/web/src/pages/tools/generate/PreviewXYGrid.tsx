@@ -5,10 +5,9 @@ import { AXIS_LABELS, formatAxisValue, type XYAxisDraft } from './xy'
 
 // zoom = 单 cell 物理宽度（px）。固定列宽 → 滚轮 zoom 视觉立即生效；
 // 列总宽 > 容器时横滚（已有 overflow:auto 兜底）。
-// 范围：40-1200px（20%-600%）；20 张 X 轴 100% 总宽 4000px 已经超屏幕，
-// 600% 上限留余量给单 cell 半屏看大图（XY 双击全屏是另一途径）。
+// MIN = 40px (20%) 远看概览；MAX 动态 = 容器宽（保证最大单 cell 占满
+// 一屏，再大没意义）；DEFAULT = 200px (100%)。
 const ZOOM_MIN = 40
-const ZOOM_MAX = 1200
 const ZOOM_DEFAULT = 200
 const ZOOM_STEP = 24
 
@@ -35,11 +34,32 @@ export default function PreviewXYGrid({
   selectedIndices?: number[]
 }) {
   const [cellW, setCellW] = useState(ZOOM_DEFAULT)
+  const [maxW, setMaxW] = useState(ZOOM_DEFAULT * 6) // 容器还没 mount 时的兜底值
   const [fullscreenIdx, setFullscreenIdx] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   // pan 状态。movedRef 让"拖动过"的 mouseup 不触发 cell click（capture 阶段拦截）
   const dragRef = useRef<{ startX: number; startY: number; sX: number; sY: number } | null>(null)
   const movedRef = useRef(false)
+
+  // ZOOM_MAX 动态 = 容器宽（一张图一屏）；ResizeObserver 跟随窗口 / sidebar 变化
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const update = () => {
+      const w = Math.max(ZOOM_DEFAULT, el.clientWidth)
+      setMaxW(w)
+      setCellW((prev) => Math.min(prev, w))
+    }
+    update()
+    // jsdom 没有 ResizeObserver；测试 env 直接降级为 window resize 监听
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(update)
+      ro.observe(el)
+      return () => ro.disconnect()
+    }
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
 
   // wheel 必须 native + passive=false 才能 preventDefault
   useEffect(() => {
@@ -50,11 +70,11 @@ export default function PreviewXYGrid({
       if (e.shiftKey) return
       e.preventDefault()
       const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
-      setCellW((prev) => clamp(prev + delta, ZOOM_MIN, ZOOM_MAX))
+      setCellW((prev) => clamp(prev + delta, ZOOM_MIN, maxW))
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [])
+  }, [maxW])
 
   const onMouseDown: React.MouseEventHandler<HTMLDivElement> = (e) => {
     if (e.button !== 0) return
