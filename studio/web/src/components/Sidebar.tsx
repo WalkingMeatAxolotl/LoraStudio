@@ -252,10 +252,13 @@ function ProjectStepperNav({ pid, activeVid, currentStep, version, collapsed }: 
             ? 'bg-accent-soft text-accent'
             : 'bg-overlay text-fg-tertiary'
 
+        // 收起态用户决策："步骤依然保留 12345，通过绿色来表示完成"——
+        // 数字始终显示，done 走绿色 badge（bg-ok-soft + text-ok）；
+        // 展开态保留 ✓ 图标（旁边有文字标签，icon 更简洁）
         const inner = (
           <>
             <span className={`w-5 h-5 rounded-full grid place-items-center text-[10px] font-bold font-mono shrink-0 ${badgeCls}`}>
-              {isDone ? I.check : s.idx}
+              {collapsed ? s.idx : (isDone ? I.check : s.idx)}
             </span>
             {!collapsed && <span className="flex-1 text-left">{s.label}</span>}
             {!collapsed && isActive && <span className="dot dot-running" />}
