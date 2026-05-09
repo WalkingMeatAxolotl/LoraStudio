@@ -1797,7 +1797,8 @@ function TaeFluxSection({
 
         <p className="text-2xs text-fg-tertiary m-0 leading-relaxed">
           TAEFlux 是 1.6MB 的 tiny autoencoder，daemon 用它把每步 latent 解码成 256px
-          JPEG 推回前端（类似 ComfyUI 的逐步可见）。<strong>需要先下载</strong>，开启后
+          JPEG 推回前端（类似 ComfyUI 的逐步可见）。<strong>开启预览后首次生成会
+          自动下载</strong>（~1-2s，用 HF mirror 配置）；本按钮供手动重下 / 排查用。
           单图模式生成时实时显示中间步；XY 矩阵不开预览。
         </p>
 

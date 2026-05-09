@@ -112,15 +112,24 @@ class ModelCache:
         self.taeflux_attempted: bool = False  # 失败后不再重试
 
     def ensure_taeflux(self) -> Any:
-        """lazy 加载 TAEFlux。已加载或上次失败 → 返回缓存（可能是 None）。"""
+        """lazy 加载 TAEFlux。已加载或上次失败 → 返回缓存（可能是 None）。
+
+        缺失时**自动后台下载**（1.6MB ~1-2s）：用户开启预览后第一次跑生成
+        会触发；下载期间该次生成跳过预览，下次正常。失败标 attempted=True
+        不再重试，避免反复尝试（用户排查后手动重启或 settings 重新触发）。
+        """
         if self.taeflux is not None or self.taeflux_attempted:
             return self.taeflux
         self.taeflux_attempted = True
         try:
             from studio.services import model_downloader as _md
             if not _md.taeflux_available():
-                logger.info("taeflux not available; preview disabled")
-                return None
+                # 自动下载（1.6MB；用户配置的 HF mirror 自动生效）
+                logger.info("taeflux missing → auto-downloading (~1.6MB)…")
+                ok = _md.download_taeflux(on_log=lambda m: logger.info("[taeflux] %s", m))
+                if not ok:
+                    logger.warning("taeflux auto-download failed; preview disabled")
+                    return None
             from diffusers import AutoencoderTiny
             tae = AutoencoderTiny.from_pretrained(
                 str(_md.taeflux_dir()), torch_dtype=self.dtype,
