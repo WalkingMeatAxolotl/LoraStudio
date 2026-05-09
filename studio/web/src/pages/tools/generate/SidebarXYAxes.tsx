@@ -29,12 +29,22 @@ function CkptMultiPicker({
 }) {
   const [ckpts, setCkpts] = useState<LoraCkpt[]>([])
   const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     setLoaded(false)
+    setError(null)
     void api.listVersionLoraCkpts(projectId, versionId)
       .then((items) => { if (!cancelled) { setCkpts(items); setLoaded(true) } })
-      .catch(() => { if (!cancelled) { setCkpts([]); setLoaded(true) } })
+      .catch((e) => {
+        if (cancelled) return
+        const msg = e instanceof Error ? e.message : String(e)
+        // eslint-disable-next-line no-console
+        console.error('listVersionLoraCkpts failed', { projectId, versionId, error: msg })
+        setCkpts([])
+        setError(msg)
+        setLoaded(true)
+      })
     return () => { cancelled = true }
   }, [projectId, versionId])
 
@@ -45,7 +55,16 @@ function CkptMultiPicker({
     onChange(Array.from(next).join(', '))
   }
 
-  if (!loaded) return <div className="text-2xs text-fg-tertiary">加载 ckpt…</div>
+  if (!loaded) {
+    return (
+      <div className="text-2xs text-fg-tertiary font-mono">
+        加载 ckpt…（{projectId}/{versionId}）
+      </div>
+    )
+  }
+  if (error) {
+    return <div className="text-2xs text-err font-mono">加载 ckpt 失败：{error}</div>
+  }
   if (ckpts.length === 0) {
     return <div className="text-2xs text-fg-tertiary">该 LoRA 没扫到 ckpt 文件（output/ 下需 *.safetensors）</div>
   }
