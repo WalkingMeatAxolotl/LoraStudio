@@ -16,6 +16,7 @@ import GenerateProgressBar, { type GenerateProgress } from './generate/GenerateP
 import NumField from './generate/NumField'
 import PreviewCompare from './generate/PreviewCompare'
 import PreviewHistoryRail from './generate/PreviewHistoryRail'
+import PromptFromDatasetPicker from './generate/PromptFromDatasetPicker'
 import { makeThumbnail, useGenerateHistory, type HistoryEntry } from './generate/useGenerateHistory'
 import PreviewXYGrid from './generate/PreviewXYGrid'
 import PromptList from './generate/PromptList'
@@ -61,6 +62,7 @@ export default function GeneratePage() {
   const [progress, setProgress] = useState<GenerateProgress>({
     batchIdx: null, batchTotal: null, currentStep: null, totalSteps: null,
   })
+  const [datasetPickerOpen, setDatasetPickerOpen] = useState(false)
   // commit 16：图片历史栏。点击历史项 → 主预览替换为该项封面
   const history = useGenerateHistory()
   const [historyOverride, setHistoryOverride] = useState<HistoryEntry | null>(null)
@@ -343,7 +345,31 @@ export default function GeneratePage() {
             )}
 
             <div className="card" style={{ padding: 18 }}>
-              <h3 className="m-0 text-md font-semibold mb-3">提示词</h3>
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="m-0 text-md font-semibold">提示词</h3>
+                {!datasetPickerOpen && (
+                  <button
+                    onClick={() => setDatasetPickerOpen(true)}
+                    className="btn btn-ghost text-xs text-fg-tertiary"
+                    title="从训练集选 caption 作为 prompt"
+                  >
+                    + 从训练集选取
+                  </button>
+                )}
+              </div>
+              {datasetPickerOpen && (
+                <div className="mb-3">
+                  <PromptFromDatasetPicker
+                    onAppend={(tags) => {
+                      const cur = (prompts[0] ?? '').trim()
+                      const next = cur ? `${cur}, ${tags.join(', ')}` : tags.join(', ')
+                      setPrompts([next])
+                    }}
+                    onReplace={(tags) => setPrompts([tags.join(', ')])}
+                    onClose={() => setDatasetPickerOpen(false)}
+                  />
+                </div>
+              )}
               <label className="caption block mb-1">正向</label>
               <PromptList prompts={prompts} onChange={setPrompts} />
               <label className="caption block mb-1 mt-3">负向</label>
