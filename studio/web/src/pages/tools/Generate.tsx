@@ -647,6 +647,7 @@ export default function GeneratePage() {
             onSelect={handleHistorySelect}
             onRemove={(id) => { void history.remove(id) }}
             onClear={() => { void history.clearByMode(mode) }}
+            onPruneStale={history.pruneStale}
           />
       </div>
     </div>

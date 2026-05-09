@@ -13,6 +13,7 @@
  * 主流程。整体内存 / 磁盘可控（每条 thumb ~20KB，1000 条也才 20MB）。
  */
 import { useEffect, useRef, useState } from 'react'
+import { api } from '../../../api/client'
 
 const DB_NAME = 'anima-generate-history'
 const DB_VERSION = 1
@@ -171,6 +172,10 @@ export interface UseGenerateHistoryResult {
   add: (entry: Omit<HistoryEntry, 'id' | 'createdAt'>) => Promise<void>
   remove: (id: string) => Promise<void>
   clearByMode: (mode: HistoryMode) => Promise<void>
+  /** 检查每条 entry 的第一张图是否还在 server cache 里；
+   * 404 / fail 的 entry 删除（"原图已释放，留着只剩 thumbnail 没意义"）。
+   * 返回删除的 entry 数量。 */
+  pruneStale: () => Promise<number>
 }
 
 /** 全局 history 状态 hook。所有调用者共享一份内存视图（loadAll 一次）。 */
@@ -206,5 +211,25 @@ export function useGenerateHistory(): UseGenerateHistoryResult {
     setEntries((prev) => prev.filter((e) => e.mode !== mode))
   }
 
-  return { entries, add, remove, clearByMode }
+  const pruneStale = async (): Promise<number> => {
+    // 并发 HEAD 请求每条 entry 的第一张图；4xx/5xx 则视为失效，IndexedDB 删
+    const stale: string[] = []
+    await Promise.all(entries.map(async (e) => {
+      const fn = e.filenames[0]
+      if (!fn) return  // 没 filename 不动
+      const url = api.generateSampleUrl(e.taskId, fn)
+      try {
+        const r = await fetch(url, { method: 'HEAD' })
+        if (!r.ok) stale.push(e.id)
+      } catch {
+        // 网络错误（断网等）不算失效，留着下次再试
+      }
+    }))
+    if (stale.length === 0) return 0
+    await Promise.all(stale.map((id) => deleteEntry(id)))
+    setEntries((prev) => prev.filter((e) => !stale.includes(e.id)))
+    return stale.length
+  }
+
+  return { entries, add, remove, clearByMode, pruneStale }
 }

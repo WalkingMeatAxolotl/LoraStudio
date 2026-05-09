@@ -7,6 +7,7 @@
  * - 点击 → onSelect(entry) 给父组件，由父组件决定如何"回看"
  *   （单图：拉原图覆盖主预览；XY/对比：弹封面缩略图 modal）
  */
+import { useState } from 'react'
 import type { HistoryEntry, HistoryMode } from './useGenerateHistory'
 
 interface Props {
@@ -15,12 +16,29 @@ interface Props {
   onSelect: (entry: HistoryEntry) => void
   onRemove?: (id: string) => void
   onClear?: () => void
+  /** 清理失效（server cache 已没的 entry） */
+  onPruneStale?: () => Promise<number>
 }
 
 export default function PreviewHistoryRail({
-  entries, mode, onSelect, onRemove, onClear,
+  entries, mode, onSelect, onRemove, onClear, onPruneStale,
 }: Props) {
   const list = entries.filter((e) => e.mode === mode)
+  const [pruning, setPruning] = useState(false)
+  const [pruneResult, setPruneResult] = useState<string | null>(null)
+
+  const handlePrune = async () => {
+    if (!onPruneStale || pruning) return
+    setPruning(true)
+    setPruneResult(null)
+    try {
+      const n = await onPruneStale()
+      setPruneResult(n > 0 ? `清了 ${n} 条` : '都还在')
+      setTimeout(() => setPruneResult(null), 3000)
+    } finally {
+      setPruning(false)
+    }
+  }
 
   return (
     <div
@@ -35,6 +53,17 @@ export default function PreviewHistoryRail({
           title={`清空当前 ${mode} 历史`}
         >
           清空
+        </button>
+      )}
+      {list.length > 0 && onPruneStale && (
+        <button
+          className="btn btn-ghost text-2xs"
+          style={{ padding: '1px 4px' }}
+          onClick={() => void handlePrune()}
+          disabled={pruning}
+          title="检查并删除失效的历史（原图已被 server 释放的）"
+        >
+          {pruning ? '查…' : pruneResult ?? '清失效'}
         </button>
       )}
       {list.length === 0 ? (
