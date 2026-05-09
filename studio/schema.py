@@ -479,12 +479,14 @@ class LoraEntry(BaseModel):
 # 轴值类型按 axis 枚举派生：
 #   lora_scale / cfg_scale → float
 #   steps / seed           → int
-#   sampler_name / lora_path → str
-# pydantic 字段宽容用 list[Union[...]]；by_axis 校验在 model_validator 里。
+#   sampler_name           → str
+#
+# v1 暂不支持 lora_path 轴：AnimaLycorisAdapter 没有 unhook 接口，切换 LoRA
+# 文件需要 unload 旧 forward hook，留 v2。lora_scale 走 mutate
+# adapter.network.multiplier 的轻量路径，无 re-inject 成本。
 
 XYAxisType = Literal[
     "lora_scale",
-    "lora_path",
     "steps",
     "cfg_scale",
     "seed",
@@ -500,7 +502,7 @@ class XYAxisSpec(BaseModel):
     values: list[Any] = Field(..., min_length=1, description="此轴扫描的值列表")
     lora_index: Optional[int] = Field(
         None, ge=0,
-        description="axis ∈ {lora_scale, lora_path} 时指定改 lora_configs 哪一项",
+        description="axis=lora_scale 时指定改 lora_configs 哪一项",
     )
 
 
@@ -516,8 +518,8 @@ def _check_axis_values(axis: XYAxisSpec) -> None:
     """按 axis 枚举校验 values 类型（浮点 / 整数 / 字符串）。"""
     int_axes = {"steps", "seed"}
     float_axes = {"lora_scale", "cfg_scale"}
-    str_axes = {"sampler_name", "lora_path"}
-    needs_lora_index = {"lora_scale", "lora_path"}
+    str_axes = {"sampler_name"}
+    needs_lora_index = {"lora_scale"}
 
     if axis.axis in int_axes:
         for v in axis.values:
@@ -535,7 +537,7 @@ def _check_axis_values(axis: XYAxisSpec) -> None:
     if axis.axis in needs_lora_index and axis.lora_index is None:
         raise ValueError(f"axis={axis.axis} 必须指定 lora_index（绑定到 lora_configs 哪一项）")
     if axis.axis not in needs_lora_index and axis.lora_index is not None:
-        raise ValueError(f"axis={axis.axis} 不允许设 lora_index（仅 lora_* 轴可设）")
+        raise ValueError(f"axis={axis.axis} 不允许设 lora_index（仅 lora_scale 可设）")
 
 
 class GenerateConfig(BaseModel):

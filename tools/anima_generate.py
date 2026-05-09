@@ -145,6 +145,31 @@ def main() -> None:
 
     model.eval()
 
+    # XY 矩阵分支（schema 已校验：xy_matrix 设值时 prompts 单条 + count=1）
+    xy_matrix = cfg.get("xy_matrix")
+    if xy_matrix is not None:
+        _run_xy_matrix(
+            xy_matrix=xy_matrix,
+            base_specs=specs,
+            adapters=_adapters,
+            prompt=prompts[0],
+            negative_prompt=negative_prompt,
+            base_seed=base_seed,
+            base_steps=steps,
+            base_cfg_scale=cfg_scale,
+            base_sampler=sampler_name,
+            scheduler=scheduler,
+            height=height,
+            width=width,
+            model=model, vae=vae,
+            qwen_model=qwen_model, qwen_tok=qwen_tok, t5_tok=t5_tok,
+            device=device, dtype=dtype,
+            output_dir=output_dir,
+            update_monitor=_update_monitor,
+        )
+        logger.info("XY 矩阵生成完成")
+        return
+
     # 生成循环
     total = count * len(prompts)
     logger.info(f"开始生成：{len(prompts)} 个 prompt × {count} 次 = {total} 张")
@@ -183,6 +208,161 @@ def main() -> None:
             img_idx += 1
 
     logger.info("生成完成")
+
+
+# ---------------------------------------------------------------------------
+# XY 矩阵实现 —— 单 task 内循环全图，省去 N 次 model load 摊销成本
+# ---------------------------------------------------------------------------
+
+
+def _set_lora_multiplier(adapter, scale: float) -> None:
+    """In-place 改一份 adapter 的 multiplier，不需要 re-inject。
+
+    与 inference_core.apply_loras 内的设值路径一致：network.multiplier 是
+    forward 内取的全局倍率；per-lora.multiplier 兜底（lycoris 不同版本取值
+    路径有差异）。
+    """
+    if adapter.network is None:
+        return
+    adapter.network.multiplier = float(scale)
+    for lora in getattr(adapter.network, "loras", []):
+        if hasattr(lora, "multiplier"):
+            lora.multiplier = float(scale)
+
+
+def _apply_axis(
+    axis: dict,
+    value,
+    *,
+    cur_steps: int, cur_cfg_scale: float, cur_seed: int, cur_sampler: str,
+    base_specs, adapters,
+) -> tuple[int, float, int, str]:
+    """对 axis_type 派生的字段做更新；lora_scale 直接 mutate adapter。
+
+    返回 (steps, cfg_scale, seed, sampler) 4 元组（不变量直接透传）。
+    """
+    axis_type = axis["axis"]
+    if axis_type == "steps":
+        cur_steps = int(value)
+    elif axis_type == "cfg_scale":
+        cur_cfg_scale = float(value)
+    elif axis_type == "seed":
+        cur_seed = int(value)
+    elif axis_type == "sampler_name":
+        cur_sampler = str(value)
+    elif axis_type == "lora_scale":
+        idx = int(axis.get("lora_index") or 0)
+        if idx < len(adapters):
+            _set_lora_multiplier(adapters[idx], float(value))
+    return cur_steps, cur_cfg_scale, cur_seed, cur_sampler
+
+
+def _run_xy_matrix(
+    *,
+    xy_matrix: dict,
+    base_specs: list,
+    adapters: list,
+    prompt: str,
+    negative_prompt: str,
+    base_seed: int,
+    base_steps: int,
+    base_cfg_scale: float,
+    base_sampler: str,
+    scheduler: str,
+    height: int,
+    width: int,
+    model, vae, qwen_model, qwen_tok, t5_tok,
+    device: str, dtype,
+    output_dir,
+    update_monitor,
+) -> None:
+    """循环 (yi, xi) 出 N×M 张图。
+
+    设计：
+      - 每个 cell 从 base_* 派生本次参数（防上次 cell 修改泄漏到下次）；
+        lora_scale 通过 mutate adapter.multiplier 实现，每次 cell 进入前必须
+        把所有 LoRA 的 multiplier 重置回 base_specs[i].scale。
+      - 文件名 `xy_x{xi:02d}_y{yi:02d}_s{seed}.png`，前端按 (yi, xi) 排 grid。
+      - update_monitor 推 sample_path + xy 元数据；前端拿 xy={xi,yi,xv,yv}
+        渲染 cell 标签 + 排序。
+      - base_seed=0 → 随机一次后所有 cell 共享（XY 仅看轴效应）；axis=seed
+        时按 cell 值覆盖。
+    """
+    x_spec = xy_matrix["x"]
+    y_spec = xy_matrix.get("y")
+    x_values = x_spec["values"]
+    y_values = y_spec["values"] if y_spec else [None]
+
+    if base_seed == 0:
+        base_seed = random.randint(0, 2**31 - 1)
+        logger.info(f"XY 共享种子（cfg.seed=0 随机化）: {base_seed}")
+
+    base_scales = [float(s.scale) for s in base_specs]
+    total = len(x_values) * len(y_values)
+    logger.info(f"开始 XY 生成：{len(x_values)}×{len(y_values)} = {total} 张")
+
+    img_idx = 0
+    for yi, yv in enumerate(y_values):
+        for xi, xv in enumerate(x_values):
+            # 重置每个 LoRA 到 base scale，避免上次 cell 的 lora_scale 改动遗留
+            for i, s in enumerate(base_scales):
+                if i < len(adapters):
+                    _set_lora_multiplier(adapters[i], s)
+
+            cur_steps = base_steps
+            cur_cfg_scale = base_cfg_scale
+            cur_seed = base_seed
+            cur_sampler = base_sampler
+
+            cur_steps, cur_cfg_scale, cur_seed, cur_sampler = _apply_axis(
+                x_spec, xv,
+                cur_steps=cur_steps, cur_cfg_scale=cur_cfg_scale,
+                cur_seed=cur_seed, cur_sampler=cur_sampler,
+                base_specs=base_specs, adapters=adapters,
+            )
+            if y_spec is not None and yv is not None:
+                cur_steps, cur_cfg_scale, cur_seed, cur_sampler = _apply_axis(
+                    y_spec, yv,
+                    cur_steps=cur_steps, cur_cfg_scale=cur_cfg_scale,
+                    cur_seed=cur_seed, cur_sampler=cur_sampler,
+                    base_specs=base_specs, adapters=adapters,
+                )
+
+            torch.manual_seed(cur_seed)
+            random.seed(cur_seed)
+
+            logger.info(
+                f"XY [{xi},{yi}] x={xv} y={yv} "
+                f"steps={cur_steps} cfg={cur_cfg_scale} seed={cur_seed} sampler={cur_sampler}"
+            )
+            try:
+                img = _T.sample_image(
+                    model, vae, qwen_model, qwen_tok, t5_tok,
+                    prompt=prompt,
+                    height=height,
+                    width=width,
+                    steps=cur_steps,
+                    cfg_scale=cur_cfg_scale,
+                    negative_prompt=negative_prompt or None,
+                    sampler_name=cur_sampler,
+                    scheduler=scheduler,
+                    device=device,
+                    dtype=dtype,
+                )
+                fname = f"xy_x{xi:02d}_y{yi:02d}_s{cur_seed}.png"
+                out_path = output_dir / fname
+                img.save(out_path)
+                logger.info(f"已保存: {out_path}")
+                if update_monitor:
+                    update_monitor(
+                        sample_path=str(out_path),
+                        step=img_idx + 1,
+                        xy={"xi": xi, "yi": yi, "xv": xv, "yv": yv},
+                    )
+            except Exception as e:
+                logger.error(f"XY [{xi},{yi}] 失败: {e}")
+
+            img_idx += 1
 
 
 if __name__ == "__main__":

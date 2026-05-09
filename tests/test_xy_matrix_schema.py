@@ -151,20 +151,10 @@ def test_generate_xy_non_lora_axis_with_lora_index_rejected() -> None:
         )
 
 
-def test_generate_xy_lora_path_axis() -> None:
-    """axis=lora_path：values 是字符串列表，必须有 lora_index。"""
-    g = _gen(
-        lora_configs=[LoraEntry(path="/a.safetensors", scale=1.0)],
-        xy_matrix=XYMatrixSpec(
-            x=XYAxisSpec(
-                axis="lora_path",
-                values=["/a/v1.safetensors", "/a/v2.safetensors"],
-                lora_index=0,
-            ),
-        ),
-    )
-    assert g.xy_matrix is not None
-    assert g.xy_matrix.x.axis == "lora_path"
+def test_generate_xy_lora_path_axis_rejected() -> None:
+    """v1 不支持 lora_path 轴（schema 已剔除该枚举）。"""
+    with pytest.raises(ValidationError):
+        XYAxisSpec(axis="lora_path", values=["/a/v1.safetensors"], lora_index=0)  # type: ignore[arg-type]
 
 
 def test_generate_xy_axis_value_type_mismatch() -> None:
