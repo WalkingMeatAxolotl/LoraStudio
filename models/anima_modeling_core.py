@@ -17,6 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import math
 from typing import Any, Callable, List, Optional, Tuple, Union
 
@@ -27,8 +28,11 @@ from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 from torch import nn
 
+logger = logging.getLogger(__name__)
+
 _XFORMERS_AVAILABLE = False
 _USE_XFORMERS = False
+_XFORMERS_WARNED = False
 try:
     import xformers.ops as xops  # type: ignore
     _XFORMERS_AVAILABLE = True
@@ -37,6 +41,7 @@ except Exception:
 
 _FLASH_ATTN_AVAILABLE = False
 _USE_FLASH_ATTN = False
+_FLASH_ATTN_WARNED = False
 try:
     from flash_attn import flash_attn_func as _flash_attn_func  # type: ignore
     _FLASH_ATTN_AVAILABLE = True
@@ -149,14 +154,20 @@ def torch_attention_op(q_B_S_H_D: torch.Tensor, k_B_S_H_D: torch.Tensor, v_B_S_H
         try:
             out = _flash_attn_func(q_B_S_H_D, k_B_S_H_D, v_B_S_H_D)
             return rearrange(out, "b s h d -> b s (h d)")
-        except Exception:
-            pass
+        except Exception as _e:
+            global _FLASH_ATTN_WARNED
+            if not _FLASH_ATTN_WARNED:
+                logger.warning("flash_attn 推理失败，回退 SDPA（后续不再重复提示）: %s", _e)
+                _FLASH_ATTN_WARNED = True
     if _USE_XFORMERS and xops is not None:
         try:
             out = xops.memory_efficient_attention(q_B_S_H_D, k_B_S_H_D, v_B_S_H_D)
             return rearrange(out, "b s h d -> b s (h d)")
-        except Exception:
-            pass
+        except Exception as _e:
+            global _XFORMERS_WARNED
+            if not _XFORMERS_WARNED:
+                logger.warning("xformers 推理失败，回退 SDPA（后续不再重复提示）: %s", _e)
+                _XFORMERS_WARNED = True
     in_q_shape = q_B_S_H_D.shape
     in_k_shape = k_B_S_H_D.shape
     q_B_H_S_D = rearrange(q_B_S_H_D, "b ... h k -> b h ... k").view(in_q_shape[0], in_q_shape[-2], -1, in_q_shape[-1])

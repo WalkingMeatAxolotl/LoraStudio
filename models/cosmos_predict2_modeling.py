@@ -16,6 +16,7 @@
 import math
 from typing import Any, Callable, List, Optional, Tuple, Union
 
+import logging
 import numpy as np
 import torch
 from einops import rearrange, repeat
@@ -24,8 +25,11 @@ from torch import nn
 from torch.distributed import get_process_group_ranks
 from torchvision import transforms
 
+logger = logging.getLogger(__name__)
+
 _FLASH_ATTN_AVAILABLE = False
 _USE_FLASH_ATTN = False
+_FLASH_ATTN_WARNED = False
 try:
     from flash_attn import flash_attn_func as _flash_attn_func  # type: ignore
     _FLASH_ATTN_AVAILABLE = True
@@ -310,8 +314,11 @@ def torch_attention_op(q_B_S_H_D: torch.Tensor, k_B_S_H_D: torch.Tensor, v_B_S_H
         try:
             out = _flash_attn_func(q_B_S_H_D, k_B_S_H_D, v_B_S_H_D)
             return rearrange(out, "b s h d -> b s (h d)")
-        except Exception:
-            pass
+        except Exception as _e:
+            global _FLASH_ATTN_WARNED
+            if not _FLASH_ATTN_WARNED:
+                logger.warning("flash_attn 推理失败，回退 SDPA（后续不再重复提示）: %s", _e)
+                _FLASH_ATTN_WARNED = True
 
     in_q_shape = q_B_S_H_D.shape
     in_k_shape = k_B_S_H_D.shape

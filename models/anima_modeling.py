@@ -1,9 +1,13 @@
 # Anima model - MiniTrainDIT with LLMAdapter for bridging Qwen3 embeddings
 # Based on ComfyUI's comfy/ldm/anima/model.py
 
+import logging
 import torch
 from torch import nn
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
+_FLASH_ATTN_WARNED = False
 
 from models.cosmos_predict2_modeling import MiniTrainDIT, set_flash_attn_enabled  # noqa: F401
 
@@ -100,8 +104,11 @@ class LLMAdapterAttention(nn.Module):
                         value_states.transpose(1, 2),
                     )
                     return self.o_proj(out.reshape(*input_shape, -1).contiguous())
-            except Exception:
-                pass
+            except Exception as _e:
+                global _FLASH_ATTN_WARNED
+                if not _FLASH_ATTN_WARNED:
+                    logger.warning("flash_attn 推理失败，回退 SDPA（后续不再重复提示）: %s", _e)
+                    _FLASH_ATTN_WARNED = True
 
         attn_output = F.scaled_dot_product_attention(query_states, key_states, value_states, attn_mask=mask)
 
