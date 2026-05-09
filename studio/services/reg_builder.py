@@ -110,6 +110,12 @@ class RegMeta:
     postprocess_clusters: Optional[int] = None
     postprocess_method: Optional[str] = None
     postprocess_max_crop_ratio: Optional[float] = None
+    # 生成方式："scrape" = booru 拉取（默认，兼容旧 meta），
+    # "ai_base" = base 模型对 train tag 反向出对照图作正则集（先验生成）。
+    # 引入此字段是为了让 api_source 字段不被 "ai_generated" 这种伪 source 污染：
+    # generation_method="scrape" 时 api_source 才是 "gelbooru"|"danbooru"；
+    # generation_method="ai_base" 时 api_source 留空（语义上无来源）。
+    generation_method: str = "scrape"
 
 
 # ---------------------------------------------------------------------------

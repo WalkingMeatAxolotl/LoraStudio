@@ -504,7 +504,50 @@ def test_meta_roundtrip(tmp_path: Path) -> None:
     assert m2 is not None
     assert m2.actual_count == 8
     assert m2.train_tag_distribution == {"a": 5}
+    # 默认 generation_method = "scrape"（兼容旧 meta）
+    assert m2.generation_method == "scrape"
 
     reg_builder.update_meta_auto_tagged(out, True)
     m3 = reg_builder.read_meta(out)
     assert m3.auto_tagged is True
+
+
+def test_meta_legacy_without_generation_method(tmp_path: Path) -> None:
+    """旧 meta.json（无 generation_method 字段）反序列化必须不崩，落到默认 "scrape"。"""
+    import json
+    out = tmp_path / "reg"
+    out.mkdir()
+    legacy = {
+        "generated_at": 1.0, "based_on_version": "x", "api_source": "gelbooru",
+        "target_count": 5, "actual_count": 5,
+        "source_tags": [], "excluded_tags": [], "blacklist_tags": [],
+        "failed_tags": [], "train_tag_distribution": {}, "auto_tagged": False,
+        "incremental_runs": 0,
+        "postprocessed_at": None, "postprocess_clusters": None,
+        "postprocess_method": None, "postprocess_max_crop_ratio": None,
+        # 故意不带 generation_method
+    }
+    (out / "meta.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+    m = reg_builder.read_meta(out)
+    assert m is not None
+    assert m.generation_method == "scrape"
+    assert m.api_source == "gelbooru"
+
+
+def test_meta_ai_base_roundtrip(tmp_path: Path) -> None:
+    """先验生成写出的 meta：generation_method='ai_base' + api_source 留空。"""
+    out = tmp_path / "reg"
+    out.mkdir()
+    m = reg_builder.RegMeta(
+        generated_at=2.0, based_on_version="", api_source="",
+        target_count=10, actual_count=10, source_tags=[],
+        excluded_tags=["face_focus"], blacklist_tags=[], failed_tags=[],
+        train_tag_distribution={"1girl": 5}, auto_tagged=False,
+        generation_method="ai_base",
+    )
+    reg_builder.write_meta(out, m)
+    m2 = reg_builder.read_meta(out)
+    assert m2 is not None
+    assert m2.generation_method == "ai_base"
+    assert m2.api_source == ""

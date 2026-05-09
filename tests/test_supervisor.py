@@ -71,6 +71,29 @@ def test_pending_task_runs_to_completion(env) -> None:
     assert "done" in statuses
 
 
+def test_default_cmd_builder_routes_by_task_type() -> None:
+    """_default_cmd_builder 按 task_type 选择脚本（PR-9 commit 3）。"""
+    from studio.paths import REPO_ROOT
+    from studio.supervisor import _default_cmd_builder
+
+    cfg = Path("/tmp/fake.json")
+
+    cmd_train = _default_cmd_builder({"task_type": "train"}, cfg)
+    assert str(REPO_ROOT / "scripts" / "anima_train.py") in cmd_train
+
+    cmd_reg = _default_cmd_builder({"task_type": "reg_ai"}, cfg)
+    assert str(REPO_ROOT / "tools" / "anima_reg_ai.py") in cmd_reg
+
+    cmd_gen = _default_cmd_builder({"task_type": "generate"}, cfg)
+    assert str(REPO_ROOT / "tools" / "anima_generate.py") in cmd_gen
+
+    # 缺字段 / None / 未知 → 默认 train（兼容老 task）
+    cmd_legacy = _default_cmd_builder({}, cfg)
+    assert str(REPO_ROOT / "scripts" / "anima_train.py") in cmd_legacy
+    cmd_none = _default_cmd_builder({"task_type": None}, cfg)
+    assert str(REPO_ROOT / "scripts" / "anima_train.py") in cmd_none
+
+
 def test_failed_task_marked_failed(env) -> None:
     events, on_event = _events_collector()
 

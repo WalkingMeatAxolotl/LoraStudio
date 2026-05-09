@@ -14,9 +14,51 @@ interface Options {
   onOpen?: () => void
 }
 
+type Listener = (evt: StudioEvent) => void
+type OpenListener = () => void
+
+// ── 共享 EventSource ──────────────────────────────────────────────────────────
+// 全 app 只开一条 /api/events 长连接，所有 useEventStream 调用方共享。
+// 早期实现是每个调用方各开一条，结果 ~16 处 hook + StrictMode 双 mount 把
+// 浏览器 HTTP/1.1 「单 origin 6 连接」上限打爆，普通 fetch 永远拿不到 socket
+// （表现为 outputs 一直挂起、刷页面也加载不出）。
+const _listeners = new Set<Listener>()
+const _openListeners = new Set<OpenListener>()
+let _es: EventSource | null = null
+
+function _ensureOpen(): void {
+  if (_es || typeof EventSource === 'undefined') return
+  const es = new EventSource('/api/events')
+  es.onopen = () => {
+    for (const cb of _openListeners) {
+      try { cb() } catch { /* 单个订阅者回调炸不影响其他 */ }
+    }
+  }
+  es.onmessage = (e) => {
+    let evt: StudioEvent
+    try { evt = JSON.parse(e.data) as StudioEvent } catch { return }
+    for (const cb of _listeners) {
+      try { cb(evt) } catch { /* 同上 */ }
+    }
+  }
+  es.onerror = () => {
+    // EventSource 自动重连；这里只是个钩子，不主动关闭
+  }
+  _es = es
+}
+
+function _maybeClose(): void {
+  if (_es && _listeners.size === 0 && _openListeners.size === 0) {
+    _es.close()
+    _es = null
+  }
+}
+
 /**
  * 订阅 /api/events SSE 流。回调每次拿到一条事件。
  * 自动断线重连（EventSource 行为已经是这样）。
+ *
+ * 多个组件调用时共享同一条底层 EventSource，避免占满浏览器单 origin 连接配额。
  */
 export function useEventStream(
   onEvent: (evt: StudioEvent) => void,
@@ -31,21 +73,19 @@ export function useEventStream(
   useEffect(() => {
     // jsdom / SSR / 老浏览器没有 EventSource — 不连 SSE 让组件在测试环境也能挂载
     if (typeof EventSource === 'undefined') return
-    const es = new EventSource('/api/events')
-    es.onopen = () => {
-      onOpenRef.current?.()
+    const handler: Listener = (evt) => onEventRef.current(evt)
+    const openHandler: OpenListener = () => onOpenRef.current?.()
+    _listeners.add(handler)
+    _openListeners.add(openHandler)
+    _ensureOpen()
+    // 共享连接已经 open 时，新订阅者也要触发一次 onOpen 让它去 cold-fetch
+    if (_es && _es.readyState === EventSource.OPEN) {
+      try { onOpenRef.current?.() } catch { /* ignore */ }
     }
-    es.onmessage = (e) => {
-      try {
-        const evt = JSON.parse(e.data) as StudioEvent
-        onEventRef.current(evt)
-      } catch {
-        // 忽略畸形帧
-      }
+    return () => {
+      _listeners.delete(handler)
+      _openListeners.delete(openHandler)
+      _maybeClose()
     }
-    es.onerror = () => {
-      // EventSource 自动重连；这里只是个钩子，不主动关闭
-    }
-    return () => es.close()
   }, [])
 }

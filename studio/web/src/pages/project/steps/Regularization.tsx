@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import {
   api,
+  type AttentionBackend,
   type Job,
   type ProjectDetail,
+  type RegAiRequest,
   type RegBuildRequest,
   type RegStatus,
   type RegTagCount,
+  type Task,
   type Version,
 } from '../../../api/client'
 import ImageGrid from '../../../components/ImageGrid'
@@ -62,8 +65,25 @@ export default function RegularizationPage() {
   const jobIdRef = useRef<number | null>(null)
   jobIdRef.current = job?.id ?? null
 
-  // Tab：设置&日志 / 图片预览。job done 时自动切到图片，让用户看成果。
-  const [activeTab, setActiveTab] = useState<'config' | 'images'>('config')
+  // Tab：设置&日志 / 图片预览 / 先验生成。job done 时自动切到图片，让用户看成果。
+  const [activeTab, setActiveTab] = useState<'config' | 'images' | 'ai'>('config')
+
+  // 先验生成 — base 模型对每张 train 图反向出对照图，无 LoRA 参数（DreamBooth prior preservation）。
+  // excluded tag 复用主组件 `excluded` Set，与 booru tab 双向同步。
+  const [aiNeg, setAiNeg] = useState(
+    'worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, bad anatomy, bad hands, bad feet'
+  )
+  const [aiWidth, setAiWidth] = useState(1024)
+  const [aiHeight, setAiHeight] = useState(1024)
+  const [aiSteps, setAiSteps] = useState(25)
+  const [aiCfg, setAiCfg] = useState(4.0)
+  const [aiSeed, setAiSeed] = useState(0)
+  const [aiIncremental, setAiIncremental] = useState(false)
+  const [aiBackend, setAiBackend] = useState<AttentionBackend>('flash_attn')
+  const [aiTask, setAiTask] = useState<Task | null>(null)
+  const [aiBusy, setAiBusy] = useState(false)
+  const aiTaskIdRef = useRef<number | null>(null)
+  aiTaskIdRef.current = aiTask?.id ?? null
 
   // 预览 modal
   const [previewIdx, setPreviewIdx] = useState<number | null>(null)
@@ -141,6 +161,7 @@ export default function RegularizationPage() {
 
   useEventStream((evt) => {
     const jid = jobIdRef.current
+    const tid = aiTaskIdRef.current
     if (evt.type === 'job_log_appended' && jid && evt.job_id === jid) {
       setLogs((prev) => [...prev, String(evt.text ?? '')])
     } else if (evt.type === 'job_state_changed' && jid && evt.job_id === jid) {
@@ -151,11 +172,21 @@ export default function RegularizationPage() {
         // job 成功完成 → 自动切到图片 tab，让用户看成果
         if (evt.status === 'done') setActiveTab('images')
       }
+    } else if (evt.type === 'task_state_changed' && tid && evt.task_id === tid) {
+      void api.getRegPriorTask(project.id, vid!, tid).then((t) => {
+        setAiTask(t)
+        if (t.status === 'done' || t.status === 'failed' || t.status === 'canceled') {
+          setAiBusy(false)
+          void refreshReg()
+          if (t.status === 'done') setActiveTab('images')
+        }
+      }).catch(() => {})
     }
   })
 
   const trainImageCount = activeVersion?.stats?.train_image_count ?? 0
-  const isLive = job?.status === 'running' || job?.status === 'pending'
+  // 任意一种生成跑着都视为 live —— 防止 booru / AI 并发同时写 reg/。
+  const isLive = job?.status === 'running' || job?.status === 'pending' || aiBusy
 
   const toggleTag = (tag: string) => {
     setExcluded((prev) => {
@@ -164,6 +195,35 @@ export default function RegularizationPage() {
       else next.add(tag)
       return next
     })
+  }
+
+  const handleAiGenerate = async () => {
+    if (!vid) return
+    if (trainImageCount <= 0) {
+      toast('train 还没有图片，请先完成 Step 1（下载）或 Step 2（筛选）', 'error')
+      return
+    }
+    setAiBusy(true)
+    setAiTask(null)
+    try {
+      const body: RegAiRequest = {
+        excluded_tags: Array.from(excluded),
+        negative_prompt: aiNeg,
+        width: aiWidth,
+        height: aiHeight,
+        steps: aiSteps,
+        cfg_scale: aiCfg,
+        seed: aiSeed,
+        incremental: aiIncremental,
+        attention_backend: aiBackend,
+      }
+      const t = await api.enqueueRegPrior(project.id, vid, body)
+      setAiTask(t)
+      toast(`先验生成任务 #${t.id} 已入队`, 'success')
+    } catch (e) {
+      toast(String(e), 'error')
+      setAiBusy(false)
+    }
   }
 
   const startBuild = async (incremental = false) => {
@@ -230,13 +290,23 @@ export default function RegularizationPage() {
       title="正则集"
       subtitle="基于 train tag 拉正则图，镜像结构到 reg/"
       actions={
-        <button
-          onClick={() => void startBuild(false)}
-          disabled={isLive || trainImageCount <= 0}
-          className="btn btn-primary"
-        >
-          {isLive ? '生成中…' : '开始生成'}
-        </button>
+        activeTab === 'ai' ? (
+          <button
+            onClick={() => void handleAiGenerate()}
+            disabled={isLive || trainImageCount <= 0}
+            className="btn btn-primary"
+          >
+            {isLive ? '生成中…' : '先验生成'}
+          </button>
+        ) : (
+          <button
+            onClick={() => void startBuild(false)}
+            disabled={isLive || trainImageCount <= 0}
+            className="btn btn-primary"
+          >
+            {isLive ? '生成中…' : '开始生成'}
+          </button>
+        )
       }
     >
     <div className="flex flex-col h-full gap-3 min-h-0">
@@ -264,10 +334,31 @@ export default function RegularizationPage() {
           label="图片"
           badge={reg && reg.image_count > 0 ? String(reg.image_count) : undefined}
         />
+        <TabButton
+          active={activeTab === 'ai'}
+          onClick={() => setActiveTab('ai')}
+          label="先验生成"
+          badge={aiBusy ? 'live' : aiTask?.status === 'done' ? '✓' : undefined}
+        />
       </div>
 
       {/* tab 内容（占满剩余高度，全宽） */}
-      {activeTab === 'config' ? (
+      {activeTab === 'ai' ? (
+        <AiGenPanel
+          trainTags={trainTags}
+          excluded={excluded} onToggle={toggleTag}
+          neg={aiNeg} onNegChange={setAiNeg}
+          width={aiWidth} onWidthChange={setAiWidth}
+          height={aiHeight} onHeightChange={setAiHeight}
+          steps={aiSteps} onStepsChange={setAiSteps}
+          cfg={aiCfg} onCfgChange={setAiCfg}
+          seed={aiSeed} onSeedChange={setAiSeed}
+          incremental={aiIncremental} onIncrementalChange={setAiIncremental}
+          backend={aiBackend} onBackendChange={setAiBackend}
+          task={aiTask}
+          trainImageCount={trainImageCount}
+        />
+      ) : activeTab === 'config' ? (
         <div className="flex flex-col gap-3 min-h-0 flex-1 overflow-y-auto">
           <section className="rounded-md border border-subtle bg-surface px-3.5 py-2.5 flex flex-col gap-2.5 shrink-0">
             <div className="flex flex-wrap items-center gap-2.5 text-xs">
@@ -471,7 +562,9 @@ function RegStatusBar({
               target {m.actual_count}/{m.target_count}
             </span>
             <span className="text-fg-tertiary">·</span>
-            <span className="text-fg-tertiary">{m.api_source}</span>
+            <span className="text-fg-tertiary">
+              {m.generation_method === 'ai_base' ? '先验生成' : m.api_source}
+            </span>
             <span className="text-fg-tertiary">·</span>
             <span className="text-fg-tertiary">
               auto-tag:{' '}
@@ -679,6 +772,148 @@ function Group({
         {label}
       </span>
       <div className="flex flex-wrap items-center gap-2.5 flex-1">{children}</div>
+    </div>
+  )
+}
+
+// ── AiGenPanel ──────────────────────────────────────────────────────────────
+//
+// 先验生成（DreamBooth prior preservation）：base 模型对每张 train 图的 tag
+// 反向出对照图作正则集。**无 LoRA UI** —— LoRA 加进来反而把要保留的 prior
+// 给覆盖了。
+
+function AiNumField({
+  label, value, onChange, min, max, step,
+}: {
+  label: string; value: number
+  onChange: (v: number) => void
+  min?: number; max?: number; step?: number
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="caption">{label}</label>
+      <input
+        type="number" className="input"
+        min={min} max={max} step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+    </div>
+  )
+}
+
+function AiTaskStatus({ task }: { task: Task | null }) {
+  if (!task) return null
+  const label =
+    task.status === 'done' ? '已完成' :
+    task.status === 'running' ? '生成中' :
+    task.status === 'failed' ? '失败' :
+    task.status === 'pending' ? '排队中' :
+    task.status === 'canceled' ? '已取消' : task.status
+  const cls =
+    task.status === 'done' ? 'badge badge-ok' :
+    task.status === 'running' ? 'badge badge-info' :
+    task.status === 'failed' ? 'badge badge-err' : 'badge'
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <span className={cls}>{label}</span>
+      <span className="caption font-mono">#{task.id}</span>
+      {task.status === 'done' && (
+        <span className="text-xs text-fg-tertiary">已写入 reg 对应子目录</span>
+      )}
+      {task.status === 'failed' && task.error_msg && (
+        <span className="text-xs text-err">{task.error_msg}</span>
+      )}
+    </div>
+  )
+}
+
+function AiGenPanel({
+  trainTags,
+  excluded, onToggle,
+  neg, onNegChange,
+  width, onWidthChange,
+  height, onHeightChange,
+  steps, onStepsChange,
+  cfg, onCfgChange,
+  seed, onSeedChange,
+  incremental, onIncrementalChange,
+  backend, onBackendChange,
+  task,
+  trainImageCount,
+}: {
+  trainTags: RegTagCount[]
+  excluded: Set<string>; onToggle: (tag: string) => void
+  neg: string; onNegChange: (v: string) => void
+  width: number; onWidthChange: (v: number) => void
+  height: number; onHeightChange: (v: number) => void
+  steps: number; onStepsChange: (v: number) => void
+  cfg: number; onCfgChange: (v: number) => void
+  seed: number; onSeedChange: (v: number) => void
+  incremental: boolean; onIncrementalChange: (v: boolean) => void
+  backend: AttentionBackend; onBackendChange: (v: AttentionBackend) => void
+  task: Task | null
+  trainImageCount: number
+}) {
+  return (
+    <div className="flex flex-col gap-3 min-h-0 flex-1 overflow-y-auto">
+      <section className="rounded-md border border-subtle bg-surface px-3.5 py-3 flex flex-col gap-3 shrink-0 text-sm">
+        <p className="text-2xs text-fg-tertiary m-0 leading-relaxed">
+          用 base 模型对每张训练图的 tag 反向出对照图作为正则集。让训练损失同时见到
+          base 分布，把不该学的概念推回去。每张训练图（共{' '}
+          <span className="font-mono text-fg-primary">{trainImageCount}</span>
+          {' '}张）对应生成 1 张正则图，写入{' '}
+          <span className="font-mono">reg/{'{subfolder}'}/</span>。
+          排除 tag 与左侧「Booru」共用，修改后两边同步。
+        </p>
+
+        <ExcludeTagsPicker trainTags={trainTags} excluded={excluded} onToggle={onToggle} />
+
+        <div className="flex flex-col gap-1">
+          <label className="caption">负面提示词</label>
+          <textarea
+            className="input font-mono text-sm resize-y"
+            rows={2}
+            value={neg}
+            onChange={(e) => onNegChange(e.target.value)}
+          />
+        </div>
+
+        <div className="flex gap-2">
+          <AiNumField label="宽度" value={width} onChange={onWidthChange} min={256} max={4096} step={64} />
+          <AiNumField label="高度" value={height} onChange={onHeightChange} min={256} max={4096} step={64} />
+        </div>
+        <div className="flex gap-2">
+          <AiNumField label="步数" value={steps} onChange={onStepsChange} min={1} max={150} />
+          <AiNumField label="CFG Scale" value={cfg} onChange={onCfgChange} min={0} max={20} step={0.5} />
+        </div>
+        <AiNumField label="种子（0=随机）" value={seed} onChange={onSeedChange} min={0} />
+
+        <div className="flex flex-wrap gap-3 items-end">
+          <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+            <input
+              type="checkbox"
+              checked={incremental}
+              onChange={(e) => onIncrementalChange(e.target.checked)}
+            />
+            <span className="text-fg-secondary">补足模式（跳过 reg 子目录中已有对应文件名前缀的图）</span>
+          </label>
+          <div className="flex flex-col gap-1">
+            <label className="caption text-2xs">加速</label>
+            <select
+              className="input text-xs py-1"
+              value={backend}
+              onChange={(e) => onBackendChange(e.target.value as AttentionBackend)}
+            >
+              <option value="flash_attn">Flash Attention</option>
+              <option value="xformers">xformers</option>
+              <option value="none">无（SDPA）</option>
+            </select>
+          </div>
+        </div>
+
+        <AiTaskStatus task={task} />
+      </section>
     </div>
   )
 }

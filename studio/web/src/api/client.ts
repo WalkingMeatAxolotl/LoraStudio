@@ -75,6 +75,11 @@ export interface DownloadGlobalConfig {
 
 export interface HuggingFaceConfig {
   token: string
+  /** PR-S3 — HF 模型下载端点 endpoint。
+   *  `""` → huggingface_hub 默认（直连 huggingface.co）；海外用户推荐
+   *  `"https://hf-mirror.com"` → 国内默认（项目主战场国内）
+   *  其它 URL → 自定义反代 / 自建镜像 */
+  endpoint: string
 }
 
 export interface WandBConfig {
@@ -148,6 +153,67 @@ export interface CLTaggerConfig {
   add_model_tag: boolean
   blacklist_tags: string[]
   batch_size: number
+}
+
+/** PR-S2 — PyTorch 安装状态 + 驱动检测 + 推荐 cu tag。 */
+export type TorchCuTag = 'cu128' | 'cu126' | 'cu124' | 'cu118' | 'cpu'
+export interface TorchStatus {
+  installed: boolean
+  version: string | null              // "2.5.0+cu128"
+  cuda_build: TorchCuTag | null       // 解析自 +suffix
+  cuda_available: boolean             // torch.cuda.is_available()
+  device_name: string | null          // "NVIDIA GeForce RTX 5090"
+  cuda_detect: {
+    available: boolean
+    driver_version: string | null
+    gpu_name: string | null
+  }
+  recommended_cu_tag: TorchCuTag      // 按驱动版本推荐
+  /** 装了 CPU wheel 但有 NVIDIA GPU → 误装，UI 显示「重装为 CUDA 版」红色提示。 */
+  is_cpu_with_gpu: boolean
+  /** 装了 CUDA wheel 但 cuda.is_available()=False → 驱动 / WSL 问题，pip 修不了。 */
+  is_cuda_build_unavailable: boolean
+}
+/** torch reinstall 总是 deferred：server 写 marker，下次 launcher 启动时跑 pip。
+ *  这样避开 Windows 上 torch .pyd 已被 server 进程加载、pip 无法 replace 的死锁。 */
+export interface TorchReinstallResult {
+  pending: true                       // 永远 true，提示 UI 走「请重启」分支
+  target: string                      // 用户传的（"auto" 等）
+  tag: TorchCuTag                     // 实际选定（auto 已被 server 解析）
+  message: string                     // 中文人话提示，UI 直接显示
+}
+
+/** PR-7b — Flash Attention 安装状态 + 环境检测 + GitHub 候选 wheel。 */
+export interface FlashAttnEnv {
+  python_tag: string                 // cp311
+  cuda_tag: string | null            // cu128 / null = 没 nvidia-smi 也没 torch
+  cuda_ver: string | null            // 12.8（PyTorch 编译时绑定，flash_attn ABI 跟它走）
+  /** nvidia-smi 报告的驱动支持的最高 CUDA；与 cuda_ver 可能不同。
+   * 排错时给用户看："驱动支持 cu130，PyTorch 是 cu128，应装 cu128 wheel"。 */
+  driver_cuda_ver: string | null
+  torch_tag: string | null           // torch2.5
+  torch_ver: string | null
+  platform: 'linux_x86_64' | 'win_amd64' | null
+}
+export interface FlashAttnCandidate {
+  url: string
+  name: string                       // flash_attn-2.8.3+cu128torch2.5-cp311-cp311-win_amd64.whl
+  notes: string[]                    // 兼容性说明（CUDA 大版本不同 / Python 不兼容）
+  usable: boolean                    // false = Python ABI 不匹配，UI 灰显但允许强装
+}
+export interface FlashAttnStatus {
+  installed: boolean
+  version: string | null
+  env: FlashAttnEnv
+  candidates: FlashAttnCandidate[]   // 按 score 降序，最多 20
+  fetch_error: string | null         // GitHub API 限流 / 网络异常
+}
+export interface FlashAttnInstallResult {
+  installed: boolean
+  version: string | null
+  url: string
+  stdout_tail: string                // pip 输出末 40 行
+  restart_required: boolean
 }
 
 /** PP8 — onnxruntime 装包状态 + nvidia-smi 检测结果。 */
@@ -538,6 +604,8 @@ export interface RegMeta {
   postprocess_clusters: number | null
   postprocess_method: string | null
   postprocess_max_crop_ratio: number | null
+  // "scrape" = booru 拉取，"ai_base" = base 模型先验生成；缺省按 "scrape" 处理（旧 meta 兼容）
+  generation_method?: 'scrape' | 'ai_base'
 }
 
 export interface RegStatus {
@@ -572,6 +640,60 @@ export interface RegBuildRequest {
   max_aspect_ratio?: number
   postprocess_method?: 'smart' | 'stretch' | 'crop'
   postprocess_max_crop_ratio?: number
+}
+
+/** Attention backend 三选一 — 替代原 xformers/flash_attn 双 bool。 */
+export type AttentionBackend = 'none' | 'xformers' | 'flash_attn'
+
+/** PR-9 — 先验生成（base 模型反向出 reg 集，无 LoRA）。 */
+export interface RegAiRequest {
+  excluded_tags?: string[]
+  negative_prompt?: string
+  width?: number
+  height?: number
+  steps?: number
+  cfg_scale?: number
+  sampler_name?: string
+  scheduler?: string
+  seed?: number
+  incremental?: boolean
+  mixed_precision?: string
+  attention_backend?: AttentionBackend
+}
+
+/** PR-9 — 测试出图（独立工具页，多 LoRA + multi-prompt）。 */
+export interface LoraEntry {
+  path: string
+  scale: number
+}
+
+export interface GenerateRequest {
+  prompts: string[]
+  negative_prompt?: string
+  width?: number
+  height?: number
+  steps?: number
+  cfg_scale?: number
+  sampler_name?: string
+  scheduler?: string
+  count?: number
+  seed?: number
+  lora_configs?: LoraEntry[]
+  mixed_precision?: string
+  attention_backend?: AttentionBackend
+}
+
+/** xformers 安装状态 / 安装结果（简化版，对照 FlashAttnStatus）。 */
+export interface XformersStatus {
+  installed: boolean
+  version: string | null
+}
+
+export interface XformersInstallResult {
+  installed: boolean
+  version: string | null
+  stdout_tail: string
+  restart_required: boolean
 }
 
 export type TaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'canceled'
@@ -1070,6 +1192,24 @@ export const api = {
     req<{ path: string; tags: string[] }>(
       `/api/projects/${pid}/versions/${vid}/reg/caption?path=${encodeURIComponent(path)}`
     ),
+  /** PR-9 — 启动先验生成 task（base 模型对每张 train 图反向出对照图）。 */
+  enqueueRegPrior: (pid: number, vid: number, body: RegAiRequest) =>
+    req<Task>(`/api/projects/${pid}/versions/${vid}/reg/generate-prior`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  /** 查询先验生成 task 状态。 */
+  getRegPriorTask: (pid: number, vid: number, taskId: number) =>
+    req<Task>(`/api/projects/${pid}/versions/${vid}/reg/generate-prior/${taskId}`),
+
+  /** PR-9 — 启动测试出图 task。图写到 tempdir，task 结束清掉（不保存）。 */
+  enqueueGenerate: (body: GenerateRequest) =>
+    req<Task>('/api/generate', { method: 'POST', body: JSON.stringify(body) }),
+  /** 查询测试 task 状态。 */
+  getGenerateTask: (id: number) => req<Task>(`/api/generate/${id}`),
+  /** 测试出图单张 URL（task 跑中或刚完成时拉；清理后 404）。 */
+  generateSampleUrl: (taskId: number, filename: string) =>
+    `/api/generate/${taskId}/sample/${encodeURIComponent(filename)}`,
 
   // Train config (PP6.2) -------------------------------------------------
   getVersionConfig: (pid: number, vid: number) =>
@@ -1182,6 +1322,40 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ target }),
     }),
+
+  // PR-S2 — PyTorch 运行时 / 一键重装 ---------------------------------------
+  /** 当前 torch 状态：版本 / CUDA build / cuda.is_available / 驱动检测 / 推荐 cu tag。 */
+  getTorchStatus: () => req<TorchStatus>('/api/torch/status'),
+  /** 卸装重装 torch + torchvision；同步 pip，可能 5-30 分钟，UI 必须带 loading。
+   *  装完必须重启 Studio（C extension 不能热替换）。 */
+  reinstallTorch: (target: 'auto' | TorchCuTag) =>
+    req<TorchReinstallResult>('/api/torch/reinstall', {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    }),
+
+  // PR-7b — Flash Attention 运行时 / wheel 安装 ----------------------------
+  /** 当前 flash_attn 状态 + 环境检测 + GitHub 候选 wheel 列表（前 20）。
+   *  fetch_error 非 null 时 candidates=[]，UI 应提示用户改用手动 URL。 */
+  getFlashAttnStatus: () => req<FlashAttnStatus>('/api/flash-attention/status'),
+  /** 安装 flash_attn wheel；url=null 走 service 自动匹配。
+   *  同步 pip install（远端 wheel ~150MB），可能几分钟；UI 按钮必须带 loading。
+   *  装完必须重启 Studio 才能切换（C extension 不能热替换）。 */
+  installFlashAttn: (url: string | null) =>
+    req<FlashAttnInstallResult>('/api/flash-attention/install', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+
+  // xformers 运行时（attention_backend=xformers 用） -----------------------
+  /** xformers 安装状态。比 flash_attn 简洁：xformers 走 PyPI 直装，
+   *  没有 GitHub 候选 wheel 列表的复杂选择逻辑。 */
+  getXformersStatus: () => req<XformersStatus>('/api/xformers/status'),
+  /** pip install xformers --index-url <torch-cu-index>。同步 pip，几分钟级。
+   *  装失败时后端把 stderr 末尾透传到 message，多数失败 = 上游 wheel 没覆盖
+   *  当前 torch+cu 组合。装完必须重启 Studio（C extension 不能热替换）。 */
+  installXformers: () =>
+    req<XformersInstallResult>('/api/xformers/install', { method: 'POST' }),
 
   // PP7 — 训练集导出 / 导入 -----------------------------------------------
   /** 当前 version 的 train/ 打包 zip 直链。用 downloadBlob() 调它显示 loading。 */
