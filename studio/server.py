@@ -2217,11 +2217,22 @@ def import_queue(body: ImportRequest) -> dict[str, Any]:
 
 
 @app.get("/api/queue")
-def list_queue(status: Optional[str] = None) -> dict[str, Any]:
+def list_queue(
+    status: Optional[str] = None,
+    include_generate: bool = False,
+) -> dict[str, Any]:
+    """队列默认隐藏 generate 测试出图任务（commit 15 P0-2）。
+
+    generate task 走 daemon 不占 train slot，且生命周期短（出完图就结束），
+    出现在队列里只会让用户混淆"为什么队列卡住"。需要排查时加
+    `?include_generate=true` 兜底。
+    """
     if status and status not in db.VALID_STATUSES:
         raise HTTPException(400, f"unknown status: {status}")
     with db.connection_for() as conn:
         items = db.list_tasks(conn, status=status)
+    if not include_generate:
+        items = db.filter_out_task_types(items, ("generate",))
     return {"items": items}
 
 
