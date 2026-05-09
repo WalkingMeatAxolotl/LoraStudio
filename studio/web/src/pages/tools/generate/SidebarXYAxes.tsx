@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { api, type LoraCkpt, type LoraEntry, type XYAxisType } from '../../../api/client'
+import SidebarLoras from './SidebarLoras'
+import type { ProjectLora } from './types'
 import { AXIS_LABELS, AXIS_VALUE_TYPE, REQUIRES_LORA_INDEX, type XYAxisDraft } from './xy'
 
-const ALL_AXES: XYAxisType[] = ['steps', 'cfg_scale', 'lora_scale', 'lora_ckpt']
+// LoRA 和权重最常用，放最上；steps / cfg 是次要数值轴
+const ALL_AXES: XYAxisType[] = ['lora_ckpt', 'lora_scale', 'cfg_scale', 'steps']
 
 function placeholderFor(axis: XYAxisType): string {
   const t = AXIS_VALUE_TYPE[axis]
@@ -176,9 +179,15 @@ function AxisCard({
   )
 }
 
-/** Sidebar 的 XY 轴配置区（仅 mode=xy 时渲染）。 */
+/** Sidebar 的 XY 轴配置区（仅 mode=xy 时渲染）。
+ *
+ * mode=xy 下独立 LoRA 卡片不渲染（用户决策）；LoRA 选择直接进 XY 卡片
+ * 顶部，跟轴配置同框。LoRA 是 lora / 权重 轴的源数据，没 LoRA 这俩轴
+ * 就空跑。
+ */
 export default function SidebarXYAxes({
-  xDraft, yDraft, onXChange, onYChange, loras,
+  xDraft, yDraft, onXChange, onYChange,
+  loras, onLorasChange, projectLoras,
 }: {
   xDraft: XYAxisDraft
   yDraft: XYAxisDraft | null
@@ -186,9 +195,21 @@ export default function SidebarXYAxes({
   /** null = 移除 Y 轴退化到单轴 N×1；非 null = 添加/修改 Y */
   onYChange: (d: XYAxisDraft | null) => void
   loras: LoraEntry[]
+  onLorasChange: (l: LoraEntry[]) => void
+  projectLoras: ProjectLora[]
 }) {
   return (
     <div className="card" style={{ padding: 18 }}>
+      {/* 顶部：LoRA 选择（替代独立 LoRA 卡片） */}
+      <div className="flex items-baseline justify-between mb-3">
+        <div className="text-md font-semibold">LoRA</div>
+        <span className="text-xs text-fg-tertiary">XY 轴用，多选项目/版本</span>
+      </div>
+      <SidebarLoras loras={loras} onChange={onLorasChange} projectLoras={projectLoras} />
+
+      {/* 分隔 + XY 轴 */}
+      <div className="my-4" style={{ height: 1, background: 'var(--border-subtle)' }} />
+
       <div className="flex items-center justify-between mb-3">
         <div className="text-md font-semibold">XY 轴</div>
       </div>

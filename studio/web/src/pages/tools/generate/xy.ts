@@ -23,8 +23,8 @@ export const AXIS_VALUE_TYPE: Record<XYAxisType, 'int' | 'float' | 'string'> = {
 export const AXIS_LABELS: Record<XYAxisType, string> = {
   steps: '步数',
   cfg_scale: 'CFG Scale',
-  lora_scale: 'LoRA 权重',
-  lora_ckpt: 'LoRA Ckpt（不同 step）',
+  lora_scale: '权重',
+  lora_ckpt: 'LoRA',
 }
 
 export const REQUIRES_LORA_INDEX: Set<XYAxisType> = new Set(['lora_scale', 'lora_ckpt'])

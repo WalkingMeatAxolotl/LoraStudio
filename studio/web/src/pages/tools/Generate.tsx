@@ -272,13 +272,16 @@ export default function GeneratePage() {
           {/* 左：sidebar — 对齐 Test 重设计.html v1：LoRA → 提示词 → 参数 → Generate bar */}
           <div className="flex flex-col gap-4 w-full xl:w-[420px] shrink-0">
 
-            <div className="card" style={{ padding: 18 }}>
-              <div className="flex items-baseline justify-between mb-3">
-                <h3 className="m-0 text-md font-semibold">LoRA</h3>
-                <span className="text-xs text-fg-tertiary">从项目挑版本，权重单滑块调</span>
+            {/* mode=single：独立 LoRA 卡片；mode=xy：LoRA 选择合并到 XY 卡片顶部 */}
+            {mode === 'single' && (
+              <div className="card" style={{ padding: 18 }}>
+                <div className="flex items-baseline justify-between mb-3">
+                  <h3 className="m-0 text-md font-semibold">LoRA</h3>
+                  <span className="text-xs text-fg-tertiary">从项目挑版本，权重单滑块调</span>
+                </div>
+                <SidebarLoras loras={loras} onChange={setLoras} projectLoras={projectLoras} />
               </div>
-              <SidebarLoras loras={loras} onChange={setLoras} projectLoras={projectLoras} />
-            </div>
+            )}
 
             {mode === 'xy' && (
               <SidebarXYAxes
@@ -287,6 +290,8 @@ export default function GeneratePage() {
                 onXChange={setXDraft}
                 onYChange={setYDraft}
                 loras={loras}
+                onLorasChange={setLoras}
+                projectLoras={projectLoras}
               />
             )}
 
