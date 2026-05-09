@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
-"""测试出图 — 独立运行推理，复用 anima_train.sample_image 推理链路 + inference_core 多 LoRA。
+"""测试出图 — 独立运行推理（CLI 用法，不再被 Studio server 调）。
 
 用法：
     python tools/anima_generate.py --config generate_config.json [--monitor-state-file state.json]
 
 JSON 配置字段见 studio.schema.GenerateConfig。
 
-关键：
+历史 / 当前位置：
+  - 早期 server 通过 supervisor spawn 这个脚本作为 generate task 的 worker；
+    每次出图都要 30-60s 重 load 模型。
+  - PR Phase 2（commit 9+）改成常驻 inference_daemon（tools/anima_daemon.py）+
+    模型跨 task 复用 + 图不落盘走内存 cache。Server 不再 spawn 这个脚本。
+  - 本文件保留作 CLI 用法：用户在命令行直跑出图，写盘到 cfg.output_dir
+    （用户指定路径，是真实持久化）。
+
+关键实现：
   - 多 LoRA 加载走 studio.services.inference_core.apply_loras —— 每份 LoRA 独立
     inject 一份 AnimaLycorisAdapter，rank/alpha 从 ss_network_args 读，用
-    multiplier=scale 控制贡献权重。**修复 PR #17 作者的 P0 bug**：硬编码
-    rank=32 + tensor 直加 LoKr 子矩阵会出错图。
-  - 输出图写到 cfg.output_dir（Studio 模式由 server 填 tempfile.gettempdir() /
-    anima_gen_{task_id}，task 结束清掉 —— 用户视角"不保存"）。
+    multiplier=scale 控制贡献权重（修 PR #17 硬编码 rank=32 + LoKr 子矩阵
+    直加的出错图问题）。
   - 进度通过 train_monitor 推 SSE，前端按 sample_path 拉单图显示。
 """
 from __future__ import annotations

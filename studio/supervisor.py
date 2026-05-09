@@ -88,13 +88,17 @@ def _default_cmd_builder(task: dict[str, Any], config_path: Path) -> list[str]:
 
     train (默认 / 老 task): scripts/anima_train.py
     reg_ai: tools/anima_reg_ai.py（先验生成）
-    generate: tools/anima_generate.py（测试出图）
+    generate: 走 inference_daemon，**不**经这个 cmd_builder，supervisor
+        在 _dispatch_generate 里直接派给 daemon。这里 fallback 到 anima_generate.py
+        只是为了某天测试可能注入 cmd_builder 时不爆 KeyError —— 实际跑
+        不到这条 path（_next_pending_task_in 在 dispatch_train 里只挑
+        train/reg_ai）。
     """
     task_type = task.get("task_type") or "train"
     if task_type == "reg_ai":
         script = REPO_ROOT / "tools" / "anima_reg_ai.py"
     elif task_type == "generate":
-        script = REPO_ROOT / "tools" / "anima_generate.py"
+        script = REPO_ROOT / "tools" / "anima_generate.py"  # 兜底，正常路径不来这
     else:
         script = REPO_ROOT / "scripts" / "anima_train.py"
     cmd = [
