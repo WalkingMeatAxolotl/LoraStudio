@@ -386,28 +386,32 @@ def _encode_jpeg(img: Any, quality: int = 80) -> tuple[str, int]:
 
 
 def _build_preview_callback(req_id: str, every_n: int) -> Any:
-    """commit 14：返回一个 step_callback，每 N 步通过 TAEFlux 解码一次推 stdout。
+    """每步推 preview_step 事件；TAEFlux 可用 + 节流命中时附 image_b64。
 
-    callback 在 daemon 主线程同步执行（采样循环里）；TAEFlux decode + JPEG
-    encode 单步 ~10-20ms 可接受。模型缺失或 decode 失败时 callback 静默跳
-    过（采样不受影响）。
+    用户反馈：进度条始终要可见（"当前在做什么，第几步"），预览图按需。
+    本 callback 拆成两路：
+      - 永远 emit preview_step { step, total } —— 前端进度条
+      - every_n>0 且步命中（含末步）+ TAEFlux 加载 OK → 附 image_b64
+    callback 在 daemon 主线程同步执行；空逻辑 ~微秒级，TAEFlux decode +
+    JPEG 编码 ~10-20ms。
     """
     def _cb(step: int, total: int, latent: Any) -> None:
-        # 节流：每 N 步推一次（含末步）
-        if step % every_n != 0 and step != total - 1:
-            return
-        tae = CACHE.ensure_taeflux()
-        if tae is None:
-            return
-        img = _decode_taeflux_preview(tae, latent, CACHE.dtype)
-        if img is None:
-            return
-        b64, byte_size = _encode_jpeg(img, quality=80)
-        _emit_for(
-            req_id, "preview_step",
-            step=step + 1, total=total,
-            image_b64=b64, byte_size=byte_size,
-        )
+        # 是否带预览图：preview_every_n_steps>0 + 节流命中 + TAEFlux 可用
+        with_image = False
+        b64: Optional[str] = None
+        byte_size = 0
+        if every_n > 0 and (step % every_n == 0 or step == total - 1):
+            tae = CACHE.ensure_taeflux()
+            if tae is not None:
+                img = _decode_taeflux_preview(tae, latent, CACHE.dtype)
+                if img is not None:
+                    b64, byte_size = _encode_jpeg(img, quality=80)
+                    with_image = True
+        payload: dict[str, Any] = {"step": step + 1, "total": total}
+        if with_image:
+            payload["image_b64"] = b64
+            payload["byte_size"] = byte_size
+        _emit_for(req_id, "preview_step", **payload)
     return _cb
 
 
@@ -461,10 +465,10 @@ def _run_generate(req_id: str, task_id: int, cfg: dict[str, Any], output_dir: Pa
     CACHE.ensure_loaded(cfg)
     adapters = CACHE.apply_loras(cfg.get("lora_configs", []))
 
-    # commit 14：中间步预览（TAEFlux）。preview_every_n_steps=0 关；>0 时
-    # 每 N 步推一次 preview_step 事件。模型缺失自动跳过。
+    # 进度推送：永远建 callback 推 preview_step（含 step/total）；
+    # preview_every_n_steps>0 时附 image_b64 中间预览图（commit 14）。
     preview_every = int(cfg.get("preview_every_n_steps", 0) or 0)
-    preview_callback = _build_preview_callback(req_id, preview_every) if preview_every > 0 else None
+    preview_callback = _build_preview_callback(req_id, preview_every)
 
     prompts: list[str] = cfg.get("prompts") or [
         "newest, safe, 1girl, masterpiece, best quality"
@@ -489,6 +493,7 @@ def _run_generate(req_id: str, task_id: int, cfg: dict[str, Any], output_dir: Pa
             base_sampler=sampler_name, scheduler=scheduler,
             height=height, width=width,
             update_monitor=update_monitor,
+            preview_callback=preview_callback,
         )
         return
 
@@ -504,6 +509,10 @@ def _run_generate(req_id: str, task_id: int, cfg: dict[str, Any], output_dir: Pa
             )
             torch.manual_seed(seed)
             random.seed(seed)
+            _emit_for(
+                req_id, "image_started",
+                batch_idx=img_idx, batch_total=total, total_steps=steps,
+            )
             try:
                 img = _T.sample_image(
                     CACHE.model, CACHE.vae,
@@ -555,6 +564,7 @@ def _run_xy(
     height: int,
     width: int,
     update_monitor: Any,
+    preview_callback: Any = None,
 ) -> None:
     x_spec = xy_matrix["x"]
     y_spec = xy_matrix.get("y")
@@ -619,6 +629,10 @@ def _run_xy(
             torch.manual_seed(cur_seed)
             random.seed(cur_seed)
 
+            _emit_for(
+                req_id, "image_started",
+                batch_idx=img_idx, batch_total=total, total_steps=cur_steps,
+            )
             try:
                 img = _T.sample_image(
                     CACHE.model, CACHE.vae,
@@ -627,6 +641,7 @@ def _run_xy(
                     height=height,
                     width=width,
                     steps=cur_steps,
+                    step_callback=preview_callback,
                     cfg_scale=cur_cfg_scale,
                     negative_prompt=negative_prompt or None,
                     sampler_name=base_sampler,

@@ -12,6 +12,7 @@ import { useToast } from '../../components/Toast'
 import { useEventStream } from '../../lib/useEventStream'
 import AspectChips, { aspectFromDimensions, type AspectName } from './generate/AspectChips'
 import DaemonControls from './generate/DaemonControls'
+import GenerateProgressBar, { type GenerateProgress } from './generate/GenerateProgress'
 import NumField from './generate/NumField'
 import PreviewCompare from './generate/PreviewCompare'
 import PreviewHistoryRail from './generate/PreviewHistoryRail'
@@ -56,6 +57,10 @@ export default function GeneratePage() {
   const [monitorState, setMonitorState] = useState<MonitorState | null>(null)
   // commit 14：中间步预览（仅 single 模式有意义；XY/对比 cell 多预览意义小）
   const [previewStep, setPreviewStep] = useState<{ step: number; total: number; dataUrl: string } | null>(null)
+  // 生成进度（image_started + preview_step 聚合）
+  const [progress, setProgress] = useState<GenerateProgress>({
+    batchIdx: null, batchTotal: null, currentStep: null, totalSteps: null,
+  })
   // commit 16：图片历史栏。点击历史项 → 主预览替换为该项封面
   const history = useGenerateHistory()
   const [historyOverride, setHistoryOverride] = useState<HistoryEntry | null>(null)
@@ -108,6 +113,8 @@ export default function GeneratePage() {
         setCurrentTask(t)
         if (t.status === 'done' || t.status === 'failed' || t.status === 'canceled') {
           setBusy(false)
+          // 清进度（不让上次跑残留显示）
+          setProgress({ batchIdx: null, batchTotal: null, currentStep: null, totalSteps: null })
         }
       }).catch(() => { /* task 已清也走这里 */ })
     } else if (
@@ -119,13 +126,28 @@ export default function GeneratePage() {
     } else if (
       evt.type === 'generate_preview_step'
       && String(evt.task_id) === String(tid)
-      && typeof evt.image_b64 === 'string'
     ) {
-      // commit 14：中间步预览。data URL 直接覆盖主图 src 直到下一步或最终图来
-      setPreviewStep({
-        step: Number(evt.step) || 0,
-        total: Number(evt.total) || 0,
-        dataUrl: `data:image/jpeg;base64,${evt.image_b64}`,
+      const step = Number(evt.step) || 0
+      const total = Number(evt.total) || 0
+      // 进度永远更新
+      setProgress((p) => ({ ...p, currentStep: step, totalSteps: total }))
+      // image_b64 是可选的（settings 没开预览时无）
+      if (typeof evt.image_b64 === 'string') {
+        setPreviewStep({
+          step, total,
+          dataUrl: `data:image/jpeg;base64,${evt.image_b64}`,
+        })
+      }
+    } else if (
+      evt.type === 'generate_image_started'
+      && String(evt.task_id) === String(tid)
+    ) {
+      // 新 batch 开始 → 重置 step 进度，更新 batch 计数
+      setProgress({
+        batchIdx: typeof evt.batch_idx === 'number' ? evt.batch_idx : null,
+        batchTotal: typeof evt.batch_total === 'number' ? evt.batch_total : null,
+        currentStep: 0,
+        totalSteps: typeof evt.total_steps === 'number' ? evt.total_steps : null,
       })
     }
   })
@@ -220,6 +242,7 @@ export default function GeneratePage() {
     setCurrentTask(null)
     setMonitorState(null)
     setSelectedIndices([])  // 新一轮生成 — 旧选择已失效
+    setProgress({ batchIdx: null, batchTotal: null, currentStep: null, totalSteps: null })
     try {
       const body: GenerateRequest = {
         prompts: prompts.filter((p) => p.trim()),
@@ -424,6 +447,8 @@ export default function GeneratePage() {
                 </div>
                 <ViewModeTabs mode={mode} onModeChange={setMode} compareEnabled={compareEnabled} />
               </div>
+
+              <GenerateProgressBar busy={busy} progress={progress} />
 
               {historyOverride ? (
                 <div className="flex flex-col items-center gap-2">

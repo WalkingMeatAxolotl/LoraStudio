@@ -739,13 +739,24 @@ class Supervisor:
         if kind in ("image_done", "image_error"):
             return
         if kind == "preview_step":
-            # commit 14：中间步预览 → 转发 SSE，前端覆盖主图 src
+            # commit 14：中间步进度 + 可选预览。step/total 永远有，image_b64
+            # 取决于 settings.preview_every_n_steps + TAEFlux 是否可用
             self._on_event({
                 "type": "generate_preview_step",
                 "task_id": tid,
                 "step": event.get("step"),
                 "total": event.get("total"),
                 "image_b64": event.get("image_b64"),
+            })
+            return
+        if kind == "image_started":
+            # 多张图（XY 或 count>1）：当前进度到第几张
+            self._on_event({
+                "type": "generate_image_started",
+                "task_id": tid,
+                "batch_idx": event.get("batch_idx"),
+                "batch_total": event.get("batch_total"),
+                "total_steps": event.get("total_steps"),
             })
             return
         if kind == "done":
