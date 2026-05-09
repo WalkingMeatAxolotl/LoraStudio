@@ -11,8 +11,9 @@ describe('parseAxisValues', () => {
     expect(parseAxisValues('cfg_scale', '3.0, 4.5, 5')).toEqual([3.0, 4.5, 5])
   })
 
-  it('parses string axis (sampler_name)', () => {
-    expect(parseAxisValues('sampler_name', 'er_sde, euler_a')).toEqual(['er_sde', 'euler_a'])
+  it('parses string axis (lora_ckpt 路径)', () => {
+    expect(parseAxisValues('lora_ckpt', '/a/step100.safetensors, /a/step200.safetensors'))
+      .toEqual(['/a/step100.safetensors', '/a/step200.safetensors'])
   })
 
   it('rejects empty values', () => {

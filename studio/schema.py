@@ -486,11 +486,10 @@ class LoraEntry(BaseModel):
 # adapter.network.multiplier 的轻量路径，无 re-inject 成本。
 
 XYAxisType = Literal[
-    "lora_scale",
-    "steps",
-    "cfg_scale",
-    "seed",
-    "sampler_name",
+    "lora_scale",   # 改 lora_configs[lora_index].scale 的多个值
+    "steps",        # 不同采样步数
+    "cfg_scale",    # 不同 CFG
+    "lora_ckpt",    # 同一 LoRA 训练过程的不同 step/epoch ckpt（找过拟合拐点）
 ]
 
 
@@ -502,7 +501,7 @@ class XYAxisSpec(BaseModel):
     values: list[Any] = Field(..., min_length=1, description="此轴扫描的值列表")
     lora_index: Optional[int] = Field(
         None, ge=0,
-        description="axis=lora_scale 时指定改 lora_configs 哪一项",
+        description="axis=lora_scale / lora_ckpt 时指定改 lora_configs 哪一项",
     )
 
 
@@ -516,10 +515,10 @@ class XYMatrixSpec(BaseModel):
 
 def _check_axis_values(axis: XYAxisSpec) -> None:
     """按 axis 枚举校验 values 类型（浮点 / 整数 / 字符串）。"""
-    int_axes = {"steps", "seed"}
+    int_axes = {"steps"}
     float_axes = {"lora_scale", "cfg_scale"}
-    str_axes = {"sampler_name"}
-    needs_lora_index = {"lora_scale"}
+    str_axes = {"lora_ckpt"}  # ckpt 路径列表
+    needs_lora_index = {"lora_scale", "lora_ckpt"}
 
     if axis.axis in int_axes:
         for v in axis.values:
@@ -537,7 +536,7 @@ def _check_axis_values(axis: XYAxisSpec) -> None:
     if axis.axis in needs_lora_index and axis.lora_index is None:
         raise ValueError(f"axis={axis.axis} 必须指定 lora_index（绑定到 lora_configs 哪一项）")
     if axis.axis not in needs_lora_index and axis.lora_index is not None:
-        raise ValueError(f"axis={axis.axis} 不允许设 lora_index（仅 lora_scale 可设）")
+        raise ValueError(f"axis={axis.axis} 不允许设 lora_index（仅 lora_scale / lora_ckpt 可设）")
 
 
 class GenerateConfig(BaseModel):

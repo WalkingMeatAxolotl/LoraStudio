@@ -326,24 +326,20 @@ def _apply_axis(
     *,
     cur_steps: int,
     cur_cfg_scale: float,
-    cur_seed: int,
-    cur_sampler: str,
     adapters: list[Any],
-) -> tuple[int, float, int, str]:
+) -> tuple[int, float]:
+    """处理纯数值/scale 轴。lora_ckpt 不在这处理（需要重新 inject，由
+    _run_xy 单独走 CACHE.apply_loras 路径）。"""
     axis_type = axis["axis"]
     if axis_type == "steps":
         cur_steps = int(value)
     elif axis_type == "cfg_scale":
         cur_cfg_scale = float(value)
-    elif axis_type == "seed":
-        cur_seed = int(value)
-    elif axis_type == "sampler_name":
-        cur_sampler = str(value)
     elif axis_type == "lora_scale":
         idx = int(axis.get("lora_index") or 0)
         if idx < len(adapters):
             _set_lora_multiplier(adapters[idx], float(value))
-    return cur_steps, cur_cfg_scale, cur_seed, cur_sampler
+    return cur_steps, cur_cfg_scale
 
 
 def _setup_monitor(cfg: dict[str, Any]) -> Any:
@@ -570,35 +566,56 @@ def _run_xy(
         logger.info("XY 共享种子（cfg.seed=0 随机化）: %d", base_seed)
 
     base_scales = [float(s.scale) for s in CACHE.last_lora_specs]
+    base_lora_paths = [str(s.path) for s in CACHE.last_lora_specs]
     total = len(x_values) * len(y_values)
     _emit_for(req_id, "started", task_id=task_id, total=total)
+
+    def _swap_ckpt_for_axis(spec: dict[str, Any], val: Any, lora_configs: list[dict[str, Any]]) -> None:
+        """axis=lora_ckpt 时把 lora_configs[lora_index].path 改成 val。"""
+        if spec.get("axis") != "lora_ckpt":
+            return
+        idx = int(spec.get("lora_index") or 0)
+        if 0 <= idx < len(lora_configs):
+            lora_configs[idx]["path"] = str(val)
 
     img_idx = 0
     for yi, yv in enumerate(y_values):
         for xi, xv in enumerate(x_values):
+            # lora_ckpt 切换：mutate cfg.lora_configs 的 path 然后调
+            # CACHE.apply_loras —— commit 20 detach 路径会快速 reinject。
+            x_is_ckpt = x_spec.get("axis") == "lora_ckpt"
+            y_is_ckpt = y_spec is not None and y_spec.get("axis") == "lora_ckpt"
+            if x_is_ckpt or y_is_ckpt:
+                lora_configs = [
+                    {"path": p, "scale": s}
+                    for p, s in zip(base_lora_paths, base_scales)
+                ]
+                _swap_ckpt_for_axis(x_spec, xv, lora_configs)
+                if y_spec is not None and yv is not None:
+                    _swap_ckpt_for_axis(y_spec, yv, lora_configs)
+                adapters = CACHE.apply_loras(lora_configs)
+                base_scales = [float(s.scale) for s in CACHE.last_lora_specs]
+
             for i, s in enumerate(base_scales):
                 if i < len(adapters):
                     _set_lora_multiplier(adapters[i], s)
 
             cur_steps = base_steps
             cur_cfg_scale = base_cfg_scale
-            cur_seed = base_seed
-            cur_sampler = base_sampler
 
-            cur_steps, cur_cfg_scale, cur_seed, cur_sampler = _apply_axis(
+            cur_steps, cur_cfg_scale = _apply_axis(
                 x_spec, xv,
                 cur_steps=cur_steps, cur_cfg_scale=cur_cfg_scale,
-                cur_seed=cur_seed, cur_sampler=cur_sampler,
                 adapters=adapters,
             )
             if y_spec is not None and yv is not None:
-                cur_steps, cur_cfg_scale, cur_seed, cur_sampler = _apply_axis(
+                cur_steps, cur_cfg_scale = _apply_axis(
                     y_spec, yv,
                     cur_steps=cur_steps, cur_cfg_scale=cur_cfg_scale,
-                    cur_seed=cur_seed, cur_sampler=cur_sampler,
                     adapters=adapters,
                 )
 
+            cur_seed = base_seed
             torch.manual_seed(cur_seed)
             random.seed(cur_seed)
 
@@ -612,7 +629,7 @@ def _run_xy(
                     steps=cur_steps,
                     cfg_scale=cur_cfg_scale,
                     negative_prompt=negative_prompt or None,
-                    sampler_name=cur_sampler,
+                    sampler_name=base_sampler,
                     scheduler=scheduler,
                     device=CACHE.device,
                     dtype=CACHE.dtype,

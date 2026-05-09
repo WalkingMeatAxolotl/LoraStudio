@@ -15,21 +15,19 @@ export interface XYAxisDraft {
 /** XYAxisSpec 配套的字段类型映射（与 schema._check_axis_values 同源）。 */
 export const AXIS_VALUE_TYPE: Record<XYAxisType, 'int' | 'float' | 'string'> = {
   steps: 'int',
-  seed: 'int',
   cfg_scale: 'float',
   lora_scale: 'float',
-  sampler_name: 'string',
+  lora_ckpt: 'string',  // ckpt 路径
 }
 
 export const AXIS_LABELS: Record<XYAxisType, string> = {
   steps: '步数',
   cfg_scale: 'CFG Scale',
-  seed: '种子',
-  sampler_name: '采样器',
   lora_scale: 'LoRA 权重',
+  lora_ckpt: 'LoRA Ckpt（不同 step）',
 }
 
-export const REQUIRES_LORA_INDEX: Set<XYAxisType> = new Set(['lora_scale'])
+export const REQUIRES_LORA_INDEX: Set<XYAxisType> = new Set(['lora_scale', 'lora_ckpt'])
 
 /** 解析逗号分隔的 raw 字符串成 axis values。失败抛 string error。 */
 export function parseAxisValues(axis: XYAxisType, raw: string): Array<number | string> {

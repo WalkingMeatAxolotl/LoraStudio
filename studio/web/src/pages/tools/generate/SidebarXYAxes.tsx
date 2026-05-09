@@ -1,11 +1,11 @@
 import type { LoraEntry, XYAxisType } from '../../../api/client'
 import { AXIS_LABELS, AXIS_VALUE_TYPE, REQUIRES_LORA_INDEX, type XYAxisDraft } from './xy'
 
-const ALL_AXES: XYAxisType[] = ['steps', 'cfg_scale', 'seed', 'sampler_name', 'lora_scale']
+const ALL_AXES: XYAxisType[] = ['steps', 'cfg_scale', 'lora_scale', 'lora_ckpt']
 
 function placeholderFor(axis: XYAxisType): string {
   const t = AXIS_VALUE_TYPE[axis]
-  if (axis === 'sampler_name') return 'er_sde, euler_a, ...'
+  if (axis === 'lora_ckpt') return '从下方 LoRA ckpt 列表多选'
   if (t === 'int') return '20, 25, 30'
   return '0.6, 0.8, 1.0'
 }

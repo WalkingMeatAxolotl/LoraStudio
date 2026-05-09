@@ -35,9 +35,41 @@ def test_axis_lora_scale_float_values_ok() -> None:
     assert a.lora_index == 0
 
 
-def test_axis_sampler_name_str_values_ok() -> None:
-    a = XYAxisSpec(axis="sampler_name", values=["er_sde", "euler_a"])
-    assert a.values == ["er_sde", "euler_a"]
+def test_axis_lora_ckpt_string_values_ok() -> None:
+    """lora_ckpt 接受 ckpt 路径字符串列表 + 必须 lora_index。"""
+    a = XYAxisSpec(
+        axis="lora_ckpt",
+        values=["/p/v3/output/v3_step1500.safetensors", "/p/v3/output/v3_step2000.safetensors"],
+        lora_index=0,
+    )
+    assert a.values == [
+        "/p/v3/output/v3_step1500.safetensors",
+        "/p/v3/output/v3_step2000.safetensors",
+    ]
+    assert a.lora_index == 0
+
+
+def test_axis_lora_ckpt_requires_lora_index() -> None:
+    """_check_axis_values 在 GenerateConfig validator 里走，所以缺 lora_index 要在
+    完整 GenerateConfig 校验中暴露错误。"""
+    with pytest.raises(ValidationError, match="必须指定 lora_index"):
+        _gen(
+            xy_matrix=XYMatrixSpec(
+                x=XYAxisSpec(axis="lora_ckpt", values=["/p.safetensors"]),
+            ),
+        )
+
+
+def test_axis_sampler_name_now_rejected() -> None:
+    """commit: sampler_name 轴已删（我们硬编码 er_sde 不支持其他采样器）。"""
+    with pytest.raises(ValidationError):
+        XYAxisSpec(axis="sampler_name", values=["er_sde"])  # type: ignore[arg-type]
+
+
+def test_axis_seed_now_rejected() -> None:
+    """commit: seed 轴已删（"测 ep" 场景下应锁种子；用户决策）。"""
+    with pytest.raises(ValidationError):
+        XYAxisSpec(axis="seed", values=[42])  # type: ignore[arg-type]
 
 
 def test_axis_invalid_axis_rejected() -> None:
@@ -151,8 +183,8 @@ def test_generate_xy_non_lora_axis_with_lora_index_rejected() -> None:
         )
 
 
-def test_generate_xy_lora_path_axis_rejected() -> None:
-    """v1 不支持 lora_path 轴（schema 已剔除该枚举）。"""
+def test_axis_lora_path_now_rejected() -> None:
+    """lora_path 轴已删；不同 LoRA 切换通过 lora_ckpt 处理（视为同一 lora_index 不同 path）。"""
     with pytest.raises(ValidationError):
         XYAxisSpec(axis="lora_path", values=["/a/v1.safetensors"], lora_index=0)  # type: ignore[arg-type]
 

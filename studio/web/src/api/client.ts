@@ -641,14 +641,13 @@ export type XYAxisType =
   | 'lora_scale'
   | 'steps'
   | 'cfg_scale'
-  | 'seed'
-  | 'sampler_name'
+  | 'lora_ckpt'  // 同一 LoRA 的不同 step/epoch ckpt（找过拟合拐点）
 
 export interface XYAxisSpec {
   axis: XYAxisType
-  /** 类型按 axis 派生：steps/seed→int；lora_scale/cfg_scale→number；sampler_name→string */
+  /** 类型按 axis 派生：steps→int；lora_scale/cfg_scale→number；lora_ckpt→string(path) */
   values: Array<number | string>
-  /** axis=lora_scale 时必填 —— 绑定到 lora_configs 哪一项 */
+  /** axis=lora_scale / lora_ckpt 时必填 —— 绑定到 lora_configs 哪一项 */
   lora_index?: number | null
 }
 
