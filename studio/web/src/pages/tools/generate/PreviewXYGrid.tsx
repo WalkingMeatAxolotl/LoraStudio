@@ -5,10 +5,12 @@ import { AXIS_LABELS, formatAxisValue, type XYAxisDraft } from './xy'
 
 // zoom = 单 cell 物理宽度（px）。固定列宽 → 滚轮 zoom 视觉立即生效；
 // 列总宽 > 容器时横滚（已有 overflow:auto 兜底）。
-const ZOOM_MIN = 80
-const ZOOM_MAX = 600
+// 范围：40-1200px（20%-600%）；20 张 X 轴 100% 总宽 4000px 已经超屏幕，
+// 600% 上限留余量给单 cell 半屏看大图（XY 双击全屏是另一途径）。
+const ZOOM_MIN = 40
+const ZOOM_MAX = 1200
 const ZOOM_DEFAULT = 200
-const ZOOM_STEP = 20
+const ZOOM_STEP = 24
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v))
