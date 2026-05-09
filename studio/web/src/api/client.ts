@@ -674,6 +674,20 @@ export interface GenerateRequest {
   xy_matrix?: XYMatrixSpec | null
 }
 
+/** version output/ 下扫到的 LoRA ckpt 文件（GET .../lora_ckpts）。 */
+export interface LoraCkpt {
+  /** 'final' / 'step' / 'epoch' / 'other' */
+  kind: 'final' | 'step' | 'epoch' | 'other'
+  /** step / epoch 数；final / other 为 0 */
+  value: number
+  /** 显示用：'final' / 'step 2476' / 'epoch 5' / 文件名 */
+  label: string
+  /** 绝对路径 */
+  path: string
+  /** 文件 mtime 时间戳 */
+  mtime: number
+}
+
 /** Phase 2 commit 14 — TAEFlux 模型状态（GET /api/generate/taeflux/status）。 */
 export interface TaeFluxStatus {
   available: boolean
@@ -1201,6 +1215,11 @@ export const api = {
   /** 查询先验生成 task 状态。 */
   getRegPriorTask: (pid: number, vid: number, taskId: number) =>
     req<Task>(`/api/projects/${pid}/versions/${vid}/reg/generate-prior/${taskId}`),
+
+  /** 列出 version output/ 下所有 LoRA ckpt 文件（XY ckpt 轴 + 单图模式切 ckpt）。 */
+  listVersionLoraCkpts: (pid: number, vid: number) =>
+    req<{ items: LoraCkpt[] }>(`/api/projects/${pid}/versions/${vid}/lora_ckpts`)
+      .then((r) => r.items),
 
   /** PR-9 — 启动测试出图 task。Phase 2 起：图走 server 内存 cache，关页面即丢。 */
   enqueueGenerate: (body: GenerateRequest) =>

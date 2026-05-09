@@ -518,6 +518,14 @@ def list_versions_endpoint(pid: int) -> dict[str, Any]:
     }
 
 
+@app.get("/api/projects/{pid}/versions/{vid}/lora_ckpts")
+def list_version_lora_ckpts(pid: int, vid: int) -> dict[str, Any]:
+    """列出 version output/ 下所有 .safetensors（step / epoch / final），
+    用于 LoRA picker 第二层（XY ckpt 轴 + 单图模式切 ckpt）。"""
+    p, v, vdir = _version_dir_or_404(pid, vid)
+    return {"items": versions.list_lora_ckpts(vdir)}
+
+
 @app.post("/api/projects/{pid}/versions")
 def create_version_endpoint(pid: int, body: VersionCreate) -> dict[str, Any]:
     with db.connection_for() as conn:

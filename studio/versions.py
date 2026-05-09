@@ -42,6 +42,67 @@ def version_dir(project_id: int, slug: str, label: str) -> Path:
     return projects.project_dir(project_id, slug) / "versions" / label
 
 
+def list_lora_ckpts(vdir: Path) -> list[dict[str, Any]]:
+    """扫 versions/{label}/output/*.safetensors，列所有 LoRA ckpt 文件。
+
+    anima_train 输出命名约定（scripts/anima_train.py:2434, 2464）：
+      - {output_name}_step{N}.safetensors    （按 step 保存）
+      - {output_name}_epoch{N}.safetensors   （按 epoch 保存）
+      - {output_name}_final.safetensors      （训练完毕）
+
+    返回每个 ckpt 的 {kind, value, label, path, mtime}：
+      - kind: 'step' | 'epoch' | 'final' | 'other'
+      - value: int（step/epoch 数；final/other → 0）
+      - label: 显示用，"step 2476" / "epoch 5" / "final" / 文件名
+      - path: 绝对路径字符串
+      - mtime: 修改时间戳（前端按时间倒序展示）
+    排序：final 在前 → step 数字降序 → epoch 数字降序 → 其他按 mtime 降序。
+    """
+    output_dir = vdir / "output"
+    if not output_dir.exists():
+        return []
+    items: list[dict[str, Any]] = []
+    for f in output_dir.glob("*.safetensors"):
+        if not f.is_file():
+            continue
+        name = f.stem  # 去掉 .safetensors
+        kind = "other"
+        value = 0
+        label = name
+        # 匹配 *_step{N}
+        m = re.search(r"_step(\d+)$", name)
+        if m:
+            kind = "step"
+            value = int(m.group(1))
+            label = f"step {value}"
+        else:
+            m = re.search(r"_epoch(\d+)$", name)
+            if m:
+                kind = "epoch"
+                value = int(m.group(1))
+                label = f"epoch {value}"
+            elif name.endswith("_final"):
+                kind = "final"
+                label = "final"
+        try:
+            mtime = f.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        items.append({
+            "kind": kind, "value": value, "label": label,
+            "path": str(f), "mtime": mtime,
+        })
+
+    # 排序：final 顶部；同 kind 按 value 降序；其他按 mtime 降序
+    kind_order = {"final": 0, "step": 1, "epoch": 2, "other": 3}
+    items.sort(key=lambda x: (
+        kind_order.get(x["kind"], 9),
+        -x["value"],
+        -x["mtime"],
+    ))
+    return items
+
+
 def _write_version_json(v: dict[str, Any], pdir_label_path: Path) -> None:
     pdir_label_path.mkdir(parents=True, exist_ok=True)
     (pdir_label_path / "version.json").write_text(
