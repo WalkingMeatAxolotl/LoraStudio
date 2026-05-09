@@ -664,6 +664,14 @@ export interface GenerateRequest {
   xy_matrix?: XYMatrixSpec | null
 }
 
+/** Phase 2 — Inference daemon 当前状态（GET /api/generate/daemon/status）。 */
+export interface DaemonStatus {
+  state: 'stopped' | 'starting' | 'idle' | 'busy' | 'unloading'
+  model_loaded: boolean
+  busy: boolean
+  alive: boolean
+}
+
 /** xformers 安装状态 / 安装结果（简化版，对照 FlashAttnStatus）。 */
 export interface XformersStatus {
   installed: boolean
@@ -1177,14 +1185,20 @@ export const api = {
   getRegPriorTask: (pid: number, vid: number, taskId: number) =>
     req<Task>(`/api/projects/${pid}/versions/${vid}/reg/generate-prior/${taskId}`),
 
-  /** PR-9 — 启动测试出图 task。图写到 tempdir，task 结束清掉（不保存）。 */
+  /** PR-9 — 启动测试出图 task。Phase 2 起：图走 server 内存 cache，关页面即丢。 */
   enqueueGenerate: (body: GenerateRequest) =>
     req<Task>('/api/generate', { method: 'POST', body: JSON.stringify(body) }),
   /** 查询测试 task 状态。 */
   getGenerateTask: (id: number) => req<Task>(`/api/generate/${id}`),
-  /** 测试出图单张 URL（task 跑中或刚完成时拉；清理后 404）。 */
+  /** 测试出图单张 URL（task 跑中或刚完成时拉；客户端断连 30s + LRU 后 404）。 */
   generateSampleUrl: (taskId: number, filename: string) =>
     `/api/generate/${taskId}/sample/${encodeURIComponent(filename)}`,
+  /** Phase 2 — daemon 状态查询（前端 DaemonControls）。 */
+  getDaemonStatus: () => req<DaemonStatus>('/api/generate/daemon/status'),
+  /** Phase 2 — 手动卸载 daemon 模型（busy 时 409）。 */
+  unloadDaemon: () => req<{ ok: boolean; noop?: boolean }>(
+    '/api/generate/daemon/unload', { method: 'POST' }
+  ),
 
   // Train config (PP6.2) -------------------------------------------------
   getVersionConfig: (pid: number, vid: number) =>

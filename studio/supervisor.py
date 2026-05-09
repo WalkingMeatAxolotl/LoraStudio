@@ -716,6 +716,7 @@ class Supervisor:
                 on_event=self._on_daemon_task_event,
             )
             logger.info("submitted generate task %d to daemon", task_id)
+            self._emit_daemon_state()
         except Exception as e:
             logger.exception("daemon submit failed")
             self._on_daemon_task_event({
@@ -725,25 +726,29 @@ class Supervisor:
             })
 
     def _on_daemon_task_event(self, event: dict[str, Any]) -> None:
-        """daemon 推回的 task 级事件（image_done / done / error）。
-
-        commit 9：image_done 不动（前端通过 monitor_state.json + poller SSE
-        拿到 sample_path）；commit 10 改成把 PNG bytes 入 server.generate_cache。
-        """
+        """daemon 推回的 task 级事件（image_done / done / error）。"""
         kind = event.get("kind")
         tid = int(event.get("task_id") or 0)
-        if kind in ("started", "image_done", "image_error"):
+        if kind == "started":
+            self._emit_daemon_state()
+            return
+        if kind in ("image_done", "image_error"):
             return
         if kind == "done":
             self._finalize_daemon_task(tid, status="done")
+            self._emit_daemon_state()
         elif kind == "error":
             self._finalize_daemon_task(
                 tid, status="failed", error_msg=str(event.get("message") or "daemon error"),
             )
+            self._emit_daemon_state()
 
     def _on_daemon_global_event(self, event: dict[str, Any]) -> None:
         """daemon 进程级事件（loaded / unloaded / stopped）。"""
         kind = event.get("kind")
+        if kind in ("loaded", "unloaded"):
+            self._emit_daemon_state()
+            return
         if kind == "stopped":
             with self._daemon_lock:
                 tid = self._daemon_active_task_id
@@ -756,6 +761,23 @@ class Supervisor:
                         tid, status="failed",
                         error_msg=f"daemon exited (rc={event.get('rc')})",
                     )
+            self._emit_daemon_state()
+
+    def _emit_daemon_state(self) -> None:
+        """commit 13：广播 daemon 当前状态给 SSE 订阅者（前端 status pill）。"""
+        daemon = get_daemon()
+        with self._daemon_lock:
+            active_tid = self._daemon_active_task_id
+        try:
+            self._on_event({
+                "type": "daemon_state_changed",
+                "state": daemon.state,
+                "model_loaded": daemon.is_model_loaded,
+                "busy": daemon.is_busy,
+                "active_task_id": active_tid,
+            })
+        except Exception:
+            logger.exception("emit daemon state failed")
 
     def _finalize_daemon_task(
         self,

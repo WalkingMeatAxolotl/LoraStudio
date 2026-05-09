@@ -257,6 +257,14 @@ def test_supervisor_dispatches_generate_to_daemon(env, mock_daemon_script, monke
     assert "running" in statuses
     assert "done" in statuses
 
+    # commit 13：supervisor 应该至少 emit 一次 daemon_state_changed
+    daemon_evts = [e for e in events if e.get("type") == "daemon_state_changed"]
+    assert daemon_evts, "expected daemon_state_changed events; got none"
+    # 至少一个 busy=True（提交后立刻 emit）和一个 busy=False（done 后）
+    busy_states = [e["busy"] for e in daemon_evts]
+    assert True in busy_states
+    assert False in busy_states
+
 
 def test_supervisor_cancel_pending_generate(env, mock_daemon_script, monkeypatch):
     from studio.supervisor import Supervisor

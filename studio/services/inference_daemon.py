@@ -354,16 +354,17 @@ class InferenceDaemon:
                 logger.exception("cache_image failed for %s", filename)
             forward_msg = {k: v for k, v in msg.items() if k != "image_b64"}
 
-        try:
-            active.on_event({**forward_msg, "task_id": active.task_id})
-        except Exception:
-            logger.exception("task on_event handler failed")
-
-        # done / error 后释放 active + 回 idle
+        # done/error 先切状态，再回调 —— 让 callback 内查询 is_busy/state 时
+        # 看到准确的 IDLE 状态（commit 13 daemon_state_changed 依赖这个顺序）
         if kind in ("done", "error"):
             with self._lock:
                 self._active = None
                 self._state = STATE_IDLE
+
+        try:
+            active.on_event({**forward_msg, "task_id": active.task_id})
+        except Exception:
+            logger.exception("task on_event handler failed")
 
     def _handle_proc_exit(self, proc: subprocess.Popen) -> None:
         """子进程退出处理：标 STOPPED + 给 active task 推 error + 通知 listeners。"""

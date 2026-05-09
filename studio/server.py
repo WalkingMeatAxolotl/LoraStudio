@@ -1884,6 +1884,41 @@ def get_generate_task(task_id: int) -> dict[str, Any]:
     return task
 
 
+# ---------------------------------------------------------------------------
+# /api/generate/daemon — 测试 daemon 状态查询 + 手动卸载（commit 13）
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/generate/daemon/status")
+def get_daemon_status() -> dict[str, Any]:
+    """查询 daemon 当前状态。前端 DaemonControls 用。"""
+    from .services.inference_daemon import get_daemon
+    daemon = get_daemon()
+    return {
+        "state": daemon.state,
+        "model_loaded": daemon.is_model_loaded,
+        "busy": daemon.is_busy,
+        "alive": daemon.is_alive,
+    }
+
+
+@app.post("/api/generate/daemon/unload")
+def unload_daemon() -> dict[str, Any]:
+    """手动卸载 daemon 模型（释放 VRAM）。busy 时拒绝（409）。
+
+    卸载完成后 supervisor 会推 daemon_state_changed SSE，前端按钮自动 disable。
+    下次用户点「开始生成」daemon 按需重 load。
+    """
+    from .services.inference_daemon import get_daemon
+    daemon = get_daemon()
+    if daemon.is_busy:
+        raise HTTPException(409, "daemon is busy, cannot unload")
+    if not daemon.is_model_loaded:
+        return {"ok": True, "noop": True}
+    daemon.request_unload()
+    return {"ok": True}
+
+
 @app.get("/api/generate/{task_id}/sample/{filename}")
 def get_generate_sample(task_id: int, filename: str) -> Any:
     """读 generate task 的输出图（commit 10：从 server 内存 cache 取，无磁盘）。

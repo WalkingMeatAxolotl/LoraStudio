@@ -11,6 +11,7 @@ import {
 import PageHeader from '../../components/PageHeader'
 import { useToast } from '../../components/Toast'
 import { useEventStream } from '../../lib/useEventStream'
+import DaemonControls from './generate/DaemonControls'
 import NumField from './generate/NumField'
 import PreviewCompare from './generate/PreviewCompare'
 import PreviewXYGrid from './generate/PreviewXYGrid'
@@ -245,6 +246,8 @@ export default function GeneratePage() {
                 <option value="none">无（PyTorch SDPA）</option>
               </select>
             </div>
+
+            <DaemonControls />
 
             <div className="flex gap-2">
               <button className="btn btn-primary flex-1" onClick={handleGenerate} disabled={busy}>
