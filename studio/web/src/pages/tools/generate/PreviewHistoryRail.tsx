@@ -21,23 +21,13 @@ export default function PreviewHistoryRail({
   entries, mode, onSelect, onRemove, onClear,
 }: Props) {
   const list = entries.filter((e) => e.mode === mode)
-  if (list.length === 0) {
-    return (
-      <div
-        className="text-fg-tertiary text-2xs text-center"
-        style={{ width: 64, paddingTop: 16 }}
-      >
-        暂无历史
-      </div>
-    )
-  }
 
   return (
     <div
-      className="flex flex-col gap-1"
-      style={{ width: 64, maxHeight: 720, overflowY: 'auto' }}
+      className="card flex flex-col gap-1 self-stretch"
+      style={{ width: 80, padding: 8, overflowY: 'auto' }}
     >
-      {onClear && (
+      {list.length > 0 && onClear && (
         <button
           className="btn btn-ghost text-2xs"
           style={{ padding: '1px 4px' }}
@@ -47,14 +37,18 @@ export default function PreviewHistoryRail({
           清空
         </button>
       )}
-      {list.map((entry) => (
-        <HistoryItem
-          key={entry.id}
-          entry={entry}
-          onSelect={() => onSelect(entry)}
-          onRemove={onRemove ? () => onRemove(entry.id) : undefined}
-        />
-      ))}
+      {list.length === 0 ? (
+        <div className="text-fg-tertiary text-2xs text-center pt-3">暂无历史</div>
+      ) : (
+        list.map((entry) => (
+          <HistoryItem
+            key={entry.id}
+            entry={entry}
+            onSelect={() => onSelect(entry)}
+            onRemove={onRemove ? () => onRemove(entry.id) : undefined}
+          />
+        ))
+      )}
     </div>
   )
 }

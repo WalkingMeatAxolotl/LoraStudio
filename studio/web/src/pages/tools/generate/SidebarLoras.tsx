@@ -52,7 +52,8 @@ export default function SidebarLoras({
       {!pickerOpen ? (
         <button
           onClick={() => setPickerOpen(true)}
-          className="btn btn-ghost btn-sm self-start text-xs text-fg-secondary"
+          className="w-full text-sm text-accent hover:bg-surface rounded-md border border-dashed border-subtle hover:border-accent transition-colors"
+          style={{ padding: '10px 12px' }}
         >
           + 选 LoRA
         </button>

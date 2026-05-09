@@ -3,6 +3,11 @@ import { api, type DaemonStatus } from '../../../api/client'
 import { useEventStream } from '../../../lib/useEventStream'
 import { useToast } from '../../../components/Toast'
 
+/** Header 行尾的「清理显存」按钮：单一按钮，状态隐式（busy / 未加载时 disabled）。
+ *
+ * 之前 sidebar 末尾的"推理 daemon · 状态"卡片合并到这里 —— 用户决策：
+ * 不要时刻显示状态文字，需要释放 VRAM 时按按钮就行。
+ */
 export default function DaemonControls() {
   const { toast } = useToast()
   const [status, setStatus] = useState<DaemonStatus | null>(null)
@@ -11,7 +16,7 @@ export default function DaemonControls() {
   useEffect(() => {
     void api.getDaemonStatus()
       .then(setStatus)
-      .catch(() => { /* 启动一闪 — server 还没起齐时容忍 */ })
+      .catch(() => { /* 启动一闪 */ })
   }, [])
 
   useEventStream((evt) => {
@@ -30,9 +35,9 @@ export default function DaemonControls() {
     try {
       const r = await api.unloadDaemon()
       if (r.noop) {
-        toast('模型未加载', 'info')
+        toast('显存已释放（模型未加载）', 'info')
       } else {
-        toast('已请求卸载', 'success')
+        toast('已请求清理显存', 'success')
       }
     } catch (e) {
       toast(String(e), 'error')
@@ -41,48 +46,21 @@ export default function DaemonControls() {
     }
   }
 
-  if (!status) return null
-
-  const label = status.busy
-    ? '生成中'
-    : status.state === 'unloading'
-      ? '卸载中…'
-      : status.model_loaded
-        ? '模型已加载'
-        : status.state === 'stopped'
-          ? '未启动'
-          : '空闲（未加载）'
-
-  const dotClass = status.busy
-    ? 'bg-warn'
-    : status.model_loaded
-      ? 'bg-success'
-      : 'bg-subtle'
-
-  const canUnload = status.model_loaded && !status.busy && status.state !== 'unloading'
+  const canUnload = !!(status && status.model_loaded && !status.busy && status.state !== 'unloading')
 
   return (
-    <div className="card" style={{ padding: 12 }}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs">
-          <span className={`inline-block w-2 h-2 rounded-full ${dotClass}`} />
-          <span className="text-fg-secondary">推理 daemon</span>
-          <span className="text-fg-tertiary">{label}</span>
-        </div>
-        <button
-          className="btn btn-ghost text-xs"
-          style={{ padding: '4px 10px' }}
-          onClick={handleUnload}
-          disabled={!canUnload || unloading}
-          title={
-            status.busy ? '生成中不可卸载'
-              : !status.model_loaded ? '模型未加载，无需卸载'
-                : '释放 VRAM；下次出图按需重 load'
-          }
-        >
-          {unloading ? '请求中…' : '卸载模型'}
-        </button>
-      </div>
-    </div>
+    <button
+      className="btn btn-ghost text-sm"
+      onClick={handleUnload}
+      disabled={!canUnload || unloading}
+      title={
+        !status ? '加载状态中…'
+          : status.busy ? '生成中不可清理'
+            : !status.model_loaded ? '模型未加载，无需清理'
+              : '释放推理 daemon 占用的 VRAM；下次出图按需重 load'
+      }
+    >
+      {unloading ? '清理中…' : '清理显存'}
+    </button>
   )
 }

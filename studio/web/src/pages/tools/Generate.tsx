@@ -257,10 +257,15 @@ export default function GeneratePage() {
       : '开始生成'
 
   return (
-    <div className="fade-in">
-      <PageHeader eyebrow="工具" title="测试" subtitle="独立推理 · 单图 / XY 矩阵 / 双图对比（出图不保存，关页面即丢）" />
+    <div className="fade-in flex flex-col" style={{ minHeight: '100vh' }}>
+      <PageHeader
+        eyebrow="工具"
+        title="测试"
+        subtitle="独立推理 · 单图 / XY 矩阵 / 双图对比（出图不保存，关页面即丢）"
+        actions={<DaemonControls />}
+      />
 
-      <div className="p-6 flex gap-4 items-start flex-wrap xl:flex-nowrap">
+      <div className="p-6 flex gap-4 items-stretch flex-wrap xl:flex-nowrap flex-1 min-h-0">
 
           {/* 左：sidebar — 顺序按 design image 1：提示词 → LoRA → (XY) → 参数 → 加速 → 按钮 */}
           <div className="flex flex-col gap-4 w-full xl:w-[340px] shrink-0">
@@ -272,7 +277,7 @@ export default function GeneratePage() {
                 <label className="caption block mb-1">负面提示词</label>
                 <textarea
                   className="input w-full font-mono text-xs resize-y"
-                  rows={2}
+                  rows={5}
                   value={negPrompt}
                   onChange={(e) => setNegPrompt(e.target.value)}
                 />
@@ -327,8 +332,6 @@ export default function GeneratePage() {
               </select>
             </div>
 
-            <DaemonControls />
-
             <div className="flex gap-2">
               <button className="btn btn-primary flex-1" onClick={handleGenerate} disabled={busy}>
                 {generateLabel}
@@ -341,9 +344,9 @@ export default function GeneratePage() {
             </div>
           </div>
 
-          {/* 中：结果 */}
-          <div className="flex-1 min-w-0">
-            <div className="card" style={{ padding: 18 }}>
+          {/* 中：结果（高度填满 viewport 剩余） */}
+          <div className="flex-1 min-w-0 flex flex-col">
+            <div className="card flex-1 flex flex-col" style={{ padding: 18 }}>
               <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
                 <div className="flex items-center gap-2">
                   <span className="text-md font-semibold">生成结果</span>
@@ -385,10 +388,7 @@ export default function GeneratePage() {
                   </div>
                 </div>
               ) : !currentTask ? (
-                <div
-                  className="grid place-items-center rounded-md border border-subtle bg-sunken text-fg-tertiary text-sm"
-                  style={{ minHeight: 260 }}
-                >
+                <div className="flex-1 grid place-items-center rounded-md border border-subtle bg-sunken text-fg-tertiary text-sm">
                   填写参数后点击「开始生成」
                 </div>
               ) : mode === 'compare' && selectedIndices.length === 2 ? (

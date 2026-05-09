@@ -16,7 +16,7 @@ export default function PromptList({ prompts, onChange }: {
           )}
           <textarea
             className="input flex-1 font-mono text-sm resize-y"
-            rows={3}
+            rows={5}
             value={p}
             onChange={(e) => set(i, e.target.value)}
             placeholder="输入正向提示词…"
