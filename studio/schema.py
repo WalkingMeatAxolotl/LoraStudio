@@ -467,6 +467,9 @@ class LoraEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
     path: str = Field(..., description="LoRA safetensors 绝对路径")
     scale: float = Field(1.0, description="贡献权重（multiplier），多 LoRA 各自独立")
+    # 关联到的 version（picker 选的；外部文件无）；前端用 vid 拉 ckpt 列表
+    project_id: Optional[int] = Field(None, ge=1)
+    version_id: Optional[int] = Field(None, ge=1)
 
 
 # ---------------------------------------------------------------------------

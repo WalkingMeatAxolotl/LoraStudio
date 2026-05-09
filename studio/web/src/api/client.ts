@@ -632,6 +632,9 @@ export interface RegAiRequest {
 export interface LoraEntry {
   path: string
   scale: number
+  /** 来自 picker 的项目 / 版本绑定；外部文件无 */
+  project_id?: number | null
+  version_id?: number | null
 }
 
 /** XY 矩阵：单 task 内循环全图，前端按 (yi, xi) 排成 grid。

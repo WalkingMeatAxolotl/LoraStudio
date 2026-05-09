@@ -1,27 +1,42 @@
-import type { LoraEntry } from '../../../api/client'
+import { useEffect, useState } from 'react'
+import { api, type LoraCkpt, type LoraEntry } from '../../../api/client'
 import { projectAbbr } from './InlineLoraPicker'
 
 /** 已添加的 LoRA 卡片（对齐 Test 重设计.html 的 .ver-row 风格）：
  *
  *   [44px thumb]  项目 / 版本   [训练中 pill]
- *                 file name 或 stage · date
+ *                 [step 2476 · 最新][step 2000][step 1500]   ← ckpt pills
  *                 ─────────────  权重 slider  [×0.85]    [×]
  *
  * - thumb 用 ASCII 缩写（大写）+ 斜纹背景占位
  * - 训练中 stage 时整张卡片描边走 accent 色
+ * - 有 version_id 时 fetch ckpt 列表；点 pill 切 path（同卡片内不同 step）
  */
 export default function LoraCard({
-  lora, label, stage, onScaleChange, onRemove,
+  lora, label, stage, onChange, onRemove,
 }: {
   lora: LoraEntry
   label: string
-  /** 训练 stage（'training' / 'done' 等）；用于「训练中」pill 和卡片整体描边 */
   stage?: string
-  onScaleChange: (scale: number) => void
+  /** 替换整条 entry（path 切 ckpt 时也走它） */
+  onChange: (next: LoraEntry) => void
   onRemove: () => void
 }) {
   const filename = lora.path.split(/[\\/]/).pop() ?? lora.path
   const live = stage === 'training'
+
+  const [ckpts, setCkpts] = useState<LoraCkpt[]>([])
+  useEffect(() => {
+    if (!lora.project_id || !lora.version_id) {
+      setCkpts([])
+      return
+    }
+    let cancelled = false
+    void api.listVersionLoraCkpts(lora.project_id, lora.version_id)
+      .then((items) => { if (!cancelled) setCkpts(items) })
+      .catch(() => { if (!cancelled) setCkpts([]) })
+    return () => { cancelled = true }
+  }, [lora.project_id, lora.version_id])
 
   return (
     <div
@@ -34,7 +49,6 @@ export default function LoraCard({
           : 'linear-gradient(180deg, var(--bg-elevated), var(--bg-surface))',
       }}
     >
-      {/* 44px thumb with diagonal stripes */}
       <div
         className="shrink-0 grid place-items-center font-mono text-fg-tertiary"
         style={{
@@ -56,11 +70,8 @@ export default function LoraCard({
             <span
               className="font-mono shrink-0"
               style={{
-                fontSize: 10,
-                padding: '1px 7px',
-                borderRadius: 999,
-                background: 'var(--accent-soft)',
-                color: 'var(--accent)',
+                fontSize: 10, padding: '1px 7px', borderRadius: 999,
+                background: 'var(--accent-soft)', color: 'var(--accent)',
                 letterSpacing: '0.03em',
               }}
             >
@@ -72,6 +83,34 @@ export default function LoraCard({
         {!label && (
           <div className="text-2xs text-fg-tertiary truncate font-mono" title={lora.path}>
             {lora.path}
+          </div>
+        )}
+
+        {/* Ckpt step pills（同 version 多个 ckpt 时显示，点击切 path） */}
+        {ckpts.length > 1 && (
+          <div className="flex flex-wrap gap-1" style={{ marginTop: 2 }}>
+            {ckpts.map((c) => {
+              const active = c.path === lora.path
+              return (
+                <button
+                  key={c.path}
+                  onClick={() => onChange({ ...lora, path: c.path })}
+                  className="font-mono"
+                  style={{
+                    fontSize: 10,
+                    padding: '2px 8px',
+                    borderRadius: 999,
+                    border: active ? '1px solid transparent' : '1px dashed var(--border-default)',
+                    background: active ? 'var(--accent-soft)' : 'transparent',
+                    color: active ? 'var(--accent)' : 'var(--fg-secondary)',
+                    cursor: 'pointer',
+                  }}
+                  title={c.path}
+                >
+                  {c.label}
+                </button>
+              )
+            })}
           </div>
         )}
 
@@ -88,7 +127,7 @@ export default function LoraCard({
             max={1.5}
             step={0.05}
             value={lora.scale}
-            onChange={(e) => onScaleChange(Number(e.target.value))}
+            onChange={(e) => onChange({ ...lora, scale: Number(e.target.value) })}
             className="flex-1"
             aria-label="权重滑杆"
             style={{ accentColor: 'var(--accent)' }}
@@ -99,7 +138,7 @@ export default function LoraCard({
             max={1.5}
             step={0.05}
             value={lora.scale}
-            onChange={(e) => onScaleChange(Number(e.target.value))}
+            onChange={(e) => onChange({ ...lora, scale: Number(e.target.value) })}
             className="input font-mono text-center"
             style={{ width: 54, padding: '3px 6px', fontSize: 12 }}
             aria-label="权重数值"

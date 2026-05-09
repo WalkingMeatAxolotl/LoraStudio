@@ -18,41 +18,51 @@ export default function SidebarLoras({
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pathPickerOpen, setPathPickerOpen] = useState(false)
 
-  // path → "项目 / 版本" label 反查（picker 选过的有；外部文件用 basename 兜底）
+  // version_id → "项目 / 版本" label 反查（picker 选过的有；切 step ckpt 后
+  // path 会变，所以不能用 path 反查）
   const labelOf = useMemo(() => {
-    const map = new Map<string, string>()
+    const map = new Map<number, string>()
     for (const l of projectLoras) {
-      map.set(l.path, `${l.projectTitle} / ${l.versionLabel}`)
+      map.set(l.versionId, `${l.projectTitle} / ${l.versionLabel}`)
     }
-    return (path: string): string => map.get(path) ?? ''
+    return (entry: LoraEntry): string =>
+      entry.version_id != null ? (map.get(entry.version_id) ?? '') : ''
   }, [projectLoras])
 
-  // path → stage 反查（训练中卡片要描边 accent）
+  // version_id → stage 反查（训练中卡片要描边 accent）
   const stageOf = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const l of projectLoras) map.set(l.path, l.stage)
-    return (path: string): string | undefined => map.get(path)
+    const map = new Map<number, string>()
+    for (const l of projectLoras) map.set(l.versionId, l.stage)
+    return (entry: LoraEntry): string | undefined =>
+      entry.version_id != null ? map.get(entry.version_id) : undefined
   }, [projectLoras])
 
   const selectedPaths = useMemo(() => new Set(loras.map((l) => l.path)), [loras])
 
   const addLora = (path: string) => {
     if (!path || selectedPaths.has(path)) return
-    onChange([...loras, { path, scale: 1.0 }])
+    // 找 picker 里这个 path 对应的 project/version，绑定到 LoraEntry
+    const matched = projectLoras.find((l) => l.path === path)
+    onChange([...loras, {
+      path,
+      scale: 1.0,
+      project_id: matched?.projectId ?? null,
+      version_id: matched?.versionId ?? null,
+    }])
   }
   const removeAt = (i: number) => onChange(loras.filter((_, idx) => idx !== i))
-  const setScaleAt = (i: number, scale: number) =>
-    onChange(loras.map((l, idx) => (idx === i ? { ...l, scale } : l)))
+  const replaceAt = (i: number, next: LoraEntry) =>
+    onChange(loras.map((l, idx) => (idx === i ? next : l)))
 
   return (
     <div className="flex flex-col gap-2">
       {loras.map((l, i) => (
         <LoraCard
-          key={`${l.path}-${i}`}
+          key={`${l.version_id ?? 'ext'}-${i}`}
           lora={l}
-          label={labelOf(l.path)}
-          stage={stageOf(l.path)}
-          onScaleChange={(s) => setScaleAt(i, s)}
+          label={labelOf(l)}
+          stage={stageOf(l)}
+          onChange={(next) => replaceAt(i, next)}
           onRemove={() => removeAt(i)}
         />
       ))}
