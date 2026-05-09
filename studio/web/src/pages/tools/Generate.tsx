@@ -295,8 +295,9 @@ export default function GeneratePage() {
       {/* 三列各自独立滚动，整页固定高度 = viewport */}
       <div className="p-6 flex gap-4 items-stretch flex-wrap xl:flex-nowrap flex-1 min-h-0">
 
-          {/* 左：sidebar 独立 scroll — LoRA → 提示词 → 参数 → Generate bar */}
-          <div className="flex flex-col gap-4 w-full xl:w-[420px] shrink-0 overflow-y-auto pr-2 self-stretch">
+          {/* 左：sidebar — 上半部分独立 scroll，Generate bar 固定底部始终可见 */}
+          <div className="flex flex-col gap-4 w-full xl:w-[420px] shrink-0 self-stretch min-h-0">
+          <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto pr-2">
 
             {/* mode=single：独立 LoRA 卡片；mode=xy：LoRA 选择合并到 XY 卡片顶部 */}
             {mode === 'single' && (
@@ -398,14 +399,16 @@ export default function GeneratePage() {
               </div>
             </div>
 
-            {/* Generate bar：对齐 design 的 .gen-bar — 橙色大按钮 + 右侧 meta */}
+          </div>
+            {/* Generate bar：固定 sidebar 底部（在 scroll 区外），橙色大按钮 + 右侧 meta */}
             <div
-              className="flex items-center gap-3"
+              className="flex items-center gap-3 shrink-0"
               style={{
                 padding: '10px 12px',
                 borderRadius: 'var(--r-lg)',
                 border: '1px solid var(--border-subtle)',
                 background: 'var(--bg-elevated)',
+                marginRight: 8, // 跟内层 pr-2 对齐，按钮区不被 scrollbar 占地
               }}
             >
               <button
