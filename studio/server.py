@@ -86,6 +86,7 @@ from .schema import (
     LoraEntry,
     RegAiConfig,
     TrainingConfig,
+    XYMatrixSpec,
     migrate_legacy_attention,
 )
 from .supervisor import Supervisor
@@ -1773,6 +1774,8 @@ class GenerateRequest(BaseModel):
     lora_configs: list[LoraEntry] = []
     mixed_precision: str = "bf16"
     attention_backend: AttentionBackend = "flash_attn"
+    # XY 矩阵：None=单图模式；设值时 schema 强制 prompts 单条 + count=1
+    xy_matrix: Optional[XYMatrixSpec] = None
 
     # 兼容老前端送 xformers / flash_attn 双 bool（自动映射成 attention_backend）
     @model_validator(mode="before")
@@ -1813,6 +1816,7 @@ def enqueue_generate(body: GenerateRequest) -> dict[str, Any]:
         lora_configs=[lc.model_dump() for lc in body.lora_configs],
         mixed_precision=body.mixed_precision,
         attention_backend=body.attention_backend,
+        xy_matrix=body.xy_matrix.model_dump() if body.xy_matrix else None,
     )
 
     cfg_path = tempdir / "config.json"

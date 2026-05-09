@@ -623,6 +623,30 @@ export interface LoraEntry {
   scale: number
 }
 
+/** XY 矩阵：单 task 内循环全图，前端按 (yi, xi) 排成 grid。
+ *  设了 xy_matrix 时后端强制 prompts 单条 + count=1（避免排列爆炸）。 */
+export type XYAxisType =
+  | 'lora_scale'
+  | 'lora_path'
+  | 'steps'
+  | 'cfg_scale'
+  | 'seed'
+  | 'sampler_name'
+
+export interface XYAxisSpec {
+  axis: XYAxisType
+  /** 类型按 axis 派生：steps/seed→int；lora_scale/cfg_scale→number；
+   *  sampler_name/lora_path→string */
+  values: Array<number | string>
+  /** axis ∈ {lora_scale, lora_path} 时必填 —— 绑定到 lora_configs 哪一项 */
+  lora_index?: number | null
+}
+
+export interface XYMatrixSpec {
+  x: XYAxisSpec
+  y?: XYAxisSpec | null
+}
+
 export interface GenerateRequest {
   prompts: string[]
   negative_prompt?: string
@@ -637,6 +661,8 @@ export interface GenerateRequest {
   lora_configs?: LoraEntry[]
   mixed_precision?: string
   attention_backend?: AttentionBackend
+  /** 设值时 prompts 限单条 + count=1（schema 校验） */
+  xy_matrix?: XYMatrixSpec | null
 }
 
 /** xformers 安装状态 / 安装结果（简化版，对照 FlashAttnStatus）。 */

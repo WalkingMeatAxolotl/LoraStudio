@@ -469,6 +469,75 @@ class LoraEntry(BaseModel):
     scale: float = Field(1.0, description="贡献权重（multiplier），多 LoRA 各自独立")
 
 
+# ---------------------------------------------------------------------------
+# XY 矩阵：轴枚举 + axis spec + matrix spec
+# ---------------------------------------------------------------------------
+#
+# 设计：单 task 内循环全图（一次 model load 摊销 ~30s 启动成本）。前端拿到
+# samples[].xy={xi,yi,xv,yv} 元数据按 (yi, xi) 排成 grid 渲染。
+#
+# 轴值类型按 axis 枚举派生：
+#   lora_scale / cfg_scale → float
+#   steps / seed           → int
+#   sampler_name / lora_path → str
+# pydantic 字段宽容用 list[Union[...]]；by_axis 校验在 model_validator 里。
+
+XYAxisType = Literal[
+    "lora_scale",
+    "lora_path",
+    "steps",
+    "cfg_scale",
+    "seed",
+    "sampler_name",
+]
+
+
+class XYAxisSpec(BaseModel):
+    """单轴定义：axis 枚举 + values 列表 + (lora_axis 时) lora_index。"""
+
+    model_config = ConfigDict(extra="forbid")
+    axis: XYAxisType = Field(..., description="轴绑定的字段")
+    values: list[Any] = Field(..., min_length=1, description="此轴扫描的值列表")
+    lora_index: Optional[int] = Field(
+        None, ge=0,
+        description="axis ∈ {lora_scale, lora_path} 时指定改 lora_configs 哪一项",
+    )
+
+
+class XYMatrixSpec(BaseModel):
+    """XY 矩阵：x 轴必填，y 可选（None = 单轴 N×1 退化成一行）。"""
+
+    model_config = ConfigDict(extra="forbid")
+    x: XYAxisSpec
+    y: Optional[XYAxisSpec] = None
+
+
+def _check_axis_values(axis: XYAxisSpec) -> None:
+    """按 axis 枚举校验 values 类型（浮点 / 整数 / 字符串）。"""
+    int_axes = {"steps", "seed"}
+    float_axes = {"lora_scale", "cfg_scale"}
+    str_axes = {"sampler_name", "lora_path"}
+    needs_lora_index = {"lora_scale", "lora_path"}
+
+    if axis.axis in int_axes:
+        for v in axis.values:
+            if not isinstance(v, int) or isinstance(v, bool):
+                raise ValueError(f"axis={axis.axis} values 必须为 int，收到 {type(v).__name__}")
+    elif axis.axis in float_axes:
+        for v in axis.values:
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                raise ValueError(f"axis={axis.axis} values 必须为 number，收到 {type(v).__name__}")
+    elif axis.axis in str_axes:
+        for v in axis.values:
+            if not isinstance(v, str):
+                raise ValueError(f"axis={axis.axis} values 必须为 str，收到 {type(v).__name__}")
+
+    if axis.axis in needs_lora_index and axis.lora_index is None:
+        raise ValueError(f"axis={axis.axis} 必须指定 lora_index（绑定到 lora_configs 哪一项）")
+    if axis.axis not in needs_lora_index and axis.lora_index is not None:
+        raise ValueError(f"axis={axis.axis} 不允许设 lora_index（仅 lora_* 轴可设）")
+
+
 class GenerateConfig(BaseModel):
     """测试出图任务参数。对应 tools/anima_generate.py 的 JSON 配置。
 
@@ -505,6 +574,12 @@ class GenerateConfig(BaseModel):
         description="LoRA 列表（每份独立 inject，multiplier=scale）",
     )
 
+    # XY 矩阵（None=普通单图模式；设了就 anima_generate.py 走 XY 循环分支）
+    xy_matrix: Optional[XYMatrixSpec] = Field(
+        None,
+        description="XY 矩阵参数；设值时 prompts 限单条、count=1（避免排列爆炸）",
+    )
+
     # 运行时
     output_dir: str = Field("", description="输出目录（服务端填 tempdir，task 结束清）")
     mixed_precision: str = Field("bf16")
@@ -517,6 +592,26 @@ class GenerateConfig(BaseModel):
     @classmethod
     def _migrate_attention(cls, data: Any) -> Any:
         return migrate_legacy_attention(data)
+
+    @model_validator(mode="after")
+    def _validate_xy(self) -> "GenerateConfig":
+        """XY 与 prompts/count 互斥；axis lora_index 必须指向已存在的 lora_configs。"""
+        if self.xy_matrix is None:
+            return self
+        if len(self.prompts) > 1:
+            raise ValueError("xy_matrix 与多 prompt 互斥（排列爆炸）—— 单 prompt 时才能开 XY")
+        if self.count != 1:
+            raise ValueError("xy_matrix 与 count>1 互斥 —— XY 模式下每个 (x,y) 出 1 张")
+        for label, axis in (("x", self.xy_matrix.x), ("y", self.xy_matrix.y)):
+            if axis is None:
+                continue
+            _check_axis_values(axis)
+            if axis.lora_index is not None and axis.lora_index >= len(self.lora_configs):
+                raise ValueError(
+                    f"xy_matrix.{label}.lora_index={axis.lora_index} 越界（仅 "
+                    f"{len(self.lora_configs)} 个 lora_configs）"
+                )
+        return self
 
 
 # ---------------------------------------------------------------------------
