@@ -293,13 +293,79 @@ def test_bootstrap_install_failure_returns_error(
 # ---------------------------------------------------------------------------
 
 
-def test_preload_skips_on_non_linux(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ors.sys, "platform", "win32")
+def test_preload_skips_on_unsupported_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """非 Linux / 非 Windows（如 macOS）→ 整体跳过。"""
+    monkeypatch.setattr(ors.sys, "platform", "darwin")
     res = ors._preload_torch_cuda_libs()
     assert res["platform_skip"] is True
     assert res["applied"] is False
     assert res["preloaded"] == []
     assert res["candidates"] == 0
+
+
+def test_preload_windows_adds_torch_lib_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Windows + 装了 torch GPU build → os.add_dll_directory(torch/lib) 被调，
+    返回结果 preloaded 含目录路径（onnxruntime dlopen cublasLt 等找得到）。"""
+    monkeypatch.setattr(ors.sys, "platform", "win32")
+
+    # 仿造 torch.__file__ 指向带 lib/ 的目录
+    torch_pkg = tmp_path / "torch"
+    (torch_pkg / "lib").mkdir(parents=True)
+    fake_torch = MagicMock()
+    fake_torch.__file__ = str(torch_pkg / "__init__.py")
+
+    def _import(name: str):
+        if name == "torch":
+            return fake_torch
+        raise ImportError(name)
+
+    monkeypatch.setattr(ors.importlib, "import_module", _import)
+    # 旁路：venv/Scripts/python.exe 下 `import torch` 走 sys.modules，
+    # 但 _add_torch_dll_dirs_windows 用的是 `import torch` 函数局部 —— 用
+    # monkeypatch sys.modules 直接喂
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+
+    called: list[str] = []
+    monkeypatch.setattr(
+        ors.os,
+        "add_dll_directory",
+        lambda d: called.append(d) or MagicMock(),
+        raising=False,
+    )
+
+    res = ors._preload_torch_cuda_libs()
+    assert res["applied"] is True
+    assert res["platform_skip"] is False
+    assert str(torch_pkg / "lib") in res["preloaded"]
+    assert called == [str(torch_pkg / "lib")]
+
+
+def test_preload_windows_noop_without_torch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows 但 venv 没 torch → applied 仍为 True（平台支持），candidates=0。"""
+    monkeypatch.setattr(ors.sys, "platform", "win32")
+    monkeypatch.delitem(__import__("sys").modules, "torch", raising=False)
+
+    # 让 `import torch` 失败：覆盖 importlib.import_module 不够，因为函数内
+    # 用的是字面 import；改 sys.modules 哨兵 + meta_path 不太干净。简单做法：
+    # 把 ors.os.path.isdir 在没 torch 时也走 False 路径 —— 但实际函数体先 import
+    # 失败就提前 return。这里直接构造 import 错误：
+    import builtins
+    real_import = builtins.__import__
+
+    def _fake_import(name, *a, **k):
+        if name == "torch":
+            raise ImportError("not installed")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    res = ors._preload_torch_cuda_libs()
+    assert res["applied"] is True
+    assert res["candidates"] == 0
+    assert res["preloaded"] == []
 
 
 def test_preload_noop_when_no_torch_nvidia_packages(

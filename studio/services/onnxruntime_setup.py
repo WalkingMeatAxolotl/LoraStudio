@@ -116,31 +116,84 @@ def _has_system_cuda_libs() -> bool:
     return False
 
 
+def _add_torch_dll_dirs_windows() -> dict[str, Any]:
+    """PR — Windows 上把 torch 自带的 CUDA DLL 目录加入 Python DLL 搜索路径。
+
+    Python 3.8+ Windows 出于安全废除了 PATH 自动 dlopen native DLL —— 必须
+    `os.add_dll_directory()` 主动声明。onnxruntime 在 import 期 dlopen
+    `cublasLt64_12.dll` / `cudnn_*.dll` 时找不到，`get_available_providers()`
+    照样列 CUDAExecutionProvider，但 InferenceSession 内部 silently 降 CPU
+    （onnx_tagger_base._create_session 已经能识别这种降级）。
+
+    torch GPU build wheel 把全套 CUDA DLL 放在 `site-packages/torch/lib/`
+    （cublasLt64_12 / cudnn*_9 / curand64_10 / cufft64_11 / cusparse64_12 /
+    cudart64_12 / nvrtc）。加进 DLL search path，后续 onnxruntime 的 dlopen
+    就能找到。
+
+    返回 `{"added", "errors", "candidates"}`：
+    - `added`：成功 add_dll_directory 的目录列表
+    - `errors`：尝试但失败的 (dir, reason) 列表
+    - `candidates`：发现的候选目录数（=0 表示 venv 没装 torch GPU build）
+    """
+    added: list[str] = []
+    errors: list[tuple[str, str]] = []
+    try:
+        import torch  # noqa: PLC0415
+    except ImportError:
+        return {"added": added, "errors": errors, "candidates": 0}
+    lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+    if not os.path.isdir(lib):
+        return {"added": added, "errors": errors, "candidates": 0}
+    try:
+        # Python 3.8+ Windows API；其他平台没有
+        os.add_dll_directory(lib)  # type: ignore[attr-defined]
+        added.append(lib)
+    except (OSError, AttributeError) as exc:
+        errors.append((lib, str(exc)))
+    return {"added": added, "errors": errors, "candidates": 1}
+
+
 def _preload_torch_cuda_libs() -> dict[str, Any]:
-    """Linux 上 ctypes RTLD_GLOBAL 预加载 torch 自带的 CUDA runtime so。
+    """跨平台预加载 torch 自带的 CUDA 库，让 onnxruntime-gpu dlopen 找得到。
 
     背景：onnxruntime-gpu wheel 不打包 CUDA runtime；用户机器没系统装 CUDA
     时，CUDA EP 在 `get_available_providers()` 里看着可用，但创 session 时
-    dlopen 失败（典型 `libcurand.so.10: cannot open shared object file`）。
-    PyTorch 装 GPU build 会带一组 `nvidia-*-cu12` wheel，把 so 放到
-    `site-packages/nvidia/*/lib/`；提前 RTLD_GLOBAL 加载它们后，onnxruntime
-    后续 dlopen 就能从已加载的全局符号表里解析。
+    dlopen 失败（Linux: `libcurand.so.10`；Windows: `cublasLt64_12.dll`）。
+    onnxruntime 不抛异常，会**静默降级到 CPU**（onnx_tagger_base 已有检测）。
 
-    **注意**：系统已有 CUDA（如 nvidia docker 镜像）时跳过 preload。torch wheel
-    的 CUDA 版本（cu128 = cuBLAS 12.8）与 onnxruntime-gpu 编译目标的 CUDA 子
-    版本不一致时，强行 RTLD_GLOBAL 覆盖会导致推理时 CUBLAS_STATUS_INVALID_VALUE。
+    PyTorch GPU build 自带所有需要的 CUDA 库：
+    - **Linux**：装到 `site-packages/nvidia/*/lib/` —— `ctypes.CDLL(RTLD_GLOBAL)`
+      预加载到全局符号表
+    - **Windows**：装到 `site-packages/torch/lib/` —— `os.add_dll_directory()`
+      加入 DLL 搜索路径（Python 3.8+ 必需）
+
+    **注意**：Linux 上系统已有 CUDA（如 nvidia docker 镜像）时跳过 preload。
+    torch wheel 的 CUDA 版本（cu128 = cuBLAS 12.8）与 onnxruntime-gpu 编译目标
+    的 CUDA 子版本不一致时，强行 RTLD_GLOBAL 覆盖会导致推理时
+    CUBLAS_STATUS_INVALID_VALUE。Windows 上 `add_dll_directory` 只是把目录加进
+    搜索路径，不强行覆盖已加载的符号，所以无此问题。
 
     只对**当前进程**生效；server 子进程必须自己再跑一次（本模块在 import 时
     自动跑）。
 
     返回 `{"applied", "platform_skip", "system_cuda_skip", "preloaded", "errors", "candidates"}`：
-    - `platform_skip=True`：非 Linux，整体跳过（Windows / macOS 走别的路子）
-    - `system_cuda_skip=True`：检测到系统 CUDA，跳过 preload 让 onnxruntime
+    - `platform_skip=True`：非 Linux / 非 Windows（如 macOS），整体跳过
+    - `system_cuda_skip=True`：Linux 系统 CUDA 路径，跳过 preload 让 onnxruntime
       自己 dlopen 系统提供的版本
-    - `preloaded`：成功 dlopen 的绝对路径列表
-    - `errors`：尝试 dlopen 但失败的 (path, reason) 列表
-    - `candidates`：被检视的 nvidia.* 子包数（用来观测 venv 里是否有 torch CUDA）
+    - `preloaded`：成功 dlopen / add_dll_directory 的绝对路径列表
+    - `errors`：尝试但失败的 (path, reason) 列表
+    - `candidates`：检视的候选数（Linux: nvidia.* 子包；Windows: torch/lib 目录）
     """
+    if sys.platform == "win32":
+        wres = _add_torch_dll_dirs_windows()
+        return {
+            "applied": True,
+            "platform_skip": False,
+            "system_cuda_skip": False,
+            "preloaded": wres["added"],
+            "errors": wres["errors"],
+            "candidates": wres["candidates"],
+        }
     if not sys.platform.startswith("linux"):
         return {
             "applied": False,
