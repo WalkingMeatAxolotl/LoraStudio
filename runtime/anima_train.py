@@ -2085,6 +2085,8 @@ def main():
     if optimizer_type == "prodigy":
         optimizer_extra["d_coef"] = float(getattr(args, "prodigy_d_coef", 1.0))
         optimizer_extra["safeguard_warmup"] = bool(getattr(args, "prodigy_safeguard_warmup", True))
+    if optimizer_type == "prodigy_plus":
+        optimizer_extra["use_stableadamw"] = bool(getattr(args, "prodigy_use_stableadamw", True))
     optimizer = create_optimizer(
         optimizer_type=optimizer_type,
         params=param_groups,

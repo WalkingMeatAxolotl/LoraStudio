@@ -5,13 +5,20 @@ Optimizer Utils Module - 优化器创建
 1. 标准 AdamW - PyTorch 内置
 2. 8-bit AdamW (bitsandbytes) - 内存高效
 3. Prodigy (prodigyopt) - 无需调 lr 的自适应优化器
+4. ProdigyPlusScheduleFree (prodigy-plus-schedule-free) - 自适应 + Schedule-Free
 """
 
-from typing import List, Dict, Any, Optional, Iterator
+from __future__ import annotations
+
+import inspect
+import logging
+from typing import Any, Dict, List, Optional, Union, Iterator
 
 import torch
 from torch import nn
 from torch.optim import Optimizer, AdamW
+
+logger = logging.getLogger(__name__)
 
 # 尝试导入 bitsandbytes
 try:
@@ -19,6 +26,43 @@ try:
     BITSANDBYTES_AVAILABLE = True
 except ImportError:
     BITSANDBYTES_AVAILABLE = False
+
+
+def _is_param_groups(params: Any) -> bool:
+    """判断 params 是否已经是 [{'params': [...], ...}] 形式。"""
+    if isinstance(params, (list, tuple)) and len(params) > 0:
+        return isinstance(params[0], dict) and "params" in params[0]
+    return False
+
+
+def _filter_kwargs_by_signature(cls_or_fn, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """只保留 cls_or_fn 签名里真实存在的关键字参数。
+
+    避免不同版本库的参数差异导致 TypeError。有 **kwargs 的函数直接透传。
+    """
+    try:
+        sig = inspect.signature(cls_or_fn)
+    except (TypeError, ValueError):
+        return dict(kwargs)
+
+    accepted, has_var_keyword = set(), False
+    for name, param in sig.parameters.items():
+        if param.kind is inspect.Parameter.VAR_KEYWORD:
+            has_var_keyword = True
+            break
+        accepted.add(name)
+
+    if has_var_keyword:
+        return dict(kwargs)
+
+    filtered = {k: v for k, v in kwargs.items() if k in accepted}
+    dropped = [k for k in kwargs if k not in accepted]
+    if dropped:
+        logger.warning(
+            f"[optimizer] Dropped unsupported kwargs for "
+            f"{getattr(cls_or_fn, '__name__', cls_or_fn)}: {dropped}"
+        )
+    return filtered
 
 
 def create_optimizer(
@@ -84,10 +128,20 @@ def create_optimizer(
             **kwargs
         )
 
+    elif optimizer_type == "prodigy_plus":
+        return create_prodigy_plus(
+            params=params,
+            lr=learning_rate,
+            betas=betas,
+            weight_decay=weight_decay,
+            eps=eps,
+            **kwargs
+        )
+
     else:
         raise ValueError(
             f"Unknown optimizer type: {optimizer_type}. "
-            f"Choose from: adamw, adamw8bit, prodigy"
+            f"Choose from: adamw, adamw8bit, prodigy, prodigy_plus"
         )
 
 
@@ -280,6 +334,72 @@ def create_prodigy(
 
     print("  [OK] Prodigy optimizer created")
 
+    return optimizer
+
+
+def create_prodigy_plus(
+    params,
+    lr: float = 1.0,
+    betas: tuple = (0.9, 0.99),
+    weight_decay: float = 0.01,
+    eps: Optional[float] = None,   # None → Adam-atan2（新版推荐，数值更稳）
+    d_coef: float = 1.0,
+    use_stableadamw: bool = True,  # 抗 bf16 梯度尖峰
+    use_schedulefree: bool = True,
+    use_bias_correction: bool = False,
+    factored: bool = False,
+    **kwargs,
+) -> Optimizer:
+    """创建 ProdigyPlusScheduleFree 优化器。
+
+    自适应学习率 + Schedule-Free，无需 LR scheduler。
+    训练前须调用 optimizer.train()，推理/采样前须调用 optimizer.eval()。
+
+    eps=None 启用 Adam-atan2（atan2(m, sqrt(v))，天然避免除零，bf16 友好）。
+    版本兼容：未知参数自动过滤，不会因库版本差异 TypeError。
+    """
+    try:
+        from prodigy_plus_schedule_free import ProdigyPlusScheduleFree
+    except ImportError as e:
+        raise ImportError(
+            "prodigy-plus-schedule-free is required. "
+            "Install with: pip install prodigy-plus-schedule-free"
+        ) from e
+
+    if abs(float(lr) - 1.0) > 1e-8:
+        logger.warning(
+            f"[ProdigyPlus] Forcing lr=1.0 (got {lr}); "
+            f"Prodigy adapts step size internally via d."
+        )
+    lr = 1.0
+
+    if isinstance(eps, (int, float)) and eps <= 0:
+        logger.warning(f"[ProdigyPlus] eps={eps} non-positive, falling back to None (Adam-atan2).")
+        eps = None
+
+    candidate = dict(
+        lr=lr, betas=betas, eps=eps, weight_decay=weight_decay,
+        d_coef=d_coef, use_stableadamw=use_stableadamw,
+        use_schedulefree=use_schedulefree,
+        use_bias_correction=use_bias_correction,
+        factored=factored,
+        **kwargs,
+    )
+    safe_kwargs = _filter_kwargs_by_signature(ProdigyPlusScheduleFree, candidate)
+
+    param_list = params if _is_param_groups(params) else list(params)
+
+    logger.info(
+        f"Creating ProdigyPlusScheduleFree "
+        f"(d_coef={d_coef}, betas={betas}, wd={weight_decay}, "
+        f"eps={eps}, stableadamw={use_stableadamw})"
+    )
+    logger.info(f"[ProdigyPlus] Effective kwargs: {list(safe_kwargs.keys())}")
+
+    optimizer = ProdigyPlusScheduleFree(param_list, **safe_kwargs)
+
+    total = sum(p.numel() for g in optimizer.param_groups for p in g["params"] if p.requires_grad)
+    logger.info(f"[ProdigyPlus] Trainable params: {total:,}")
     return optimizer
 
 

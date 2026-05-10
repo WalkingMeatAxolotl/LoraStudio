@@ -267,6 +267,11 @@ class TrainingConfig(BaseModel):
         description="Prodigy warmup 期间保护 d 增长",
         json_schema_extra=_meta("training", show_when="optimizer_type==prodigy"),
     )
+    prodigy_use_stableadamw: bool = Field(
+        True,
+        description="StableAdamW：缓解 bf16 梯度尖峰（仅 prodigy_plus）",
+        json_schema_extra=_meta("training", show_when="optimizer_type==prodigy_plus"),
+    )
     weight_decay: float = Field(
         0.0, ge=0.0,
         description="权重衰减（0=禁用）",
