@@ -83,10 +83,13 @@ export interface HuggingFaceConfig {
 }
 
 export interface WandBConfig {
+  enabled: boolean
   api_key: string
   project: string
   entity: string
   base_url: string
+  mode: 'online' | 'offline' | 'disabled'
+  log_samples: boolean
 }
 
 export interface JoyCaptionConfig {
@@ -99,6 +102,8 @@ export interface LLMPromptPreset {
   id: string
   label: string
   prompt: string
+  builtin: boolean
+  output_format: 'json' | 'text'
 }
 
 export interface LLMTaggerConfig {
@@ -116,6 +121,7 @@ export interface LLMTaggerConfig {
   max_retries: number
   max_side: number
   jpeg_quality: number
+  max_image_mb: number
 }
 
 export interface LLMConnectionTestResult {

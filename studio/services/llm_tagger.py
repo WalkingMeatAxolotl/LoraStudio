@@ -239,28 +239,48 @@ class LLMTagger:
                     p,
                     max_side=cfg.max_side,
                     quality=cfg.jpeg_quality,
+                    max_image_mb=cfg.max_image_mb,
                 )
-                parsed = self._call_with_retry(cfg, data_url, p)
-                caption_json = self._normalize_llm_payload(parsed)
-                yield {
-                    "image": p,
-                    "tags": caption_json_to_tags(caption_json),
-                    "caption": caption_json_to_text(caption_json),
-                    "caption_json": caption_json,
-                }
+                content = self._call_with_retry(cfg, data_url, p)
+                if self._output_format(cfg) == "text":
+                    text = content.strip()
+                    if not text:
+                        raise RuntimeError("LLM 返回空内容")
+                    yield {"image": p, "tags": [text], "caption": text}
+                else:
+                    parsed = self._parse_json_text(content)
+                    caption_json = self._normalize_llm_payload(parsed)
+                    yield {
+                        "image": p,
+                        "tags": caption_json_to_tags(caption_json),
+                        "caption": caption_json_to_text(caption_json),
+                        "caption_json": caption_json,
+                    }
             except Exception as exc:  # noqa: BLE001
                 yield {"image": p, "tags": [], "error": str(exc)}
             on_progress(i + 1, total)
+
+    def _selected_preset(
+        self, cfg: "secrets.LLMTaggerConfig"
+    ) -> Optional["secrets.LLMPromptPresetConfig"]:
+        for preset in cfg.prompt_presets:
+            if preset.id == cfg.prompt_preset:
+                return preset
+        return cfg.prompt_presets[0] if cfg.prompt_presets else None
 
     def _prompt(self, cfg: "secrets.LLMTaggerConfig") -> str:
         if cfg.prompt_preset == "custom":
             prompt = cfg.custom_prompt.strip()
             if prompt:
                 return prompt
-        for preset in cfg.prompt_presets:
-            if preset.id == cfg.prompt_preset:
-                return preset.prompt
-        return cfg.prompt_presets[0].prompt
+        preset = self._selected_preset(cfg)
+        return preset.prompt if preset else ""
+
+    def _output_format(self, cfg: "secrets.LLMTaggerConfig") -> str:
+        if cfg.prompt_preset == "custom":
+            return "text" if self._overrides.get("_output_format") == "text" else "json"
+        preset = self._selected_preset(cfg)
+        return preset.output_format if preset else "json"
 
     def _headers(self, cfg: "secrets.LLMTaggerConfig") -> dict[str, str]:
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
@@ -273,7 +293,7 @@ class LLMTagger:
         cfg: "secrets.LLMTaggerConfig",
         data_url: str,
         image_path: Path,
-    ) -> dict[str, Any]:
+    ) -> str:
         last_exc: Optional[Exception] = None
         for attempt in range(1, cfg.max_retries + 1):
             try:
@@ -311,7 +331,6 @@ class LLMTagger:
                     if cfg.endpoint == "responses"
                     else self._extract_chat_text(payload)
                 )
-                parsed = self._parse_json_text(content)
                 logger.info(
                     "LLM tagger OK %s model=%s image=%s elapsed=%sms",
                     endpoint,
@@ -319,7 +338,7 @@ class LLMTagger:
                     image_path.name,
                     elapsed_ms,
                 )
-                return parsed
+                return content
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 if attempt < cfg.max_retries:
@@ -341,7 +360,7 @@ class LLMTagger:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": self._user_text(image_path)},
+                        {"type": "text", "text": self._user_text(image_path, cfg)},
                         {"type": "image_url", "image_url": {"url": data_url}},
                     ],
                 },
@@ -363,20 +382,19 @@ class LLMTagger:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": self._user_text(image_path)},
+                        {"type": "input_text", "text": self._user_text(image_path, cfg)},
                         {"type": "input_image", "image_url": data_url},
                     ],
                 },
             ],
         }
 
-    @staticmethod
-    def _user_text(image_path: Path) -> str:
+    def _user_text(self, image_path: Path, cfg: "secrets.LLMTaggerConfig") -> str:
         return json.dumps(
             {
                 "file_name": image_path.name,
                 "target": "anima_lora_caption",
-                "return_json_only": True,
+                "return_json_only": self._output_format(cfg) == "json",
             },
             ensure_ascii=False,
         )
@@ -452,23 +470,35 @@ class LLMTagger:
         *,
         max_side: int,
         quality: int,
+        max_image_mb: float = 5.0,
     ) -> str:
         path = Path(image_path)
         if not path.exists():
             raise RuntimeError(f"Image does not exist: {path}")
+        max_bytes = max(1, int(float(max_image_mb or 5.0) * 1024 * 1024))
+        side = max(64, int(max_side))
+        initial_quality = max(1, min(100, int(quality)))
         with Image.open(path) as img:
             img = ImageOps.exif_transpose(img) or img
             if img.mode != "RGBA":
                 img = img.convert("RGBA")
-            img.thumbnail((max(64, int(max_side)), max(64, int(max_side))))
-            canvas = Image.new("RGB", img.size, (255, 255, 255))
-            canvas.paste(img, mask=img.getchannel("A"))
-            buf = io.BytesIO()
-            canvas.save(
-                buf,
-                format="JPEG",
-                quality=max(1, min(100, int(quality))),
-                optimize=True,
-            )
-        encoded = base64.b64encode(buf.getvalue()).decode("ascii")
-        return f"data:image/jpeg;base64,{encoded}"
+            while True:
+                work = img.copy()
+                work.thumbnail((side, side))
+                canvas = Image.new("RGB", work.size, (255, 255, 255))
+                canvas.paste(work, mask=work.getchannel("A"))
+                for q in (initial_quality, 75, 65, 55, 45, 35):
+                    q = min(initial_quality, q)
+                    buf = io.BytesIO()
+                    canvas.save(buf, format="JPEG", quality=max(1, q), optimize=True)
+                    data = buf.getvalue()
+                    encoded_bytes = base64.b64encode(data)
+                    if len(encoded_bytes) <= max_bytes:
+                        encoded = encoded_bytes.decode("ascii")
+                        return f"data:image/jpeg;base64,{encoded}"
+                if side <= 256:
+                    raise RuntimeError(
+                        f"压缩后图片仍超过上限 {max_image_mb:g} MB，请调大 max_image_mb 或使用更小图片"
+                    )
+                side = max(256, int(side * 0.8))
+                initial_quality = min(initial_quality, 75)

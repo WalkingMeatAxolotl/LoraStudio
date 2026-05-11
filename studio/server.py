@@ -1141,6 +1141,7 @@ class LLMTaggerOverrides(BaseModel):
     max_retries: Optional[int] = None
     max_side: Optional[int] = None
     jpeg_quality: Optional[int] = None
+    max_image_mb: Optional[float] = None
 
 
 class TagJobRequest(BaseModel):

@@ -58,6 +58,7 @@ type LLMTaggerForm = {
   max_retries: number
   max_side: number
   jpeg_quality: number
+  max_image_mb: number
 }
 
 function fromConfig(cfg: WD14Config): Wd14Form {
@@ -97,6 +98,7 @@ function fromLLMTaggerConfig(cfg: LLMTaggerConfig): LLMTaggerForm {
     max_retries: cfg.max_retries,
     max_side: cfg.max_side,
     jpeg_quality: cfg.jpeg_quality,
+    max_image_mb: cfg.max_image_mb,
   }
 }
 
@@ -858,6 +860,7 @@ function LLMTaggerPanel({
           <LLMLabeledNumber label="max_retries" value={form.max_retries} base={defaults.max_retries} min={1} max={10} disabled={disabled} onChange={(v) => onChange({ ...form, max_retries: Math.round(v) })} />
           <LLMLabeledNumber label="max_side" value={form.max_side} base={defaults.max_side} min={64} max={4096} disabled={disabled} onChange={(v) => onChange({ ...form, max_side: Math.round(v) })} />
           <LLMLabeledNumber label="jpeg_quality" value={form.jpeg_quality} base={defaults.jpeg_quality} min={1} max={100} disabled={disabled} onChange={(v) => onChange({ ...form, jpeg_quality: Math.round(v) })} />
+          <LLMLabeledNumber label="max_image_mb" value={form.max_image_mb} base={defaults.max_image_mb} min={0.1} max={25} step={0.1} disabled={disabled} onChange={(v) => onChange({ ...form, max_image_mb: v })} />
         </div>
       )}
     </section>
@@ -910,6 +913,7 @@ function LLMLabeledNumber({
   base,
   min,
   max,
+  step = 1,
   disabled,
   onChange,
 }: {
@@ -918,6 +922,7 @@ function LLMLabeledNumber({
   base: number
   min: number
   max: number
+  step?: number
   disabled: boolean
   onChange: (v: number) => void
 }) {
@@ -928,6 +933,7 @@ function LLMLabeledNumber({
         type="number"
         min={min}
         max={max}
+        step={step}
         value={value}
         onChange={(e) => {
           const n = Number(e.target.value)

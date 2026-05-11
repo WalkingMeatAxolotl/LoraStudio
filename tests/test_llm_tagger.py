@@ -236,3 +236,32 @@ def test_responses_payload_uses_instructions(isolated_secrets, tmp_path: Path) -
     body = sess.post.call_args.kwargs["json"]
     assert "instructions" in body
     assert body["input"][0]["role"] == "user"
+
+
+def test_text_preset_returns_natural_caption(isolated_secrets, tmp_path: Path) -> None:
+    secrets.update({"llm_tagger": {"prompt_preset": "joycaption"}})
+    sess = MagicMock()
+    sess.post.return_value = _chat_response("a calm natural caption")
+    tagger = llm_tagger.LLMTagger(session=sess)
+    img = _png(tmp_path / "1.png")
+
+    [result] = list(tagger.tag([img]))
+
+    assert result["tags"] == ["a calm natural caption"]
+    assert result["caption"] == "a calm natural caption"
+    assert "caption_json" not in result
+
+
+def test_image_data_url_respects_payload_cap(tmp_path: Path) -> None:
+    img = tmp_path / "large.png"
+    Image.effect_noise((1024, 1024), 80).convert("RGB").save(img)
+
+    data_url = llm_tagger.LLMTagger._image_to_data_url(
+        img,
+        max_side=1024,
+        quality=95,
+        max_image_mb=0.25,
+    )
+
+    encoded = data_url.split(",", 1)[1].encode("ascii")
+    assert len(encoded) <= int(0.25 * 1024 * 1024)

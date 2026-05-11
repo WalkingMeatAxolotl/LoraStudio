@@ -54,10 +54,19 @@ class HuggingFaceConfig(BaseModel):
 
 
 class WandBConfig(BaseModel):
+    enabled: bool = False
     api_key: str = ""
     project: str = "AnimaLoraStudio"
     entity: str = ""
     base_url: str = ""
+    mode: str = "online"
+    log_samples: bool = True
+
+    @model_validator(mode="after")
+    def _normalize_values(self) -> "WandBConfig":
+        if self.mode not in {"online", "offline", "disabled"}:
+            self.mode = "online"
+        return self
 
 
 class DownloadConfig(BaseModel):
@@ -76,76 +85,18 @@ class JoyCaptionConfig(BaseModel):
     prompt_template: str = "Descriptive Caption"
 
 
-DEFAULT_LLM_STYLE_JSON_PROMPT = """You are an image captioning assistant for anime style LoRA training.
-
-Look at the image and produce JSON only. Do not wrap it in Markdown.
-
-Output schema:
-{
-  "quality": "",
-  "count": "1girl|1boy|solo|multiple girls|...",
-  "character": "",
-  "series": "",
-  "artist": "",
-  "appearance": ["visible character/style appearance tags"],
-  "tags": ["pose, expression, composition, clothing, medium, art style tags"],
-  "environment": ["background, lighting, scene, color palette tags"],
-  "nl": "one short English natural-language description"
-}
-
-Rules:
-- Use concise English Danbooru-style tags with spaces, not underscores.
-- For style LoRA, keep useful style, medium, lighting, color, and background tags.
-- Do not invent character, series, or artist names. Leave those fields empty unless visually explicit.
-- Do not include quality/resolution/source/noise tags such as best quality, masterpiece, normal quality, highres, hires, absurdres, lowres, artist name, signature, watermark, username, dated, commentary.
-- Do not include explanations or extra keys."""
-
-
-DEFAULT_LLM_GENERAL_JSON_PROMPT = """You are an image captioning assistant for LoRA training.
-
-Return JSON only, with keys:
-quality, count, character, series, artist, appearance, tags, environment, nl.
-
-Use concise English Danbooru-style tags with spaces. Describe only visible content.
-Keep appearance tags separate from action/composition tags and background tags.
-Leave unknown character, series, and artist fields empty.
-Avoid metadata, watermark, signature, username, date, and pure quality/resolution tags."""
-
-
-DEFAULT_LLM_TXT_TAGS_PROMPT = """You are an image tagger for LoRA training.
-
-Return JSON only in this exact schema:
-{"tags":["tag one","tag two","tag three"],"nl":""}
-
-Use concise English Danbooru-style tags with spaces, not underscores.
-Describe visible subject, style, medium, clothing, pose, expression, lighting, and background.
-Avoid metadata, watermark, signature, username, date, and pure quality/resolution tags."""
-
-
 class LLMPromptPresetConfig(BaseModel):
     id: str
     label: str
     prompt: str
+    builtin: bool = False
+    output_format: str = "json"  # json | text
 
 
 def _default_llm_prompt_presets() -> list[LLMPromptPresetConfig]:
-    return [
-        LLMPromptPresetConfig(
-            id="style_json",
-            label="画风 LoRA JSON",
-            prompt=DEFAULT_LLM_STYLE_JSON_PROMPT,
-        ),
-        LLMPromptPresetConfig(
-            id="general_json",
-            label="通用 LoRA JSON",
-            prompt=DEFAULT_LLM_GENERAL_JSON_PROMPT,
-        ),
-        LLMPromptPresetConfig(
-            id="txt_tags",
-            label="TXT 标签列表",
-            prompt=DEFAULT_LLM_TXT_TAGS_PROMPT,
-        ),
-    ]
+    from .llm_presets import builtin_llm_presets
+
+    return [LLMPromptPresetConfig(**item) for item in builtin_llm_presets()]
 
 
 class LLMTaggerConfig(BaseModel):
@@ -165,22 +116,34 @@ class LLMTaggerConfig(BaseModel):
     max_retries: int = 3
     max_side: int = 1280
     jpeg_quality: int = 85
+    max_image_mb: float = 5.0
 
     @model_validator(mode="after")
     def _normalize_values(self) -> "LLMTaggerConfig":
         if self.endpoint not in {"chat_completions", "responses"}:
             self.endpoint = "chat_completions"
+        builtin_presets = _default_llm_prompt_presets()
+        builtin_by_id = {preset.id: preset for preset in builtin_presets}
         presets: list[LLMPromptPresetConfig] = []
         seen: set[str] = set()
-        for preset in self.prompt_presets or _default_llm_prompt_presets():
+        for preset in builtin_presets:
+            presets.append(preset)
+            seen.add(preset.id)
+        for preset in self.prompt_presets or []:
             preset.id = "".join(
                 ch if ch.isalnum() or ch in ("_", "-") else "_"
                 for ch in str(preset.id or "").strip()
             ).strip("_")
             preset.label = str(preset.label or preset.id).strip()
             preset.prompt = str(preset.prompt or "").strip()
+            preset.output_format = (
+                "text" if str(preset.output_format).strip() == "text" else "json"
+            )
+            if preset.id in builtin_by_id:
+                continue
             if not preset.id or not preset.prompt or preset.id in seen:
                 continue
+            preset.builtin = False
             seen.add(preset.id)
             presets.append(preset)
         if not presets:
@@ -207,6 +170,7 @@ class LLMTaggerConfig(BaseModel):
         self.max_retries = max(1, int(self.max_retries or 3))
         self.max_side = max(64, int(self.max_side or 1280))
         self.jpeg_quality = max(1, min(100, int(self.jpeg_quality or 85)))
+        self.max_image_mb = max(0.1, float(self.max_image_mb or 5.0))
         return self
 
 

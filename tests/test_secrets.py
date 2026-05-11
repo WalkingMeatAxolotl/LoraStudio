@@ -68,7 +68,9 @@ def test_llm_tagger_defaults(secrets_file: Path) -> None:
         "style_json",
         "general_json",
         "txt_tags",
+        "joycaption",
     ]
+    assert all(p.builtin for p in s.llm_tagger.prompt_presets)
 
 
 def test_llm_tagger_keeps_model_in_model_ids(secrets_file: Path) -> None:

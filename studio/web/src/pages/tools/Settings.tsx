@@ -14,6 +14,7 @@ import {
   type SecretsPatch,
   type TorchCuTag,
   type TorchStatus,
+  type WandBConfig,
   type WD14Runtime,
 } from '../../api/client'
 import PageHeader from '../../components/PageHeader'
@@ -48,9 +49,10 @@ const TAB_LIST: { id: Tab; label: string }[] = [
 const TAB_STORAGE_KEY = 'studio.settings.activeTab'
 
 const DEFAULT_LLM_PROMPT_PRESETS: LLMPromptPreset[] = [
-  { id: 'style_json', label: '画风 LoRA JSON', prompt: 'Return JSON captions for anime style LoRA training.' },
-  { id: 'general_json', label: '通用 LoRA JSON', prompt: 'Return JSON captions for LoRA training.' },
-  { id: 'txt_tags', label: 'TXT 标签列表', prompt: 'Return JSON only: {"tags":["tag one"],"nl":""}.' },
+  { id: 'style_json', label: '画风 LoRA JSON', prompt: 'Return JSON captions for anime style LoRA training.', builtin: true, output_format: 'json' },
+  { id: 'general_json', label: '通用 LoRA JSON', prompt: 'Return JSON captions for LoRA training.', builtin: true, output_format: 'json' },
+  { id: 'txt_tags', label: 'TXT 标签列表', prompt: 'Return JSON only: {"tags":["tag one"],"nl":""}.', builtin: true, output_format: 'json' },
+  { id: 'joycaption', label: 'JoyCaption', prompt: 'Descriptive Caption', builtin: true, output_format: 'text' },
 ]
 
 function getStoredTab(): Tab {
@@ -79,7 +81,15 @@ const EMPTY: Secrets = {
     cdn_rate_per_sec: 5,
   },
   huggingface: { token: '', endpoint: 'https://hf-mirror.com' },
-  wandb: { api_key: '', project: 'AnimaLoraStudio', entity: '', base_url: '' },
+  wandb: {
+    enabled: false,
+    api_key: '',
+    project: 'AnimaLoraStudio',
+    entity: '',
+    base_url: '',
+    mode: 'online',
+    log_samples: true,
+  },
   joycaption: {
     base_url: 'http://localhost:8000/v1',
     model: 'fancyfeast/llama-joycaption-beta-one-hf-llava',
@@ -100,6 +110,7 @@ const EMPTY: Secrets = {
     max_retries: 3,
     max_side: 1280,
     jpeg_quality: 85,
+    max_image_mb: 5,
   },
   wd14: {
     model_id: 'SmilingWolf/wd-eva02-large-tagger-v3',
@@ -651,6 +662,14 @@ export default function SettingsPage() {
               className={`${textInputClass} max-w-24`}
             />
           </SettingsField>
+          <SettingsField label="max_image_mb" desc="压缩后单图 payload 上限；Claude 等服务常见限制为 5 MB">
+            <input
+              type="number" min={0.1} max={25} step={0.1}
+              value={draft.llm_tagger.max_image_mb}
+              onChange={(e) => update('llm_tagger', 'max_image_mb', Math.max(0.1, Number(e.target.value) || 5))}
+              className={`${textInputClass} max-w-24`}
+            />
+          </SettingsField>
         </div>
       </SettingsSection>
 
@@ -789,6 +808,14 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection title="Weights & Biases">
+        <SettingsField label="启用 WandB" desc="打开后所有训练任务都会写入 W&B；不再占用训练配置字段">
+          <div className="flex items-center gap-3">
+            <Bool value={draft.wandb.enabled} onChange={(v) => update('wandb', 'enabled', v)} />
+            <span className="text-xs text-fg-tertiary">
+              需要训练环境已安装 wandb 包
+            </span>
+          </div>
+        </SettingsField>
         <SettingsField label="api_key">
           <SensitiveInput
             value={draft.wandb.api_key}
@@ -796,7 +823,7 @@ export default function SettingsPage() {
             onChange={(v) => update('wandb', 'api_key', v)}
           />
         </SettingsField>
-        <SettingsField label="project" desc="训练配置里 wandb_project 留空时使用这里">
+        <SettingsField label="project">
           <input
             type="text"
             value={draft.wandb.project}
@@ -822,6 +849,22 @@ export default function SettingsPage() {
             className={textInputClass}
           />
         </SettingsField>
+        <div className="grid grid-cols-2 gap-3">
+          <SettingsField label="mode">
+            <select
+              value={draft.wandb.mode}
+              onChange={(e) => update('wandb', 'mode', e.target.value as WandBConfig['mode'])}
+              className={textInputClass}
+            >
+              <option value="online">online</option>
+              <option value="offline">offline</option>
+              <option value="disabled">disabled</option>
+            </select>
+          </SettingsField>
+          <SettingsField label="记录采样图">
+            <Bool value={draft.wandb.log_samples} onChange={(v) => update('wandb', 'log_samples', v)} />
+          </SettingsField>
+        </div>
       </SettingsSection>
 
       <SettingsSection title="队列调度">
@@ -937,20 +980,22 @@ function LLMPromptPresetsEditor({
       id,
       label: `新预设 ${idx}`,
       prompt: 'Return JSON only with keys: quality, count, character, series, artist, appearance, tags, environment, nl.',
+      builtin: false,
+      output_format: 'json' as const,
     }
     onChange([...presets, next])
     onCurrentChange(id)
   }
 
   const deleteCurrent = () => {
-    if (!current || presets.length <= 1) return
+    if (!current || current.builtin || presets.length <= 1) return
     const next = presets.filter((p) => p.id !== current.id)
     onChange(next)
     onCurrentChange(next[0]?.id ?? 'custom')
   }
 
   const updateCurrent = (patch: Partial<LLMPromptPreset>) => {
-    if (!current) return
+    if (!current || current.builtin) return
     onChange(presets.map((p) => (p.id === current.id ? { ...p, ...patch } : p)))
   }
 
@@ -972,25 +1017,41 @@ function LLMPromptPresetsEditor({
         <button
           type="button"
           onClick={deleteCurrent}
-          disabled={!current || presets.length <= 1}
+          disabled={!current || current.builtin || presets.length <= 1}
           className="btn btn-ghost btn-sm"
-          title={presets.length <= 1 ? '至少保留一个预设' : '删除当前预设'}
+          title={current?.builtin ? '内置预设不可删除' : presets.length <= 1 ? '至少保留一个预设' : '删除当前预设'}
         >
           删除
         </button>
       </div>
       {current && (
         <div className="flex flex-col gap-1.5">
+          {current.builtin && (
+            <div className="text-[10px] text-fg-tertiary">
+              内置预设由程序提供，不可修改；如需调整请新增自定义预设。
+            </div>
+          )}
           <input
             type="text"
             value={current.label}
             onChange={(e) => updateCurrent({ label: e.target.value })}
+            disabled={current.builtin}
             className={textInputClass}
             placeholder="预设名称"
           />
+          <select
+            value={current.output_format}
+            onChange={(e) => updateCurrent({ output_format: e.target.value as LLMPromptPreset['output_format'] })}
+            disabled={current.builtin}
+            className={textInputClass}
+          >
+            <option value="json">JSON caption</option>
+            <option value="text">Text caption</option>
+          </select>
           <textarea
             value={current.prompt}
             onChange={(e) => updateCurrent({ prompt: e.target.value })}
+            disabled={current.builtin}
             className={`${textInputClass} min-h-44 font-mono`}
             placeholder="提示词内容"
           />

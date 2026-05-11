@@ -12,15 +12,23 @@ const initialServerState = {
     convert_to_png: true,
     remove_alpha_channel: false,
   },
-  danbooru: { username: '', api_key: '' },
+  danbooru: { username: '', api_key: '', account_type: 'free' },
   download: {
     exclude_tags: [],
     parallel_workers: 4,
     api_rate_per_sec: 2,
     cdn_rate_per_sec: 5,
   },
-  huggingface: { token: '' },
-  wandb: { api_key: '', project: 'AnimaLoraStudio', entity: '', base_url: '' },
+  huggingface: { token: '', endpoint: 'https://hf-mirror.com' },
+  wandb: {
+    enabled: false,
+    api_key: '',
+    project: 'AnimaLoraStudio',
+    entity: '',
+    base_url: '',
+    mode: 'online',
+    log_samples: true,
+  },
   llm_tagger: {
     base_url: 'http://localhost:8000/v1',
     api_key: '',
@@ -29,7 +37,7 @@ const initialServerState = {
     endpoint: 'chat_completions',
     prompt_preset: 'style_json',
     prompt_presets: [
-      { id: 'style_json', label: '画风 LoRA JSON', prompt: 'Return JSON captions for anime style LoRA training.' },
+      { id: 'style_json', label: '画风 LoRA JSON', prompt: 'Return JSON captions for anime style LoRA training.', builtin: true, output_format: 'json' },
     ],
     custom_prompt: '',
     temperature: 0.2,
@@ -38,6 +46,7 @@ const initialServerState = {
     max_retries: 3,
     max_side: 1280,
     jpeg_quality: 85,
+    max_image_mb: 5,
   },
   joycaption: {
     base_url: 'http://localhost:8000/v1',
