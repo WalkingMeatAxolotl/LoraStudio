@@ -898,6 +898,8 @@ class Supervisor:
                 env.setdefault("WANDB_ENABLED", "1")
                 env.setdefault("WANDB_MODE", wandb_cfg.mode)
                 env.setdefault("WANDB_LOG_SAMPLES", "1" if wandb_cfg.log_samples else "0")
+                env.setdefault("WANDB_SAMPLE_MAX_SIDE", str(wandb_cfg.sample_max_side))
+                env.setdefault("WANDB_SAMPLE_EVERY_N_STEPS", str(wandb_cfg.sample_every_n_steps))
                 if wandb_cfg.api_key:
                     env.setdefault("WANDB_API_KEY", wandb_cfg.api_key)
                 if wandb_cfg.project:

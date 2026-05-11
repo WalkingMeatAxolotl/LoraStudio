@@ -27,7 +27,9 @@ const initialServerState = {
     entity: '',
     base_url: '',
     mode: 'online',
-    log_samples: true,
+    log_samples: false,
+    sample_max_side: 512,
+    sample_every_n_steps: 0,
   },
   llm_tagger: {
     base_url: 'http://localhost:8000/v1',
