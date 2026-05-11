@@ -140,5 +140,5 @@ def test_lucid_save_writes_compat_metadata(tmp_path) -> None:
     args = json.loads(meta["ss_network_args"])
     assert args["algo"] == "lora"
     assert args["lucid_algo"] == "lucid"
-    assert args["base"] == "stylek"
+    assert "base" not in args
     assert args["compat"] == "lycoris_compat"

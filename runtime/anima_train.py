@@ -2022,7 +2022,6 @@ def main():
                     "lokr": "Anima LoKr",
                     "tlora": "Anima T-LoRA",
                     "orthohydra": "Anima Ortho-Hydra",
-                    "stylek": "Anima LucidLoRA (StyleK alias)",
                     "lucid": "Anima LucidLoRA",
                 }.get(args.lora_type, "Anima LoRA"),
                 "rank": args.lora_rank,
@@ -2112,28 +2111,21 @@ def main():
             balance_warmup_ratio=float(getattr(args, "orthohydra_balance_warmup_ratio", 0.4) or 0.4),
             router_lr_scale=float(getattr(args, "orthohydra_router_lr_scale", 10.0) or 10.0),
         )
-    elif args.lora_type in ("lucid", "stylek"):
+    elif args.lora_type == "lucid":
         from utils.lucid_lora import AnimaLucidLoRAAdapter
-        if args.lora_type == "stylek":
-            logger.warning("StyleK-LoRA 已由 LucidLoRA 取代；本次训练会按 Lucid 兼容模式运行。")
-        stylek_min_rank = int(getattr(args, "stylek_min_rank", 4) or 4)
-        lucid_min_rank_ratio = getattr(args, "lucid_min_rank_ratio", None)
-        if lucid_min_rank_ratio is None and args.lora_type == "stylek":
-            lucid_min_rank_ratio = max(0.0, min(1.0, stylek_min_rank / float(args.lora_rank)))
         injector = AnimaLucidLoRAAdapter(
             rank=args.lora_rank,
             alpha=args.lora_alpha,
-            min_rank=stylek_min_rank if args.lora_type == "stylek" else None,
-            min_rank_ratio=lucid_min_rank_ratio,
-            qk_rank_ratio=1.0 if args.lora_type == "stylek" else float(getattr(args, "lucid_qk_rank_ratio", 0.25) or 0.25),
+            min_rank_ratio=float(getattr(args, "lucid_min_rank_ratio", 0.1) or 0.1),
+            qk_rank_ratio=float(getattr(args, "lucid_qk_rank_ratio", 0.25) or 0.25),
             lora_plus_ratio=float(getattr(args, "lucid_lora_plus_ratio", 16.0) or 16.0),
-            alpha_rank_scale=float(getattr(args, "lucid_alpha_rank_scale", getattr(args, "stylek_alpha_rank_scale", 2.0)) or 2.0),
-            sig_type=str(getattr(args, "lucid_sig_type", getattr(args, "stylek_sig_type", "last")) or "last"),
-            ortho_reg=float(getattr(args, "lucid_ortho_reg", getattr(args, "stylek_ortho_reg", 0.01)) or 0.01),
-            mag_reg=float(getattr(args, "lucid_mag_reg", getattr(args, "stylek_mag_reg", 0.001)) or 0.001),
-            mag_amplify=float(getattr(args, "lucid_mag_amplify", getattr(args, "stylek_mag_amplify", 2.0)) or 2.0),
-            aux_loss_weight=float(getattr(args, "lucid_aux_loss_weight", getattr(args, "stylek_aux_loss_weight", 1.0)) or 1.0),
-            aux_warmup_ratio=float(getattr(args, "lucid_aux_warmup_ratio", getattr(args, "stylek_aux_warmup_ratio", 0.1)) or 0.1),
+            alpha_rank_scale=float(getattr(args, "lucid_alpha_rank_scale", 2.0) or 2.0),
+            sig_type=str(getattr(args, "lucid_sig_type", "last") or "last"),
+            ortho_reg=float(getattr(args, "lucid_ortho_reg", 0.01) or 0.01),
+            mag_reg=float(getattr(args, "lucid_mag_reg", 0.001) or 0.001),
+            mag_amplify=float(getattr(args, "lucid_mag_amplify", 2.0) or 2.0),
+            aux_loss_weight=float(getattr(args, "lucid_aux_loss_weight", 1.0) or 1.0),
+            aux_warmup_ratio=float(getattr(args, "lucid_aux_warmup_ratio", 0.1) or 0.1),
             export_mode=str(getattr(args, "lucid_export_mode", "lycoris_compat") or "lycoris_compat"),
             use_lokr_ffn=bool(getattr(args, "lucid_use_lokr_ffn", False)),
             lokr_factor=getattr(args, "lucid_lokr_factor", None),
@@ -2253,7 +2245,7 @@ def main():
         for _g in param_groups:
             if _g.pop("_is_router_group", False):
                 _g["lr"] = args.learning_rate * _router_lr_scale
-    if args.lora_type in ("lucid", "stylek"):
+    if args.lora_type == "lucid":
         _lucid_lora_plus_ratio = float(getattr(args, "lucid_lora_plus_ratio", 16.0) or 16.0)
         for _g in param_groups:
             if _g.pop("_lucid_lora_plus_group", False):
@@ -2532,7 +2524,7 @@ def main():
                 injector.set_mask(injector.build_sigma_mask(t, device))
             elif args.lora_type == "orthohydra":
                 injector.set_sigma(float(t.mean().item()))
-            elif args.lora_type in ("stylek", "lucid"):
+            elif args.lora_type == "lucid":
                 injector.set_mask(injector.build_sigma_mask(t, device))
             t_exp = t.view(-1, 1, 1, 1, 1)
             noise = make_noise(
@@ -2577,8 +2569,8 @@ def main():
                 if _warmup_done:
                     loss = loss + injector.balance_loss_weight * injector.get_balance_loss()
 
-            # Lucid/StyleK rank-component auxiliary loss (ortho + bimodal; outside autocast)
-            if args.lora_type in ("stylek", "lucid"):
+            # Lucid rank-component auxiliary loss (ortho + bimodal; outside autocast)
+            if args.lora_type == "lucid":
                 _warmup_done = (
                     not total_steps
                     or global_step >= int(total_steps * injector.aux_warmup_ratio)
@@ -2617,7 +2609,7 @@ def main():
                             [(f"{k}.lora_down", lyr.down.weight) for k, lyr in injector._layer_keys.items()]
                             + [(f"{k}.lora_up", lyr.up.weight) for k, lyr in injector._layer_keys.items()]
                         )
-                    elif args.lora_type in ("orthohydra", "stylek", "lucid"):
+                    elif args.lora_type in ("orthohydra", "lucid"):
                         # lambda_layer is zero-init/magnitude-bearing; excluded by default keyword
                         _og_named = injector.named_trainable_params()
                     else:

@@ -23,7 +23,6 @@ export interface SchemaProperty {
    * 不渲染。用于「该字段对当前用户群无意义但 schema 必须保留」的兜底场景。 */
   hidden?: boolean
   ui_level?: 'basic' | 'advanced'
-  deprecated_options?: Record<string, string>
   anyOf?: Array<{ type?: string }>
   items?: SchemaProperty
 }

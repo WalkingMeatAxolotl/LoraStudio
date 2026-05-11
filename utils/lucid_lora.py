@@ -409,7 +409,6 @@ class AnimaLucidLoRAAdapter:
         args = {
             "algo": "lucid" if compat_mode == "native" else "lora",
             "lucid_algo": "lucid",
-            "base": "stylek",
             "rank": self.rank,
             "min_rank": self.min_rank,
             "min_rank_ratio": self.min_rank_ratio,

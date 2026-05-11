@@ -160,10 +160,10 @@ class TrainingConfig(BaseModel):
     )
 
     # ------------------------------------------------------------------- LoRA
-    lora_type: Literal["lora", "lokr", "loha", "tlora", "orthohydra", "lucid", "stylek"] = Field(
+    lora_type: Literal["lora", "lokr", "loha", "tlora", "orthohydra", "lucid"] = Field(
         "lokr",
-        description="适配器算法（lora/lokr/loha/tlora/orthohydra/lucid；stylek 为旧配置兼容）",
-        json_schema_extra=_meta("lora", deprecated_options={"stylek": "已由 LucidLoRA 取代"}),
+        description="适配器算法（lora/lokr/loha/tlora/orthohydra/lucid）",
+        json_schema_extra=_meta("lora"),
     )
     lora_rank: int = Field(
         32, ge=4, le=256,
@@ -267,7 +267,7 @@ class TrainingConfig(BaseModel):
     )
     lucid_alpha_rank_scale: float = Field(
         2.0, ge=0.1, le=5.0,
-        description="LucidLoRA rank 曲线幂次（继承 StyleK 调度，仅 lora_type=lucid）",
+        description="LucidLoRA rank 曲线幂次（仅 lora_type=lucid）",
         json_schema_extra=_meta("lora", show_when="lora_type==lucid", ui_level="advanced"),
     )
     lucid_sig_type: Literal["random", "last", "first"] = Field(
@@ -316,48 +316,6 @@ class TrainingConfig(BaseModel):
         description="LucidLoRA 保存 metadata 模式：native 或 LyCORIS 兼容（仅 lora_type=lucid）",
         json_schema_extra=_meta("lora", show_when="lora_type==lucid", ui_level="advanced"),
     )
-    stylek_min_rank: int = Field(
-        4, ge=1,
-        description="StyleK 高噪声段最小 rank（deprecated：读取旧配置用，训练时映射到 Lucid）",
-        json_schema_extra=_meta("lora", show_when="lora_type==stylek", deprecated=True),
-    )
-    stylek_alpha_rank_scale: float = Field(
-        2.0, ge=0.1, le=5.0,
-        description="StyleK rank 曲线幂次（>1 = 风格段保留更多容量；仅 lora_type=stylek）",
-        json_schema_extra=_meta("lora", show_when="lora_type==stylek", deprecated=True),
-    )
-    stylek_sig_type: Literal["random", "last", "first"] = Field(
-        "last",
-        description="StyleK up.weight SVD 初始化方向（last=最小奇异/推荐；first=最大；random=高斯；仅 lora_type=stylek）",
-        json_schema_extra=_meta("lora", show_when="lora_type==stylek", deprecated=True),
-    )
-    stylek_ortho_reg: float = Field(
-        0.01, ge=0.0,
-        description="StyleK B^T B ≈ I 正交正则权重（仅 lora_type=stylek）",
-        json_schema_extra=_meta("lora", show_when="lora_type==stylek", deprecated=True),
-    )
-    stylek_mag_reg: float = Field(
-        0.001, ge=0.0,
-        description="StyleK rank 幅值稀疏化强度（仅 lora_type=stylek）",
-        json_schema_extra=_meta("lora", show_when="lora_type==stylek", deprecated=True),
-    )
-    stylek_mag_amplify: float = Field(
-        2.0, ge=0.0,
-        description="StyleK 幅值双极化陡峭度（0=关闭；越大越接近 hard Top-K；仅 lora_type=stylek）",
-        json_schema_extra=_meta("lora", show_when="lora_type==stylek", deprecated=True),
-    )
-    stylek_aux_loss_weight: float = Field(
-        1.0, ge=0.0,
-        description="StyleK 辅助 loss 全局权重（仅 lora_type=stylek）",
-        json_schema_extra=_meta("lora", show_when="lora_type==stylek", deprecated=True),
-    )
-    stylek_aux_warmup_ratio: float = Field(
-        0.1, ge=0.0, le=1.0,
-        description="StyleK 辅助 loss 热身比例，前 X% 步不加（仅 lora_type=stylek）",
-        json_schema_extra=_meta("lora", show_when="lora_type==stylek", deprecated=True),
-    )
-
-    # ------------------------------------------------------------------ 训练
     epochs: int = Field(
         10, ge=1,
         description="训练轮数",
