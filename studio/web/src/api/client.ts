@@ -90,6 +90,10 @@ export interface WandBConfig {
   base_url: string
   mode: 'online' | 'offline' | 'disabled'
   log_samples: boolean
+  /** 上传前缩到最长边像素，默认 512 */
+  sample_max_side: number
+  /** step 节流：>0 时只在 global_step % N == 0 上传，0 = 不额外节流 */
+  sample_every_n_steps: number
 }
 
 export interface ModelScopeConfig {
@@ -1222,7 +1226,9 @@ export const api = {
         add_model_tag?: boolean | null
         blacklist_tags?: string[] | null
       }
-      llm_overrides?: Omit<Partial<LLMTaggerConfig>, 'api_key' | 'model_ids' | 'prompt_presets'>
+      llm_overrides?:
+        & Omit<Partial<LLMTaggerConfig>, 'api_key' | 'model_ids' | 'prompt_presets'>
+        & { _output_format?: 'json' | 'text' }
     }
   ) =>
     req<Job>(`/api/projects/${pid}/versions/${vid}/tag`, {

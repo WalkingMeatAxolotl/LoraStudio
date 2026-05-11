@@ -91,7 +91,9 @@ const EMPTY: Secrets = {
     entity: '',
     base_url: '',
     mode: 'online',
-    log_samples: true,
+    log_samples: false,
+    sample_max_side: 512,
+    sample_every_n_steps: 0,
   },
   modelscope: { token: '' },
   download_source: 'huggingface',
@@ -881,10 +883,34 @@ export default function SettingsPage() {
               <option value="disabled">disabled</option>
             </select>
           </SettingsField>
-          <SettingsField label="记录采样图">
+          <SettingsField label="记录采样图" desc="开启后训练采样图会上传到 wandb.ai 公网；私有 IP / NSFW 数据集请保持关闭">
             <Bool value={draft.wandb.log_samples} onChange={(v) => update('wandb', 'log_samples', v)} />
           </SettingsField>
         </div>
+        {draft.wandb.log_samples && (
+          <div className="grid grid-cols-2 gap-3">
+            <SettingsField label="采样图最长边" desc="上传前缩到此像素，原图常 2K+，512 已够 wandb 浏览">
+              <input
+                type="number"
+                min={64}
+                step={64}
+                value={draft.wandb.sample_max_side}
+                onChange={(e) => update('wandb', 'sample_max_side', Math.max(64, parseInt(e.target.value) || 512))}
+                className={textInputClass}
+              />
+            </SettingsField>
+            <SettingsField label="step 节流" desc="0 = 不额外节流；>0 时只在 global_step % N == 0 上传，避免长训练上 GB 级图">
+              <input
+                type="number"
+                min={0}
+                step={50}
+                value={draft.wandb.sample_every_n_steps}
+                onChange={(e) => update('wandb', 'sample_every_n_steps', Math.max(0, parseInt(e.target.value) || 0))}
+                className={textInputClass}
+              />
+            </SettingsField>
+          </div>
+        )}
       </SettingsSection>
 
       <SettingsSection title="ModelScope（魔搭社区）">
