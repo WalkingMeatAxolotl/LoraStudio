@@ -226,9 +226,10 @@ def render_curve_panel(losses, width=60, height=10):
 # ============================================================================
 
 class WandBMonitor:
-    def __init__(self, wandb_module, run) -> None:
+    def __init__(self, wandb_module, run, *, log_samples: bool = True) -> None:
         self._wandb = wandb_module
         self._run = run
+        self.log_samples = log_samples
 
     @property
     def enabled(self) -> bool:
@@ -263,30 +264,26 @@ class WandBMonitor:
 
 
 def init_wandb_monitor(args, output_dir: Path, config_path: Optional[Path]) -> WandBMonitor:
-    if not getattr(args, "wandb_enabled", False):
+    enabled = str(os.environ.get("WANDB_ENABLED", "")).strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
         return WandBMonitor(None, None)
-    mode = str(getattr(args, "wandb_mode", "online") or "online")
+    mode = str(os.environ.get("WANDB_MODE", "online") or "online")
     if mode == "disabled":
         return WandBMonitor(None, None)
     try:
         import wandb
     except ImportError as exc:
         raise RuntimeError(
-            "已启用 wandb_enabled，但当前环境没有安装 wandb。"
-            "请先在训练环境安装：pip install wandb，或关闭 wandb_enabled。"
+            "已在 Settings 启用 WandB，但当前环境没有安装 wandb。"
+            "请先在训练环境安装：pip install wandb，或在 Settings 关闭 WandB。"
         ) from exc
 
-    project = (
-        str(getattr(args, "wandb_project", "") or "").strip()
-        or os.environ.get("WANDB_PROJECT")
-        or "AnimaLoraStudio"
-    )
-    entity = (
-        str(getattr(args, "wandb_entity", "") or "").strip()
-        or os.environ.get("WANDB_ENTITY")
-        or None
-    )
-    run_name = str(getattr(args, "wandb_run_name", "") or "").strip() or str(args.output_name)
+    project = os.environ.get("WANDB_PROJECT") or "AnimaLoraStudio"
+    entity = os.environ.get("WANDB_ENTITY") or None
+    run_name = os.environ.get("WANDB_RUN_NAME") or str(args.output_name)
+    log_samples = str(os.environ.get("WANDB_LOG_SAMPLES", "1")).strip().lower() not in {
+        "0", "false", "no", "off",
+    }
     wandb_dir = output_dir / "wandb"
     wandb_dir.mkdir(parents=True, exist_ok=True)
     cfg = {
@@ -304,7 +301,7 @@ def init_wandb_monitor(args, output_dir: Path, config_path: Optional[Path]) -> W
         dir=str(wandb_dir),
     )
     logger.info(f"W&B 监控已启用: project={project}, run={run_name}, mode={mode}")
-    return WandBMonitor(wandb, run)
+    return WandBMonitor(wandb, run, log_samples=log_samples)
 
 
 # ============================================================================
@@ -2346,7 +2343,7 @@ def main():
             sample_path = sample_dir / f"step_0_baseline_{i}.png"
             img.save(sample_path)
             emit(f"基线采样保存: step_0_baseline_{i}.png")
-            if getattr(args, "wandb_log_samples", True):
+            if wandb_monitor.log_samples:
                 wandb_monitor.log_image(
                     "samples/baseline",
                     sample_path,
@@ -2502,7 +2499,7 @@ def main():
                     sample_path = sample_dir / f"step_{global_step}.png"
                     img.save(sample_path)
                     emit(f"采样保存: step_{global_step}.png")
-                    if getattr(args, "wandb_log_samples", True):
+                    if wandb_monitor.log_samples:
                         wandb_monitor.log_image(
                             "samples/step",
                             sample_path,
@@ -2577,7 +2574,7 @@ def main():
                 sample_path = sample_dir / f"epoch_{current_epoch}.png"
                 img.save(sample_path)
                 emit(f"采样保存: epoch_{current_epoch}.png")
-                if getattr(args, "wandb_log_samples", True):
+                if wandb_monitor.log_samples:
                     wandb_monitor.log_image(
                         "samples/epoch",
                         sample_path,

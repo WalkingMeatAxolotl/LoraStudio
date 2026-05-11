@@ -47,6 +47,15 @@ def migrate_legacy_attention(data: Any) -> Any:
     """
     if not isinstance(data, dict):
         return data
+    for key in (
+        "wandb_enabled",
+        "wandb_project",
+        "wandb_entity",
+        "wandb_run_name",
+        "wandb_mode",
+        "wandb_log_samples",
+    ):
+        data.pop(key, None)
     if "attention_backend" in data:
         data.pop("xformers", None)
         data.pop("flash_attn", None)
@@ -453,36 +462,6 @@ class TrainingConfig(BaseModel):
         True,
         description="(已废弃) 旧 monitor server 自动开浏览器；当前忽略",
         json_schema_extra=_meta("monitor", hidden=True),
-    )
-    wandb_enabled: bool = Field(
-        False,
-        description="启用 Weights & Biases 训练监视（需要环境已安装 wandb 并配置 API key）",
-        json_schema_extra=_meta("monitor"),
-    )
-    wandb_project: str = Field(
-        "",
-        description="W&B project；留空时使用 Settings 里的默认值或 AnimaLoraStudio",
-        json_schema_extra=_meta("monitor", show_when="wandb_enabled==true"),
-    )
-    wandb_entity: str = Field(
-        "",
-        description="W&B entity/team；留空则使用当前登录账号默认 entity",
-        json_schema_extra=_meta("monitor", show_when="wandb_enabled==true"),
-    )
-    wandb_run_name: str = Field(
-        "",
-        description="W&B run 名称；留空时自动使用 output_name",
-        json_schema_extra=_meta("monitor", show_when="wandb_enabled==true"),
-    )
-    wandb_mode: Literal["online", "offline", "disabled"] = Field(
-        "online",
-        description="W&B 模式；offline 会写本地离线日志，之后可 wandb sync",
-        json_schema_extra=_meta("monitor", show_when="wandb_enabled==true"),
-    )
-    wandb_log_samples: bool = Field(
-        True,
-        description="采样图片保存时同步记录到 W&B media",
-        json_schema_extra=_meta("monitor", show_when="wandb_enabled==true"),
     )
 
 

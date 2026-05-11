@@ -571,14 +571,18 @@ class Supervisor:
         env.setdefault("ACCELERATE_DISABLE_RICH", "1")
         try:
             wandb_cfg = _secrets.load().wandb
-            if wandb_cfg.api_key:
-                env.setdefault("WANDB_API_KEY", wandb_cfg.api_key)
-            if wandb_cfg.project:
-                env.setdefault("WANDB_PROJECT", wandb_cfg.project)
-            if wandb_cfg.entity:
-                env.setdefault("WANDB_ENTITY", wandb_cfg.entity)
-            if wandb_cfg.base_url:
-                env.setdefault("WANDB_BASE_URL", wandb_cfg.base_url)
+            if wandb_cfg.enabled:
+                env.setdefault("WANDB_ENABLED", "1")
+                env.setdefault("WANDB_MODE", wandb_cfg.mode)
+                env.setdefault("WANDB_LOG_SAMPLES", "1" if wandb_cfg.log_samples else "0")
+                if wandb_cfg.api_key:
+                    env.setdefault("WANDB_API_KEY", wandb_cfg.api_key)
+                if wandb_cfg.project:
+                    env.setdefault("WANDB_PROJECT", wandb_cfg.project)
+                if wandb_cfg.entity:
+                    env.setdefault("WANDB_ENTITY", wandb_cfg.entity)
+                if wandb_cfg.base_url:
+                    env.setdefault("WANDB_BASE_URL", wandb_cfg.base_url)
         except Exception:
             logger.exception("failed to load wandb settings")
         return subprocess.Popen(
