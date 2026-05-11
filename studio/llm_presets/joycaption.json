@@ -1,0 +1,7 @@
+{
+  "id": "joycaption",
+  "label": "JoyCaption",
+  "builtin": true,
+  "output_format": "text",
+  "prompt": "Descriptive Caption"
+}

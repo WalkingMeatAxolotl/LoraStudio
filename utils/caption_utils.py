@@ -31,11 +31,24 @@ def normalize_caption_json(raw_json: dict) -> dict:
     # 提取各部分
     fixed = raw_json.get("fixed", {})
     character_info = raw_json.get("character", {})
+    character_text = ""
+    if isinstance(character_info, dict):
+        character_text = character_info.get(
+            "full",
+            ", ".join(
+                t for t in (
+                    character_info.get("name", ""),
+                    character_info.get("variant", ""),
+                ) if t
+            ),
+        )
+    else:
+        character_text = str(character_info or "")
     from_path = raw_json.get("from_path", {})
     ai_output = raw_json.get("ai_output", {})
     
-    # 解析 quality（可能是 "newest, safe" 字符串）
-    quality_str = fixed.get("quality", "newest, safe")
+    # 解析 quality（可能是 "newest, safe" 字符串）；简化格式允许顶层字段
+    quality_str = fixed.get("quality", raw_json.get("quality", "newest, safe"))
     if isinstance(quality_str, str):
         quality = [t.strip() for t in quality_str.split(",") if t.strip()]
     else:
@@ -43,25 +56,27 @@ def normalize_caption_json(raw_json: dict) -> dict:
     
     # 合并 appearance（AI + from_path）
     appearance = []
-    ai_appearance = ai_output.get("appearance", [])
+    ai_appearance = ai_output.get("appearance", raw_json.get("appearance", []))
     if isinstance(ai_appearance, list):
         appearance.extend(ai_appearance)
     elif isinstance(ai_appearance, str):
         appearance.extend([t.strip() for t in ai_appearance.split(",") if t.strip()])
+    appearance.extend(from_path.get("appearance", []))
     appearance.extend(from_path.get("extra_appearance", []))
     
     # 合并 tags（AI + from_path）
     tags = []
-    ai_tags = ai_output.get("tags", [])
+    ai_tags = ai_output.get("tags", raw_json.get("tags", []))
     if isinstance(ai_tags, list):
         tags.extend(ai_tags)
     elif isinstance(ai_tags, str):
         tags.extend([t.strip() for t in ai_tags.split(",") if t.strip()])
+    tags.extend(from_path.get("tags", []))
     tags.extend(from_path.get("extra_tags", []))
     
     # environment
     environment = []
-    ai_env = ai_output.get("environment", [])
+    ai_env = ai_output.get("environment", raw_json.get("environment", []))
     if isinstance(ai_env, list):
         environment.extend(ai_env)
     elif isinstance(ai_env, str):
@@ -75,14 +90,14 @@ def normalize_caption_json(raw_json: dict) -> dict:
         },
         "tags": {
             "quality": quality,                           # ["newest", "safe"]
-            "count": ai_output.get("count", ""),          # "1girl"
-            "character": character_info.get("full", ""),  # "asahi sakayori"
-            "series": fixed.get("series", ""),            # "cosmic princess kaguya"
-            "artist": fixed.get("artist", ""),            # "@spacetime kaguya"
+            "count": ai_output.get("count", raw_json.get("count", "")),  # "1girl"
+            "character": character_text,                  # "asahi sakayori"
+            "series": fixed.get("series", raw_json.get("series", "")),  # "cosmic princess kaguya"
+            "artist": fixed.get("artist", raw_json.get("artist", "")),  # "@spacetime kaguya"
             "appearance": appearance,                     # [...]
             "tags": tags,                                 # [...]
             "environment": environment,                   # [...]
-            "nl": ai_output.get("nl", ""),                # "A boy..."
+            "nl": ai_output.get("nl", raw_json.get("nl", "")),  # "A boy..."
         }
     }
 

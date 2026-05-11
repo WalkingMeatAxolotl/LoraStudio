@@ -1,7 +1,6 @@
-"""PP4 — JoyCaption: mock requests.Session 验证 payload + 重试。"""
+"""PP4 — JoyCaption compatibility wrapper over LLMTagger."""
 from __future__ import annotations
 
-import io
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -9,7 +8,7 @@ import pytest
 from PIL import Image
 
 from studio import secrets
-from studio.services import joycaption_tagger
+from studio.services import joycaption_tagger, llm_tagger
 
 
 @pytest.fixture
@@ -28,6 +27,7 @@ def _ok_response(content: str = "tag1, tag2"):
     r = MagicMock()
     r.ok = True
     r.status_code = 200
+    r.text = ""
     r.raise_for_status = MagicMock()
     r.json = MagicMock(
         return_value={
@@ -39,21 +39,20 @@ def _ok_response(content: str = "tag1, tag2"):
 
 def test_is_available_ok(isolated_secrets) -> None:
     sess = MagicMock()
-    sess.get.return_value = MagicMock(ok=True, status_code=200)
     t = joycaption_tagger.JoyCaptionTagger(session=sess)
     ok, msg = t.is_available()
     assert ok is True
-    assert "在线" in msg
-    sess.get.assert_called_once_with("http://x/v1/models", timeout=5)
+    assert "m" in msg
+    sess.get.assert_not_called()
 
 
-def test_is_available_bad_status(isolated_secrets) -> None:
+def test_is_available_requires_model(isolated_secrets) -> None:
+    secrets.update({"joycaption": {"model": ""}})
     sess = MagicMock()
-    sess.get.return_value = MagicMock(ok=False, status_code=503)
     t = joycaption_tagger.JoyCaptionTagger(session=sess)
     ok, msg = t.is_available()
     assert ok is False
-    assert "503" in msg
+    assert "model" in msg
 
 
 def test_is_available_no_base_url(isolated_secrets) -> None:
@@ -76,21 +75,23 @@ def test_tag_emits_natural_caption(isolated_secrets, tmp_path: Path) -> None:
     assert args[0] == "http://x/v1/chat/completions"
     body = kwargs["json"]
     assert body["model"] == "m"
-    content = body["messages"][0]["content"]
-    assert content[0]["text"] == "hi"
-    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert body["messages"][0]["content"] == "hi"
+    user_content = body["messages"][1]["content"]
+    assert user_content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
 
 
 def test_tag_retries_then_fails(isolated_secrets, tmp_path: Path, monkeypatch) -> None:
     """所有重试都失败 → 单图返回 error，但循环继续。"""
+    secrets.update({"llm_tagger": {"max_retries": 2, "timeout": 1}})
     sess = MagicMock()
     bad = MagicMock()
-    bad.raise_for_status.side_effect = RuntimeError("boom")
+    bad.status_code = 500
+    bad.text = "boom"
     sess.post.return_value = bad
-    monkeypatch.setattr(joycaption_tagger.time, "sleep", lambda _: None)  # 跳过等待
+    monkeypatch.setattr(llm_tagger.time, "sleep", lambda _: None)
     t = joycaption_tagger.JoyCaptionTagger(session=sess)
     img = _png(tmp_path / "1.png")
-    [r] = list(t.tag([img], max_retries=2, timeout=1.0))
+    [r] = list(t.tag([img]))
     assert r["tags"] == []
     assert "失败" in r["error"]
     # 调了 2 次（max_retries=2）

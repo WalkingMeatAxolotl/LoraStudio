@@ -222,6 +222,89 @@ def render_curve_panel(losses, width=60, height=10):
 
 
 # ============================================================================
+# Weights & Biases 可选监控
+# ============================================================================
+
+class WandBMonitor:
+    def __init__(self, wandb_module, run, *, log_samples: bool = True) -> None:
+        self._wandb = wandb_module
+        self._run = run
+        self.log_samples = log_samples
+
+    @property
+    def enabled(self) -> bool:
+        return self._run is not None
+
+    def log(self, data: dict, *, step: Optional[int] = None) -> None:
+        if not self.enabled:
+            return
+        try:
+            self._run.log(data, step=step)
+        except Exception as exc:
+            logger.warning(f"W&B log 失败: {exc}")
+
+    def log_image(self, key: str, image_path: Path, *, caption: str, step: Optional[int] = None) -> None:
+        if not self.enabled:
+            return
+        try:
+            self._run.log(
+                {key: [self._wandb.Image(str(image_path), caption=caption)]},
+                step=step,
+            )
+        except Exception as exc:
+            logger.warning(f"W&B 图片记录失败: {exc}")
+
+    def finish(self) -> None:
+        if not self.enabled:
+            return
+        try:
+            self._run.finish()
+        except Exception as exc:
+            logger.warning(f"W&B finish 失败: {exc}")
+
+
+def init_wandb_monitor(args, output_dir: Path, config_path: Optional[Path]) -> WandBMonitor:
+    enabled = str(os.environ.get("WANDB_ENABLED", "")).strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return WandBMonitor(None, None)
+    mode = str(os.environ.get("WANDB_MODE", "online") or "online")
+    if mode == "disabled":
+        return WandBMonitor(None, None)
+    try:
+        import wandb
+    except ImportError as exc:
+        raise RuntimeError(
+            "已在 Settings 启用 WandB，但当前环境没有安装 wandb。"
+            "请先在训练环境安装：pip install wandb，或在 Settings 关闭 WandB。"
+        ) from exc
+
+    project = os.environ.get("WANDB_PROJECT") or "AnimaLoraStudio"
+    entity = os.environ.get("WANDB_ENTITY") or None
+    run_name = os.environ.get("WANDB_RUN_NAME") or str(args.output_name)
+    log_samples = str(os.environ.get("WANDB_LOG_SAMPLES", "1")).strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+    wandb_dir = output_dir / "wandb"
+    wandb_dir.mkdir(parents=True, exist_ok=True)
+    cfg = {
+        key: value
+        for key, value in vars(args).items()
+        if key not in {"interactive", "auto_install"}
+    }
+    cfg["config_path"] = str(config_path) if config_path else ""
+    run = wandb.init(
+        project=project,
+        entity=entity,
+        name=run_name,
+        mode=mode,
+        config=cfg,
+        dir=str(wandb_dir),
+    )
+    logger.info(f"W&B 监控已启用: project={project}, run={run_name}, mode={mode}")
+    return WandBMonitor(wandb, run, log_samples=log_samples)
+
+
+# ============================================================================
 # 梯度检查点
 # ============================================================================
 
@@ -1887,6 +1970,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     sample_dir = output_dir / "samples"
     sample_dir.mkdir(exist_ok=True)
+    wandb_monitor = init_wandb_monitor(args, output_dir, config_path)
 
     # 训练监控状态写入（PP6.1）：永远开启，文件路径优先来自 --monitor-state-file，
     # 否则落到 output_dir/monitor_state.json。Studio 前端通过 /api/state?task_id=
@@ -2228,6 +2312,7 @@ def main():
         # 同时保存 LoRA 权重
         lora_path = output_dir / f"{args.output_name}_interrupted_step{global_step}.safetensors"
         injector.save(lora_path)
+        wandb_monitor.finish()
         emit(f"已保存！下次使用 --resume-state \"{state_path}\" 继续训练")
         sys.exit(0)
     
@@ -2281,6 +2366,13 @@ def main():
             sample_path = sample_dir / f"step_0_baseline_{i}.png"
             img.save(sample_path)
             emit(f"基线采样保存: step_0_baseline_{i}.png")
+            if wandb_monitor.log_samples:
+                wandb_monitor.log_image(
+                    "samples/baseline",
+                    sample_path,
+                    caption=f"step 0 baseline {i}: {prompt}",
+                    step=0,
+                )
             if monitor_server:
                 try:
                     update_monitor(sample_path=sample_path)
@@ -2382,6 +2474,15 @@ def main():
                 dt_step = now - step_start_time
                 steps_per_sec = (1.0 / dt_step) if dt_step > 0 else 0.0
                 speed_ema = steps_per_sec if speed_ema is None else (0.9 * speed_ema + 0.1 * steps_per_sec)
+                wandb_monitor.log(
+                    {
+                        "train/loss": loss_val,
+                        "train/lr": float(lr),
+                        "train/epoch": epoch + 1,
+                        "train/speed_it_s": float(speed_ema or 0),
+                    },
+                    step=global_step,
+                )
 
                 if use_rich:
                     desc = f"epoch {epoch+1}/{args.epochs} step {global_step}/{total_steps or '?'}"
@@ -2421,6 +2522,13 @@ def main():
                     sample_path = sample_dir / f"step_{global_step}.png"
                     img.save(sample_path)
                     emit(f"采样保存: step_{global_step}.png")
+                    if wandb_monitor.log_samples:
+                        wandb_monitor.log_image(
+                            "samples/step",
+                            sample_path,
+                            caption=f"step {global_step}: {prompt}",
+                            step=global_step,
+                        )
                     if monitor_server:
                         try:
                             update_monitor(sample_path=sample_path)
@@ -2489,6 +2597,13 @@ def main():
                 sample_path = sample_dir / f"epoch_{current_epoch}.png"
                 img.save(sample_path)
                 emit(f"采样保存: epoch_{current_epoch}.png")
+                if wandb_monitor.log_samples:
+                    wandb_monitor.log_image(
+                        "samples/epoch",
+                        sample_path,
+                        caption=f"epoch {current_epoch}: {prompt}",
+                        step=global_step,
+                    )
                 model.train()
                 
                 # 更新监控面板
@@ -2518,6 +2633,7 @@ def main():
         emit(f"Loss curve (first {len(loss_history)} steps):\n{chart}")
 
     emit(f"Saved final LoRA: {final_path}")
+    wandb_monitor.finish()
     logger.info("训练完成!")
 
 

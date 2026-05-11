@@ -3,6 +3,9 @@ import {
   api,
   DEFAULT_WD14_MODELS,
   type CLTaggerVariantInfo,
+  type LLMConnectionTestResult,
+  type LLMPromptPreset,
+  type LLMTaggerConfig,
   type FlashAttnStatus,
   type XformersStatus,
   type ModelDownloadStatus,
@@ -11,6 +14,7 @@ import {
   type SecretsPatch,
   type TorchCuTag,
   type TorchStatus,
+  type WandBConfig,
   type WD14Runtime,
 } from '../../api/client'
 import PageHeader from '../../components/PageHeader'
@@ -25,8 +29,10 @@ type Section =
   | 'danbooru'
   | 'download'
   | 'huggingface'
+  | 'wandb'
   | 'modelscope'
   | 'joycaption'
+  | 'llm_tagger'
   | 'wd14'
   | 'cltagger'
   | 'models'
@@ -44,6 +50,13 @@ const TAB_LIST: { id: Tab; label: string }[] = [
 ]
 
 const TAB_STORAGE_KEY = 'studio.settings.activeTab'
+
+const DEFAULT_LLM_PROMPT_PRESETS: LLMPromptPreset[] = [
+  { id: 'style_json', label: '画风 LoRA JSON', prompt: 'Return JSON captions for anime style LoRA training.', builtin: true, output_format: 'json' },
+  { id: 'general_json', label: '通用 LoRA JSON', prompt: 'Return JSON captions for LoRA training.', builtin: true, output_format: 'json' },
+  { id: 'txt_tags', label: 'TXT 标签列表', prompt: 'Return JSON only: {"tags":["tag one"],"nl":""}.', builtin: true, output_format: 'json' },
+  { id: 'joycaption', label: 'JoyCaption', prompt: 'Descriptive Caption', builtin: true, output_format: 'text' },
+]
 
 function getStoredTab(): Tab {
   try {
@@ -71,12 +84,38 @@ const EMPTY: Secrets = {
     cdn_rate_per_sec: 5,
   },
   huggingface: { token: '', endpoint: 'https://hf-mirror.com' },
+  wandb: {
+    enabled: false,
+    api_key: '',
+    project: 'AnimaLoraStudio',
+    entity: '',
+    base_url: '',
+    mode: 'online',
+    log_samples: true,
+  },
   modelscope: { token: '' },
   download_source: 'huggingface',
   joycaption: {
     base_url: 'http://localhost:8000/v1',
     model: 'fancyfeast/llama-joycaption-beta-one-hf-llava',
     prompt_template: 'Descriptive Caption',
+  },
+  llm_tagger: {
+    base_url: 'http://localhost:8000/v1',
+    api_key: '',
+    model: '',
+    model_ids: [],
+    endpoint: 'chat_completions',
+    prompt_preset: 'style_json',
+    prompt_presets: [...DEFAULT_LLM_PROMPT_PRESETS],
+    custom_prompt: '',
+    temperature: 0.2,
+    max_tokens: 700,
+    timeout: 60,
+    max_retries: 3,
+    max_side: 1280,
+    jpeg_quality: 85,
+    max_image_mb: 5,
   },
   wd14: {
     model_id: 'SmilingWolf/wd-eva02-large-tagger-v3',
@@ -117,6 +156,9 @@ export default function SettingsPage() {
   const [catalog, setCatalog] = useState<ModelsCatalog | null>(null)
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [downloadBusy, setDownloadBusy] = useState<Set<string>>(new Set())
+  const [llmModelsBusy, setLlmModelsBusy] = useState(false)
+  const [llmTestBusy, setLlmTestBusy] = useState(false)
+  const [llmTestResult, setLlmTestResult] = useState<LLMConnectionTestResult | null>(null)
   const { toast } = useToast()
 
   const switchTab = (next: Tab) => {
@@ -206,6 +248,70 @@ export default function SettingsPage() {
       toast('保存失败', 'error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const refreshLLMModels = async () => {
+    if (!server) return
+    setLlmModelsBusy(true)
+    setError(null)
+    try {
+      let source = draft
+      if (dirty) {
+        const saved = await api.updateSecrets(buildPatch(draft, server))
+        setServer(saved)
+        setDraft(saved)
+        source = saved
+      }
+      const result = await api.refreshLLMModels({
+        base_url: source.llm_tagger.base_url,
+        api_key: source.llm_tagger.api_key,
+        timeout: source.llm_tagger.timeout,
+      })
+      setServer(result.secrets)
+      setDraft(result.secrets)
+      toast(`已读取 ${result.items.length} 个模型`, 'success')
+    } catch (e) {
+      setError(String(e))
+      toast(`读取模型列表失败：${e}`, 'error')
+    } finally {
+      setLlmModelsBusy(false)
+    }
+  }
+
+  const testLLMConnection = async () => {
+    setLlmTestBusy(true)
+    setLlmTestResult(null)
+    setError(null)
+    try {
+      const result = await api.testLLMConnection({
+        base_url: draft.llm_tagger.base_url,
+        api_key: draft.llm_tagger.api_key,
+        model: draft.llm_tagger.model,
+        endpoint: draft.llm_tagger.endpoint,
+        timeout: draft.llm_tagger.timeout,
+        max_tokens: Math.max(512, draft.llm_tagger.max_tokens),
+        temperature: draft.llm_tagger.temperature,
+      })
+      setLlmTestResult(result)
+      toast(result.ok ? 'LLM 连接测试通过' : 'LLM 连接测试失败', result.ok ? 'success' : 'error')
+    } catch (e) {
+      const message = String(e)
+      setError(message)
+      setLlmTestResult({
+        ok: false,
+        endpoint: draft.llm_tagger.endpoint,
+        endpoint_url: '',
+        model: draft.llm_tagger.model,
+        elapsed_ms: 0,
+        status_code: null,
+        response_preview: '',
+        error: message,
+        request_shape: 'client_error',
+      })
+      toast(`LLM 连接测试失败：${message}`, 'error')
+    } finally {
+      setLlmTestBusy(false)
     }
   }
 
@@ -386,6 +492,198 @@ export default function SettingsPage() {
         </SettingsField>
       </SettingsSection>
 
+      <SettingsSection title="LLM 打标（OpenAI compatible）">
+        <SettingsField label="base_url" desc="可填 /v1、/chat/completions 或 /responses">
+          <input
+            type="text"
+            value={draft.llm_tagger.base_url}
+            onChange={(e) => update('llm_tagger', 'base_url', e.target.value)}
+            className={textInputClass}
+          />
+        </SettingsField>
+        <SettingsField label="api_key">
+          <SensitiveInput
+            value={draft.llm_tagger.api_key}
+            serverValue={server?.llm_tagger.api_key ?? ''}
+            onChange={(v) => update('llm_tagger', 'api_key', v)}
+          />
+        </SettingsField>
+        <SettingsField label="model">
+          <div className="flex flex-col gap-1.5">
+            <div className="flex gap-1.5">
+              {draft.llm_tagger.model_ids.length > 0 ? (
+                <select
+                  value={draft.llm_tagger.model}
+                  onChange={(e) => update('llm_tagger', 'model', e.target.value)}
+                  className={`${textInputClass} flex-1`}
+                >
+                  {!draft.llm_tagger.model_ids.includes(draft.llm_tagger.model) && draft.llm_tagger.model && (
+                    <option value={draft.llm_tagger.model}>{draft.llm_tagger.model}</option>
+                  )}
+                  {draft.llm_tagger.model_ids.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={draft.llm_tagger.model}
+                  onChange={(e) => update('llm_tagger', 'model', e.target.value)}
+                  placeholder="如 gpt-4.1-mini / qwen-vl-max / 本地服务模型名"
+                  className={`${textInputClass} flex-1`}
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => void refreshLLMModels()}
+                disabled={llmModelsBusy || !draft.llm_tagger.base_url.trim()}
+                className="btn btn-secondary btn-sm"
+                title="从 base_url 的 /models 读取并保存模型列表"
+              >
+                {llmModelsBusy ? '读取中...' : '读取模型'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void testLLMConnection()}
+                disabled={llmTestBusy || !draft.llm_tagger.base_url.trim() || !draft.llm_tagger.model.trim()}
+                className="btn btn-secondary btn-sm"
+                title="发送纯文本长请求，测试 base_url / key / model / endpoint 是否通畅"
+              >
+                {llmTestBusy ? '测试中...' : '测试连接'}
+              </button>
+            </div>
+            {draft.llm_tagger.model_ids.length > 0 && (
+              <div className="text-[10px] text-fg-tertiary">
+                已保存 {draft.llm_tagger.model_ids.length} 个模型
+              </div>
+            )}
+            {llmTestResult && (
+              <div className={`mt-1 rounded-sm border px-2 py-1.5 text-[11px] font-mono ${
+                llmTestResult.ok
+                  ? 'border-ok bg-ok-soft text-ok'
+                  : 'border-err bg-err-soft text-err'
+              }`}>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  <span>{llmTestResult.ok ? 'OK' : 'FAILED'}</span>
+                  <span>{llmTestResult.endpoint}</span>
+                  {llmTestResult.status_code !== null && <span>HTTP {llmTestResult.status_code}</span>}
+                  {llmTestResult.elapsed_ms > 0 && <span>{llmTestResult.elapsed_ms}ms</span>}
+                </div>
+                {llmTestResult.endpoint_url && (
+                  <div className="mt-1 break-all text-fg-secondary">{llmTestResult.endpoint_url}</div>
+                )}
+                {(llmTestResult.error || llmTestResult.response_preview) && (
+                  <div className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words text-fg-secondary">
+                    {llmTestResult.error || llmTestResult.response_preview}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </SettingsField>
+        <div className="grid grid-cols-2 gap-3">
+          <SettingsField label="endpoint">
+            <select
+              value={draft.llm_tagger.endpoint}
+              onChange={(e) => update('llm_tagger', 'endpoint', e.target.value as LLMTaggerConfig['endpoint'])}
+              className={textInputClass}
+            >
+              <option value="chat_completions">Chat Completions</option>
+              <option value="responses">Responses</option>
+            </select>
+          </SettingsField>
+          <SettingsField label="prompt_preset">
+            <select
+              value={draft.llm_tagger.prompt_preset}
+              onChange={(e) => update('llm_tagger', 'prompt_preset', e.target.value)}
+              className={textInputClass}
+            >
+              {draft.llm_tagger.prompt_presets.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+              <option value="custom">custom（旧版单独提示词）</option>
+            </select>
+          </SettingsField>
+        </div>
+        <SettingsField label="prompt_presets" desc="可新增、修改、删除；当前选中项会用于 LLM 打标">
+          <LLMPromptPresetsEditor
+            presets={draft.llm_tagger.prompt_presets}
+            currentId={draft.llm_tagger.prompt_preset}
+            onCurrentChange={(id) => update('llm_tagger', 'prompt_preset', id)}
+            onChange={(presets) => update('llm_tagger', 'prompt_presets', presets)}
+          />
+        </SettingsField>
+        {draft.llm_tagger.prompt_preset === 'custom' && (
+          <SettingsField label="custom_prompt" desc="要求模型只返回 JSON，字段会被标准化后写入 caption">
+            <textarea
+              value={draft.llm_tagger.custom_prompt}
+              onChange={(e) => update('llm_tagger', 'custom_prompt', e.target.value)}
+              className={`${textInputClass} min-h-36 font-mono`}
+            />
+          </SettingsField>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          <SettingsField label="temperature">
+            <input
+              type="number" min={0} max={2} step={0.05}
+              value={draft.llm_tagger.temperature}
+              onChange={(e) => update('llm_tagger', 'temperature', Math.max(0, Math.min(2, Number(e.target.value) || 0)))}
+              className={`${textInputClass} max-w-24`}
+            />
+          </SettingsField>
+          <SettingsField label="max_tokens">
+            <input
+              type="number" min={64} max={4096}
+              value={draft.llm_tagger.max_tokens}
+              onChange={(e) => update('llm_tagger', 'max_tokens', Math.max(64, Number(e.target.value) || 64))}
+              className={`${textInputClass} max-w-24`}
+            />
+          </SettingsField>
+          <SettingsField label="timeout">
+            <input
+              type="number" min={5} max={600}
+              value={draft.llm_tagger.timeout}
+              onChange={(e) => update('llm_tagger', 'timeout', Math.max(5, Number(e.target.value) || 5))}
+              className={`${textInputClass} max-w-24`}
+            />
+          </SettingsField>
+          <SettingsField label="max_retries">
+            <input
+              type="number" min={1} max={10}
+              value={draft.llm_tagger.max_retries}
+              onChange={(e) => update('llm_tagger', 'max_retries', Math.max(1, Number(e.target.value) || 1))}
+              className={`${textInputClass} max-w-24`}
+            />
+          </SettingsField>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <SettingsField label="max_side" desc="上传给 VLM 前缩放最长边">
+            <input
+              type="number" min={64} max={4096}
+              value={draft.llm_tagger.max_side}
+              onChange={(e) => update('llm_tagger', 'max_side', Math.max(64, Number(e.target.value) || 64))}
+              className={`${textInputClass} max-w-24`}
+            />
+          </SettingsField>
+          <SettingsField label="jpeg_quality">
+            <input
+              type="number" min={1} max={100}
+              value={draft.llm_tagger.jpeg_quality}
+              onChange={(e) => update('llm_tagger', 'jpeg_quality', Math.max(1, Math.min(100, Number(e.target.value) || 85)))}
+              className={`${textInputClass} max-w-24`}
+            />
+          </SettingsField>
+          <SettingsField label="max_image_mb" desc="压缩后单图 payload 上限；Claude 等服务常见限制为 5 MB">
+            <input
+              type="number" min={0.1} max={25} step={0.1}
+              value={draft.llm_tagger.max_image_mb}
+              onChange={(e) => update('llm_tagger', 'max_image_mb', Math.max(0.1, Number(e.target.value) || 5))}
+              className={`${textInputClass} max-w-24`}
+            />
+          </SettingsField>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="WD14">
         <WD14ModelCard
           catalog={catalog}
@@ -529,6 +827,66 @@ export default function SettingsPage() {
         </SettingsField>
       </SettingsSection>
 
+      <SettingsSection title="Weights & Biases">
+        <SettingsField label="启用 WandB" desc="打开后所有训练任务都会写入 W&B；不再占用训练配置字段">
+          <div className="flex items-center gap-3">
+            <Bool value={draft.wandb.enabled} onChange={(v) => update('wandb', 'enabled', v)} />
+            <span className="text-xs text-fg-tertiary">
+              需要训练环境已安装 wandb 包
+            </span>
+          </div>
+        </SettingsField>
+        <SettingsField label="api_key">
+          <SensitiveInput
+            value={draft.wandb.api_key}
+            serverValue={server?.wandb.api_key ?? ''}
+            onChange={(v) => update('wandb', 'api_key', v)}
+          />
+        </SettingsField>
+        <SettingsField label="project">
+          <input
+            type="text"
+            value={draft.wandb.project}
+            onChange={(e) => update('wandb', 'project', e.target.value)}
+            placeholder="AnimaLoraStudio"
+            className={textInputClass}
+          />
+        </SettingsField>
+        <SettingsField label="entity" desc="可选；团队/用户名，留空使用 wandb 默认账号">
+          <input
+            type="text"
+            value={draft.wandb.entity}
+            onChange={(e) => update('wandb', 'entity', e.target.value)}
+            className={textInputClass}
+          />
+        </SettingsField>
+        <SettingsField label="base_url" desc="可选；私有 W&B/self-hosted 时填写">
+          <input
+            type="text"
+            value={draft.wandb.base_url}
+            onChange={(e) => update('wandb', 'base_url', e.target.value)}
+            placeholder="https://api.wandb.ai"
+            className={textInputClass}
+          />
+        </SettingsField>
+        <div className="grid grid-cols-2 gap-3">
+          <SettingsField label="mode">
+            <select
+              value={draft.wandb.mode}
+              onChange={(e) => update('wandb', 'mode', e.target.value as WandBConfig['mode'])}
+              className={textInputClass}
+            >
+              <option value="online">online</option>
+              <option value="offline">offline</option>
+              <option value="disabled">disabled</option>
+            </select>
+          </SettingsField>
+          <SettingsField label="记录采样图">
+            <Bool value={draft.wandb.log_samples} onChange={(v) => update('wandb', 'log_samples', v)} />
+          </SettingsField>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="ModelScope（魔搭社区）">
         <SettingsField label="token">
           <SensitiveInput
@@ -634,6 +992,112 @@ function SensitiveInput({ value, serverValue, onChange }: {
       placeholder={serverValue === MASK ? '已保存（不显示），输入新值才覆盖' : ''}
       onChange={(e) => onChange(e.target.value || MASK)}
       className={textInputClass}                />
+  )
+}
+
+function LLMPromptPresetsEditor({
+  presets,
+  currentId,
+  onCurrentChange,
+  onChange,
+}: {
+  presets: LLMPromptPreset[]
+  currentId: string
+  onCurrentChange: (id: string) => void
+  onChange: (presets: LLMPromptPreset[]) => void
+}) {
+  const current = presets.find((p) => p.id === currentId) ?? presets[0] ?? null
+
+  const addPreset = () => {
+    const used = new Set(presets.map((p) => p.id))
+    let idx = presets.length + 1
+    let id = `preset_${idx}`
+    while (used.has(id)) {
+      idx += 1
+      id = `preset_${idx}`
+    }
+    const next = {
+      id,
+      label: `新预设 ${idx}`,
+      prompt: 'Return JSON only with keys: quality, count, character, series, artist, appearance, tags, environment, nl.',
+      builtin: false,
+      output_format: 'json' as const,
+    }
+    onChange([...presets, next])
+    onCurrentChange(id)
+  }
+
+  const deleteCurrent = () => {
+    if (!current || current.builtin || presets.length <= 1) return
+    const next = presets.filter((p) => p.id !== current.id)
+    onChange(next)
+    onCurrentChange(next[0]?.id ?? 'custom')
+  }
+
+  const updateCurrent = (patch: Partial<LLMPromptPreset>) => {
+    if (!current || current.builtin) return
+    onChange(presets.map((p) => (p.id === current.id ? { ...p, ...patch } : p)))
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-1.5">
+        <select
+          value={current?.id ?? ''}
+          onChange={(e) => onCurrentChange(e.target.value)}
+          className={`${textInputClass} flex-1`}
+        >
+          {presets.map((p) => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>
+        <button type="button" onClick={addPreset} className="btn btn-secondary btn-sm">
+          + 新增
+        </button>
+        <button
+          type="button"
+          onClick={deleteCurrent}
+          disabled={!current || current.builtin || presets.length <= 1}
+          className="btn btn-ghost btn-sm"
+          title={current?.builtin ? '内置预设不可删除' : presets.length <= 1 ? '至少保留一个预设' : '删除当前预设'}
+        >
+          删除
+        </button>
+      </div>
+      {current && (
+        <div className="flex flex-col gap-1.5">
+          {current.builtin && (
+            <div className="text-[10px] text-fg-tertiary">
+              内置预设由程序提供，不可修改；如需调整请新增自定义预设。
+            </div>
+          )}
+          <input
+            type="text"
+            value={current.label}
+            onChange={(e) => updateCurrent({ label: e.target.value })}
+            disabled={current.builtin}
+            className={textInputClass}
+            placeholder="预设名称"
+          />
+          <select
+            value={current.output_format}
+            onChange={(e) => updateCurrent({ output_format: e.target.value as LLMPromptPreset['output_format'] })}
+            disabled={current.builtin}
+            className={textInputClass}
+          >
+            <option value="json">JSON caption</option>
+            <option value="text">Text caption</option>
+          </select>
+          <textarea
+            value={current.prompt}
+            onChange={(e) => updateCurrent({ prompt: e.target.value })}
+            disabled={current.builtin}
+            className={`${textInputClass} min-h-44 font-mono`}
+            placeholder="提示词内容"
+          />
+        </div>
+      )}
+    </div>
   )
 }
 

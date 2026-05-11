@@ -35,6 +35,7 @@ def test_defaults_when_file_missing(secrets_file: Path) -> None:
     assert s.gelbooru.api_key == ""
     assert s.wd14.threshold_general == pytest.approx(0.35)
     assert s.joycaption.base_url.startswith("http://")
+    assert s.wandb.project == "AnimaLoraStudio"
 
 
 def test_load_corrupt_json_returns_defaults(secrets_file: Path) -> None:
@@ -56,6 +57,26 @@ def test_cltagger_defaults_use_1_02(secrets_file: Path) -> None:
     assert s.cltagger.model_path == "cl_tagger_1_02/model.onnx"
     assert s.cltagger.tag_mapping_path == "cl_tagger_1_02/tag_mapping.json"
     assert s.cltagger.threshold_character == pytest.approx(0.6)
+
+
+def test_llm_tagger_defaults(secrets_file: Path) -> None:
+    s = secrets.load()
+    assert s.llm_tagger.base_url == "http://localhost:8000/v1"
+    assert s.llm_tagger.endpoint == "chat_completions"
+    assert s.llm_tagger.prompt_preset == "style_json"
+    assert [p.id for p in s.llm_tagger.prompt_presets] == [
+        "style_json",
+        "general_json",
+        "txt_tags",
+        "joycaption",
+    ]
+    assert all(p.builtin for p in s.llm_tagger.prompt_presets)
+
+
+def test_llm_tagger_keeps_model_in_model_ids(secrets_file: Path) -> None:
+    s = secrets.update({"llm_tagger": {"model": "vision-a", "model_ids": []}})
+    assert s.llm_tagger.model == "vision-a"
+    assert s.llm_tagger.model_ids == ["vision-a"]
 
 
 def test_wd14_legacy_file_without_model_ids_gets_defaults(
@@ -193,12 +214,16 @@ def test_to_masked_dict_replaces_sensitive(secrets_file: Path) -> None:
         {
             "gelbooru": {"user_id": "alice", "api_key": "secret"},
             "huggingface": {"token": "hf_secret"},
+            "wandb": {"api_key": "wandb_secret"},
+            "llm_tagger": {"api_key": "llm_secret"},
         }
     )
     masked = secrets.to_masked_dict(secrets.load())
     assert masked["gelbooru"]["user_id"] == "alice"  # 非敏感字段保留
     assert masked["gelbooru"]["api_key"] == secrets.MASK
     assert masked["huggingface"]["token"] == secrets.MASK
+    assert masked["wandb"]["api_key"] == secrets.MASK
+    assert masked["llm_tagger"]["api_key"] == secrets.MASK
 
 
 def test_to_masked_dict_keeps_empty_sensitive_empty(secrets_file: Path) -> None:
@@ -206,6 +231,8 @@ def test_to_masked_dict_keeps_empty_sensitive_empty(secrets_file: Path) -> None:
     masked = secrets.to_masked_dict(secrets.load())
     assert masked["gelbooru"]["api_key"] == ""
     assert masked["huggingface"]["token"] == ""
+    assert masked["wandb"]["api_key"] == ""
+    assert masked["llm_tagger"]["api_key"] == ""
 
 
 # ---------------------------------------------------------------------------

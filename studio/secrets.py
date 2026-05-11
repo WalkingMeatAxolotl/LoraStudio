@@ -19,6 +19,8 @@ SENSITIVE_FIELDS: tuple[str, ...] = (
     "gelbooru.api_key",
     "danbooru.api_key",
     "huggingface.token",
+    "wandb.api_key",
+    "llm_tagger.api_key",
     "modelscope.token",
 )
 
@@ -52,6 +54,22 @@ class HuggingFaceConfig(BaseModel):
     endpoint: str = "https://hf-mirror.com"
 
 
+class WandBConfig(BaseModel):
+    enabled: bool = False
+    api_key: str = ""
+    project: str = "AnimaLoraStudio"
+    entity: str = ""
+    base_url: str = ""
+    mode: str = "online"
+    log_samples: bool = True
+
+    @model_validator(mode="after")
+    def _normalize_values(self) -> "WandBConfig":
+        if self.mode not in {"online", "offline", "disabled"}:
+            self.mode = "online"
+        return self
+
+
 class ModelScopeConfig(BaseModel):
     token: str = ""
     # 魔搭社区（modelscope.cn）下载 token。公开模型不填也能下，私有 / 限速时需要。
@@ -73,6 +91,95 @@ class JoyCaptionConfig(BaseModel):
     base_url: str = "http://localhost:8000/v1"
     model: str = "fancyfeast/llama-joycaption-beta-one-hf-llava"
     prompt_template: str = "Descriptive Caption"
+
+
+class LLMPromptPresetConfig(BaseModel):
+    id: str
+    label: str
+    prompt: str
+    builtin: bool = False
+    output_format: str = "json"  # json | text
+
+
+def _default_llm_prompt_presets() -> list[LLMPromptPresetConfig]:
+    from .llm_presets import builtin_llm_presets
+
+    return [LLMPromptPresetConfig(**item) for item in builtin_llm_presets()]
+
+
+class LLMTaggerConfig(BaseModel):
+    base_url: str = "http://localhost:8000/v1"
+    api_key: str = ""
+    model: str = ""
+    model_ids: list[str] = Field(default_factory=list)
+    endpoint: str = "chat_completions"  # chat_completions | responses
+    prompt_preset: str = "style_json"
+    prompt_presets: list[LLMPromptPresetConfig] = Field(
+        default_factory=_default_llm_prompt_presets
+    )
+    custom_prompt: str = ""
+    temperature: float = 0.2
+    max_tokens: int = 700
+    timeout: int = 60
+    max_retries: int = 3
+    max_side: int = 1280
+    jpeg_quality: int = 85
+    max_image_mb: float = 5.0
+
+    @model_validator(mode="after")
+    def _normalize_values(self) -> "LLMTaggerConfig":
+        if self.endpoint not in {"chat_completions", "responses"}:
+            self.endpoint = "chat_completions"
+        builtin_presets = _default_llm_prompt_presets()
+        builtin_by_id = {preset.id: preset for preset in builtin_presets}
+        presets: list[LLMPromptPresetConfig] = []
+        seen: set[str] = set()
+        for preset in builtin_presets:
+            presets.append(preset)
+            seen.add(preset.id)
+        for preset in self.prompt_presets or []:
+            preset.id = "".join(
+                ch if ch.isalnum() or ch in ("_", "-") else "_"
+                for ch in str(preset.id or "").strip()
+            ).strip("_")
+            preset.label = str(preset.label or preset.id).strip()
+            preset.prompt = str(preset.prompt or "").strip()
+            preset.output_format = (
+                "text" if str(preset.output_format).strip() == "text" else "json"
+            )
+            if preset.id in builtin_by_id:
+                continue
+            if not preset.id or not preset.prompt or preset.id in seen:
+                continue
+            preset.builtin = False
+            seen.add(preset.id)
+            presets.append(preset)
+        if not presets:
+            presets = _default_llm_prompt_presets()
+        self.prompt_presets = presets
+        preset_ids = {p.id for p in self.prompt_presets}
+        if self.prompt_preset not in preset_ids and self.prompt_preset != "custom":
+            self.prompt_preset = self.prompt_presets[0].id
+        if self.model and self.model not in self.model_ids:
+            self.model_ids = [self.model, *self.model_ids]
+        model_seen: set[str] = set()
+        clean_model_ids: list[str] = []
+        for model_id in self.model_ids:
+            text = str(model_id or "").strip()
+            key = text.lower()
+            if not text or key in model_seen:
+                continue
+            model_seen.add(key)
+            clean_model_ids.append(text)
+        self.model_ids = clean_model_ids
+        self.temperature = max(0.0, min(float(self.temperature), 2.0))
+        self.max_tokens = max(64, int(self.max_tokens or 700))
+        self.timeout = max(5, int(self.timeout or 60))
+        self.max_retries = max(1, int(self.max_retries or 3))
+        self.max_side = max(64, int(self.max_side or 1280))
+        self.jpeg_quality = max(1, min(100, int(self.jpeg_quality or 85)))
+        self.max_image_mb = max(0.1, float(self.max_image_mb or 5.0))
+        return self
 
 
 # 默认 WD14 候选模型；用户可在「设置 → WD14 → 候选模型」里增删，
@@ -173,11 +280,13 @@ class Secrets(BaseModel):
     danbooru: DanbooruConfig = Field(default_factory=DanbooruConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
     huggingface: HuggingFaceConfig = Field(default_factory=HuggingFaceConfig)
+    wandb: WandBConfig = Field(default_factory=WandBConfig)
     modelscope: ModelScopeConfig = Field(default_factory=ModelScopeConfig)
     # 模型下载源。"huggingface"（默认）走 HF + endpoint 配置；
     # "modelscope" 走魔搭社区，没有对应映射的模型自动回退 HF。
     download_source: str = "huggingface"
     joycaption: JoyCaptionConfig = Field(default_factory=JoyCaptionConfig)
+    llm_tagger: LLMTaggerConfig = Field(default_factory=LLMTaggerConfig)
     wd14: WD14Config = Field(default_factory=WD14Config)
     cltagger: CLTaggerConfig = Field(default_factory=CLTaggerConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)

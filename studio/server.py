@@ -1219,11 +1219,44 @@ class CLTaggerOverrides(BaseModel):
     blacklist_tags: Optional[list[str]] = None
 
 
+class LLMTaggerOverrides(BaseModel):
+    """打标页对 LLM tagger 设置的「本次任务覆盖」—— 仅在 worker 进程内生效。"""
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    endpoint: Optional[str] = None
+    prompt_preset: Optional[str] = None
+    custom_prompt: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    timeout: Optional[int] = None
+    max_retries: Optional[int] = None
+    max_side: Optional[int] = None
+    jpeg_quality: Optional[int] = None
+    max_image_mb: Optional[float] = None
+
+
 class TagJobRequest(BaseModel):
     tagger: str = "wd14"
     output_format: str = "txt"                # "txt" | "json"
     wd14_overrides: Optional[Wd14Overrides] = None
     cltagger_overrides: Optional[CLTaggerOverrides] = None
+    llm_overrides: Optional[LLMTaggerOverrides] = None
+
+
+class LLMModelsRefreshRequest(BaseModel):
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    timeout: Optional[int] = None
+
+
+class LLMConnectionTestRequest(BaseModel):
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    endpoint: Optional[str] = None
+    timeout: Optional[int] = None
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
 
 
 class CaptionEdit(BaseModel):
@@ -1414,6 +1447,74 @@ def check_tagger(name: str) -> dict[str, Any]:
         "msg": msg,
         "requires_service": getattr(t, "requires_service", False),
     }
+
+
+@app.post("/api/llm-tagger/models/refresh")
+def refresh_llm_tagger_models(body: LLMModelsRefreshRequest) -> dict[str, Any]:
+    """读取 OpenAI-compatible /models，并保存到 llm_tagger.model_ids。"""
+    from .services import llm_tagger as llm_tagger_svc
+
+    current = secrets.load().llm_tagger
+    base_url = (body.base_url if body.base_url is not None else current.base_url).strip()
+    api_key = (
+        current.api_key
+        if body.api_key is None or body.api_key == secrets.MASK
+        else body.api_key.strip()
+    )
+    if not base_url:
+        raise HTTPException(400, "base_url is required")
+    try:
+        model_ids = llm_tagger_svc.fetch_openai_compatible_models(
+            base_url,
+            api_key,
+            timeout=body.timeout or current.timeout,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc)) from exc
+    selected = current.model if current.model in model_ids else (model_ids[0] if model_ids else current.model)
+    patch: dict[str, Any] = {
+        "llm_tagger": {
+            "base_url": base_url,
+            "model_ids": model_ids,
+            "model": selected,
+        }
+    }
+    if body.api_key not in (None, secrets.MASK):
+        patch["llm_tagger"]["api_key"] = api_key
+    new = secrets.update(patch)
+    return {
+        "items": model_ids,
+        "secrets": secrets.to_masked_dict(new),
+    }
+
+
+@app.post("/api/llm-tagger/test")
+def test_llm_tagger_connection(body: LLMConnectionTestRequest) -> dict[str, Any]:
+    """Run a text-only LLM connectivity test without saving form values."""
+    from .services import llm_tagger as llm_tagger_svc
+
+    current = secrets.load().llm_tagger
+    merged = current.model_dump()
+    for key in ("base_url", "model", "endpoint", "timeout", "max_tokens", "temperature"):
+        value = getattr(body, key)
+        if value is not None:
+            merged[key] = value
+    if body.api_key is not None and body.api_key != secrets.MASK:
+        merged["api_key"] = body.api_key
+    cfg = secrets.LLMTaggerConfig(**merged)
+    if not cfg.base_url.strip():
+        raise HTTPException(400, "base_url is required")
+    if not cfg.model.strip():
+        raise HTTPException(400, "model is required")
+    return llm_tagger_svc.test_openai_compatible_connection(
+        cfg.base_url,
+        cfg.api_key,
+        cfg.model,
+        endpoint=cfg.endpoint,
+        timeout=cfg.timeout,
+        max_tokens=cfg.max_tokens,
+        temperature=cfg.temperature,
+    )
 
 
 def _version_train_dir_or_404(pid: int, vid: int):

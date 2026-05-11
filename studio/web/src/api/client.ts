@@ -82,6 +82,16 @@ export interface HuggingFaceConfig {
   endpoint: string
 }
 
+export interface WandBConfig {
+  enabled: boolean
+  api_key: string
+  project: string
+  entity: string
+  base_url: string
+  mode: 'online' | 'offline' | 'disabled'
+  log_samples: boolean
+}
+
 export interface ModelScopeConfig {
   /** 魔搭社区 token。公开模型可不填；私有 / 限速时需要。 */
   token: string
@@ -91,6 +101,44 @@ export interface JoyCaptionConfig {
   base_url: string
   model: string
   prompt_template: string
+}
+
+export interface LLMPromptPreset {
+  id: string
+  label: string
+  prompt: string
+  builtin: boolean
+  output_format: 'json' | 'text'
+}
+
+export interface LLMTaggerConfig {
+  base_url: string
+  api_key: string
+  model: string
+  model_ids: string[]
+  endpoint: 'chat_completions' | 'responses'
+  prompt_preset: string
+  prompt_presets: LLMPromptPreset[]
+  custom_prompt: string
+  temperature: number
+  max_tokens: number
+  timeout: number
+  max_retries: number
+  max_side: number
+  jpeg_quality: number
+  max_image_mb: number
+}
+
+export interface LLMConnectionTestResult {
+  ok: boolean
+  endpoint: LLMTaggerConfig['endpoint']
+  endpoint_url: string
+  model: string
+  elapsed_ms: number
+  status_code: number | null
+  response_preview: string
+  error: string
+  request_shape: string
 }
 
 export interface WD14Config {
@@ -258,11 +306,13 @@ export interface Secrets {
   danbooru: DanbooruConfig
   download: DownloadGlobalConfig
   huggingface: HuggingFaceConfig
+  wandb: WandBConfig
   modelscope: ModelScopeConfig
   /** 模型下载源：'huggingface'（默认）或 'modelscope'。
    *  选 modelscope 时，有映射的模型走魔搭 CLI 下载；无映射的自动回退 HF。 */
   download_source: string
   joycaption: JoyCaptionConfig
+  llm_tagger: LLMTaggerConfig
   wd14: WD14Config
   cltagger: CLTaggerConfig
   models: ModelsConfig
@@ -491,7 +541,7 @@ export interface CopyResult {
 
 // ---- tagging (PP4) --------------------------------------------------------
 
-export type TaggerName = 'wd14' | 'cltagger' | 'joycaption'
+export type TaggerName = 'wd14' | 'cltagger' | 'joycaption' | 'llm'
 
 export interface TaggerStatus {
   name: TaggerName
@@ -963,6 +1013,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  refreshLLMModels: (body: { base_url?: string; api_key?: string; timeout?: number }) =>
+    req<{ items: string[]; secrets: Secrets }>('/api/llm-tagger/models/refresh', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  testLLMConnection: (body: Partial<Pick<LLMTaggerConfig, 'base_url' | 'api_key' | 'model' | 'endpoint' | 'timeout' | 'max_tokens' | 'temperature'>>) =>
+    req<LLMConnectionTestResult>('/api/llm-tagger/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   updateSecrets: (patch: SecretsPatch) =>
     req<Secrets>('/api/secrets', {
       method: 'PUT',
@@ -1162,6 +1222,7 @@ export const api = {
         add_model_tag?: boolean | null
         blacklist_tags?: string[] | null
       }
+      llm_overrides?: Omit<Partial<LLMTaggerConfig>, 'api_key' | 'model_ids' | 'prompt_presets'>
     }
   ) =>
     req<Job>(`/api/projects/${pid}/versions/${vid}/tag`, {
