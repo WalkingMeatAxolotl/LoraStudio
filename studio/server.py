@@ -2507,10 +2507,16 @@ def download_task_outputs_zip(
         ) as zf:
             for f in files:
                 zf.write(f, arcname=f.name)
-    except Exception:
+    except Exception as e:
         tmp_path.unlink(missing_ok=True)
+        bus.publish({
+            "type": "task_outputs_zip_failed",
+            "task_id": task_id,
+            "error": str(e),
+        })
         raise
 
+    bus.publish({"type": "task_outputs_zip_ready", "task_id": task_id})
     background.add_task(lambda: tmp_path.unlink(missing_ok=True))
 
     archive_name = f"task_{task_id}_outputs.zip"

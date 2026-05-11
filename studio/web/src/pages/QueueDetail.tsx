@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   api,
-  downloadBlob,
   type Task,
   type TaskOutputs,
   type TaskStatus,
@@ -404,6 +403,28 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
     return () => { alive = false }
   }, [taskId, refreshKey])
 
+  // 压缩中状态：点 "下载全部" 时 setZipping(true)，浏览器直链接管下载，
+  // 后端打包完 publish task_outputs_zip_ready → SSE 清状态。
+  // 60s 兜底防止事件丢失 / 后端失败时按钮卡死。
+  useEventStream((evt) => {
+    if (evt.task_id !== taskId) return
+    if (evt.type === 'task_outputs_zip_ready') {
+      setZipping(false)
+    } else if (evt.type === 'task_outputs_zip_failed') {
+      setZipping(false)
+      toast(`压缩失败: ${typeof evt.error === 'string' ? evt.error : '未知错误'}`, 'error')
+    }
+  })
+
+  useEffect(() => {
+    if (!zipping) return
+    const t = window.setTimeout(() => {
+      setZipping(false)
+      toast('压缩超时（60s），如下载已开始可忽略', 'info')
+    }, 60_000)
+    return () => window.clearTimeout(t)
+  }, [zipping, toast])
+
   const sortedFiles = useMemo(() => data ? [...data.files].sort((a, b) => b.mtime - a.mtime) : [], [data])
 
   const openFolder = async () => {
@@ -413,15 +434,17 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
     finally { setBusy(false) }
   }
 
-  const handleDownloadZip = async () => {
+  const handleDownloadZip = () => {
     if (zipping) return
     setZipping(true)
-    try {
-      const safe = taskName && /^[A-Za-z0-9_.-]+$/.test(taskName)
-      const zipName = safe ? `${taskName}_outputs.zip` : `task_${taskId}_outputs.zip`
-      await downloadBlob(api.taskOutputsZipUrl(taskId), zipName)
-    } catch (e) { toast(`下载失败: ${e}`, 'error') }
-    finally { setZipping(false) }
+    const safe = taskName && /^[A-Za-z0-9_.-]+$/.test(taskName)
+    const zipName = safe ? `${taskName}_outputs.zip` : `task_${taskId}_outputs.zip`
+    const a = document.createElement('a')
+    a.href = api.taskOutputsZipUrl(taskId)
+    a.download = zipName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
   }
 
   const copyPath = async () => {
@@ -447,7 +470,7 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
           <button onClick={() => setRefreshKey((k) => k + 1)} className="btn btn-ghost btn-sm">刷新</button>
           {data.exists && data.files.length > 0 && (
             <button onClick={handleDownloadZip} disabled={zipping} className="btn btn-primary btn-sm">
-              {zipping ? '打包中...' : '下载全部'}
+              {zipping ? '压缩中...' : '下载全部'}
             </button>
           )}
         </div>
