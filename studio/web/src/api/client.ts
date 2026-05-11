@@ -22,6 +22,8 @@ export interface SchemaProperty {
   /** 后端打了 hidden=True 的字段：值仍随 ConfigData 透传 / 保存，但 SchemaForm
    * 不渲染。用于「该字段对当前用户群无意义但 schema 必须保留」的兜底场景。 */
   hidden?: boolean
+  ui_level?: 'basic' | 'advanced'
+  deprecated_options?: Record<string, string>
   anyOf?: Array<{ type?: string }>
   items?: SchemaProperty
 }

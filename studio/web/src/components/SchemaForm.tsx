@@ -78,6 +78,7 @@ export default function SchemaForm({
                 {fields.map((name) => {
                   const prop = props[name]
                   if (!evalShowWhen(prop.show_when, values)) return null
+                  if (prop.ui_level === 'advanced' && values.lucid_ui_mode !== 'advanced') return null
                   const isDisabled = disabledSet.has(name)
                   const hint = isDisabled ? dHints[name] : aHints[name]
                   return (

@@ -76,11 +76,13 @@ export default function Field({
           disabled={disabled}
           className="input" style={inputStyle}
         >
-          {(prop.enum ?? []).map((opt) => (
-            <option key={String(opt)} value={String(opt)}>
-              {String(opt)}
-            </option>
-          ))}
+          {(prop.enum ?? [])
+            .filter((opt) => !prop.deprecated_options?.[String(opt)] || String(opt) === String(value ?? ''))
+            .map((opt) => (
+              <option key={String(opt)} value={String(opt)}>
+                {String(opt)}{prop.deprecated_options?.[String(opt)] ? ' (deprecated)' : ''}
+              </option>
+            ))}
         </select>
         {help && <div className="text-xs text-fg-tertiary mt-1">{help}</div>}
       </div>
