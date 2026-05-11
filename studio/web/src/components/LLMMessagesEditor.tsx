@@ -24,20 +24,21 @@ interface Props {
   disabled?: boolean
 }
 
-/**
- * LLM tagger preset 的 messages 序列编辑器。
- *
- * - text item: role 下拉 (system/user/assistant) + content textarea + 删除按钮
- * - image item: 固定显示，content / role 不可编辑，但位置可拖
- * - 每条 item 都可拖拽（左侧 grip handle）
- * - 「+ 添加消息」追加 text/user 空消息
- *
- * 后端约束：messages 必须恰好含一个 type=image item（validator 兜底）。前端 UI
- * 不显式阻止删除 image，但删了后端会自动补一个到末尾。
- */
+/** Role 着色（与 design tokens 对齐，参见 LLM Settings redesign.html 的 .msg-role.* 规则）。 */
+const roleStyles: Record<string, { bg: string; fg: string }> = {
+  system:    { bg: 'var(--info-soft)',   fg: 'var(--info)' },
+  user:      { bg: 'var(--accent-soft)', fg: 'var(--accent)' },
+  assistant: { bg: 'var(--ok-soft)',     fg: 'var(--ok)' },
+  image:     { bg: 'var(--warn-soft)',   fg: 'var(--warn)' },
+}
+
+const roleHint: Record<string, string> = {
+  system:    '指令性 · 一般写一次',
+  user:      'few-shot 示例 / 任务描述',
+  assistant: 'few-shot 期望答案',
+}
+
 export default function LLMMessagesEditor({ messages, onChange, disabled }: Props) {
-  // 拖拽 id：每条 item 一个稳定 id；用 useRef 维护"消息引用 → id" 映射，让 array
-  // 重排时 id 跟着内容走（避免单纯按 index 算 id 在拖拽末尾跳变）。
   const idRefs = useRef<WeakMap<LLMMessage, string>>(new WeakMap())
   const seq = useRef(0)
   const idOf = (m: LLMMessage): string => {
@@ -74,7 +75,6 @@ export default function LLMMessagesEditor({ messages, onChange, disabled }: Prop
   }
 
   const addMessage = () => {
-    // 默认 role：跟随上一条交替（system→user→assistant→user→...）；起始 user
     const last = messages[messages.length - 1]
     const nextRole: LLMMessage['role'] =
       !last || last.type === 'image' || last.role === 'system'
@@ -86,11 +86,11 @@ export default function LLMMessagesEditor({ messages, onChange, disabled }: Prop
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="grid gap-2.5">
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={ids} strategy={verticalListSortingStrategy}>
           {messages.map((m, i) => (
-            <SortableItem
+            <SortableMessage
               key={ids[i]}
               id={ids[i]}
               message={m}
@@ -105,7 +105,12 @@ export default function LLMMessagesEditor({ messages, onChange, disabled }: Prop
         type="button"
         onClick={addMessage}
         disabled={disabled}
-        className="btn btn-secondary btn-sm self-start"
+        className="bg-transparent text-xs text-fg-tertiary hover:text-accent hover:bg-accent-soft hover:border-accent transition-colors py-2.5 px-3 flex items-center justify-center gap-1.5"
+        style={{
+          border: '1px dashed var(--border-default)',
+          borderRadius: 'var(--r-md)',
+          fontFamily: 'var(--font-mono)',
+        }}
       >
         + 添加消息
       </button>
@@ -113,7 +118,7 @@ export default function LLMMessagesEditor({ messages, onChange, disabled }: Prop
   )
 }
 
-function SortableItem({
+function SortableMessage({
   id,
   message,
   onChange,
@@ -131,84 +136,145 @@ function SortableItem({
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
+    background: 'var(--bg-sunken)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: 'var(--r-md)',
+    overflow: 'hidden',
   }
 
-  if (message.type === 'image') {
-    return (
+  const isImage = message.type === 'image'
+  const rolePillStyle = roleStyles[isImage ? 'image' : message.role] ?? roleStyles.user
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      {/* msg-h: header strip */}
       <div
-        ref={setNodeRef}
-        style={style}
-        className="flex items-center gap-2 rounded-sm border border-dashed border-subtle bg-surface-soft px-2 py-2"
+        className="flex items-center gap-2.5 px-2.5 py-2"
+        style={{
+          background: 'rgba(255,255,255,0.02)',
+          borderBottom: '1px solid var(--border-subtle)',
+        }}
       >
         <button
           {...attributes}
           {...listeners}
           type="button"
           aria-label="拖动调整位置"
-          className="cursor-grab text-fg-tertiary hover:text-fg-secondary select-none px-1"
           disabled={disabled}
+          className="cursor-grab text-fg-disabled select-none"
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 14 }}
         >
           ⋮⋮
         </button>
-        <span className="text-sm">📷 当前图片</span>
-        <span className="text-[10px] text-fg-tertiary">
-          打标时图片塞入此位置；可拖动调整顺序
-        </span>
-      </div>
-    )
-  }
 
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="flex items-start gap-2 rounded-sm border border-subtle bg-surface px-2 py-2"
-    >
-      <button
-        {...attributes}
-        {...listeners}
-        type="button"
-        aria-label="拖动调整位置"
-        className="cursor-grab text-fg-tertiary hover:text-fg-secondary select-none px-1 pt-1"
-        disabled={disabled}
-      >
-        ⋮⋮
-      </button>
-      <select
-        value={message.role}
-        onChange={(e) => onChange({ role: e.target.value as LLMMessage['role'] })}
-        disabled={disabled}
-        className="input input-mono text-xs"
-        style={{ width: 110 }}
-      >
-        <option value="system">system</option>
-        <option value="user">user</option>
-        <option value="assistant">assistant</option>
-      </select>
-      <textarea
-        value={message.content}
-        onChange={(e) => onChange({ content: e.target.value })}
-        disabled={disabled}
-        rows={3}
-        className="input input-mono min-h-16 flex-1 text-xs font-mono"
-        placeholder={
-          message.role === 'system'
-            ? '系统提示，例如：You are an image captioning assistant...'
-            : message.role === 'user'
-              ? '用户内容（few-shot 示例 / 任务描述）'
-              : 'assistant 期望输出（few-shot 示例答案）'
-        }
-      />
-      <button
-        type="button"
-        onClick={onDelete}
-        disabled={disabled}
-        className="btn btn-ghost btn-sm text-fg-tertiary hover:text-err shrink-0"
-        title="删除消息"
-        aria-label="删除消息"
-      >
-        ✕
-      </button>
+        {isImage ? (
+          <span
+            className="inline-flex items-center gap-1.5 text-2xs uppercase tracking-wider"
+            style={{
+              fontFamily: 'var(--font-mono)',
+              padding: '3px 8px',
+              borderRadius: 'var(--r-sm)',
+              background: rolePillStyle.bg,
+              color: rolePillStyle.fg,
+              letterSpacing: '0.06em',
+            }}
+          >
+            🖼 当前图片
+          </span>
+        ) : (
+          <select
+            value={message.role}
+            onChange={(e) => onChange({ role: e.target.value as LLMMessage['role'] })}
+            disabled={disabled}
+            className="inline-flex items-center gap-1.5 text-2xs uppercase tracking-wider cursor-pointer border-0 outline-none"
+            style={{
+              fontFamily: 'var(--font-mono)',
+              padding: '3px 8px',
+              borderRadius: 'var(--r-sm)',
+              background: rolePillStyle.bg,
+              color: rolePillStyle.fg,
+              letterSpacing: '0.06em',
+            }}
+          >
+            <option value="system">system</option>
+            <option value="user">user</option>
+            <option value="assistant">assistant</option>
+          </select>
+        )}
+
+        <span
+          className="text-2xs text-fg-tertiary"
+          style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}
+        >
+          {isImage ? '打标时把图片塞入此位置 · 可拖动' : roleHint[message.role]}
+        </span>
+
+        {!isImage && (
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={disabled}
+            className="ml-auto text-fg-tertiary hover:text-err hover:bg-err-soft border-0 bg-transparent"
+            style={{ padding: '4px 6px', borderRadius: 'var(--r-sm)', fontSize: 12 }}
+            title="删除消息"
+            aria-label="删除消息"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {/* msg body */}
+      {isImage ? (
+        <div className="flex items-center gap-3 px-3.5 py-3">
+          <div
+            className="grid place-items-center text-white"
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 'var(--r-sm)',
+              background:
+                'radial-gradient(circle at 30% 30%, oklch(0.75 0.12 60), transparent 60%), radial-gradient(circle at 70% 70%, oklch(0.45 0.10 280), transparent 65%), var(--bg-overlay)',
+              border: '1px solid var(--border-default)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+            }}
+          >
+            IMG
+          </div>
+          <div
+            className="text-xs text-fg-tertiary"
+            style={{ fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}
+          >
+            <div>
+              占位：<b className="font-medium text-fg-secondary">current_image</b>
+            </div>
+            <div>每次打标时被替换为正在处理的图片</div>
+          </div>
+        </div>
+      ) : (
+        <textarea
+          value={message.content}
+          onChange={(e) => onChange({ content: e.target.value })}
+          disabled={disabled}
+          rows={3}
+          className="w-full bg-transparent border-0 outline-none text-sm text-fg-primary block"
+          style={{
+            padding: '12px 14px',
+            fontFamily: 'var(--font-mono)',
+            resize: 'none',
+            lineHeight: 1.55,
+            minHeight: 80,
+          }}
+          placeholder={
+            message.role === 'system'
+              ? '系统提示，例如：You are an image captioning assistant...'
+              : message.role === 'user'
+                ? '（可选）用户内容 — few-shot 示例 / 任务描述'
+                : 'assistant 期望输出（few-shot 示例答案）'
+          }
+        />
+      )}
     </div>
   )
 }
