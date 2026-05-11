@@ -315,6 +315,30 @@ export default function SettingsPage() {
     // current_preset 不变；validator 会重建 preset
   }
 
+  const saveAsNewPreset = () => {
+    const label = window.prompt('新预设名称：', `${currentPreset.label} 副本`)
+    if (!label) return
+    const slug = label.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'preset'
+    const used = new Set(draft.llm_tagger.presets.map((p) => p.id))
+    let idx = 1
+    let id = slug
+    while (used.has(id)) {
+      idx += 1
+      id = `${slug}_${idx}`
+    }
+    const next: LLMPreset = {
+      ...currentPreset,
+      // deep-copy messages 避免共享引用
+      messages: currentPreset.messages.map((m) => ({ ...m })),
+      model_ids: [...currentPreset.model_ids],
+      id,
+      label,
+      builtin: false,
+    }
+    update('llm_tagger', 'presets', [...draft.llm_tagger.presets, next])
+    update('llm_tagger', 'current_preset', id)
+  }
+
   const refreshLLMModels = async () => {
     if (!server) return
     setLlmModelsBusy(true)
@@ -536,234 +560,266 @@ export default function SettingsPage() {
       </>)}
 
       {tab === 'tagging' && (<>
-      <SettingsSection title="LLM 打标（OpenAI compatible）">
-        <SettingsField label="preset" desc="一个 preset = 一整套 endpoint + prompt + 生成参数；选 preset 即切换 LLM 配置">
-          <div className="flex flex-col gap-2">
-            <div className="flex gap-1.5">
-              <select
-                value={currentPreset.id}
-                onChange={(e) => update('llm_tagger', 'current_preset', e.target.value)}
-                className={`${textInputClass} flex-1`}
-              >
-                {draft.llm_tagger.presets.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}{p.builtin ? '（内置）' : ''}
-                  </option>
-                ))}
-              </select>
-              <button type="button" onClick={addPreset} className="btn btn-secondary btn-sm">
-                + 新增
-              </button>
-              <button
-                type="button"
-                onClick={currentPreset.builtin ? resetCurrentPresetToBuiltin : deleteCurrentPreset}
-                disabled={!currentPreset.builtin && draft.llm_tagger.presets.length <= 1}
-                className="btn btn-ghost btn-sm"
-                title={currentPreset.builtin ? '把当前内置预设重置为程序默认值' : '删除当前预设'}
-              >
-                {currentPreset.builtin ? '重置默认' : '删除'}
-              </button>
-            </div>
-            <div className="text-[10px] text-fg-tertiary">
-              {currentPreset.builtin
-                ? '内置预设：所有字段可改，"重置默认" 会恢复程序提供的初始值。'
-                : '自定义预设：删除后无法恢复。'}
-            </div>
-          </div>
-        </SettingsField>
+      <SettingsSection title="LLM 打标">
+        {/* ── 顶部 preset toolbar ─────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-mono text-fg-tertiary uppercase">preset</span>
+          <select
+            value={currentPreset.id}
+            onChange={(e) => update('llm_tagger', 'current_preset', e.target.value)}
+            className={`${textInputClass} flex-1 min-w-48`}
+          >
+            {draft.llm_tagger.presets.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.builtin ? '内置 · ' : ''}{p.label}
+              </option>
+            ))}
+          </select>
+          <span className="flex-1 min-w-2" />
+          {currentPreset.builtin && (
+            <button
+              type="button"
+              onClick={resetCurrentPresetToBuiltin}
+              className="btn btn-ghost btn-sm"
+              title="把当前内置预设重置为程序默认值"
+            >
+              ↻ 重置默认
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={saveAsNewPreset}
+            className="btn btn-ghost btn-sm"
+            title="复制当前 preset 字段为新预设"
+          >
+            📝 另存为...
+          </button>
+          <button type="button" onClick={addPreset} className="btn btn-secondary btn-sm">
+            + 新 Preset
+          </button>
+          {!currentPreset.builtin && draft.llm_tagger.presets.length > 1 && (
+            <button
+              type="button"
+              onClick={deleteCurrentPreset}
+              className="btn btn-ghost btn-sm text-fg-tertiary hover:text-err"
+              title="删除当前预设"
+            >
+              ✕ 删除
+            </button>
+          )}
+        </div>
 
-        <SettingsField label="label">
+        {/* preset 名称 / 类型描述 */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono text-fg-tertiary uppercase shrink-0">label</span>
           <input
             type="text"
             value={currentPreset.label}
             onChange={(e) => updatePreset('label', e.target.value)}
-            className={textInputClass}
+            className={`${textInputClass} flex-1`}
           />
-        </SettingsField>
+          <span className="text-[10px] text-fg-tertiary">
+            {currentPreset.builtin ? '内置 preset，"重置默认"可恢复' : '自定义 preset'}
+          </span>
+        </div>
 
-        <SettingsField label="base_url" desc="可填 /v1、/chat/completions 或 /responses">
-          <input
-            type="text"
-            value={currentPreset.base_url}
-            onChange={(e) => updatePreset('base_url', e.target.value)}
-            className={textInputClass}
-          />
-        </SettingsField>
-        <SettingsField label="api_key">
-          <SensitiveInput
-            value={currentPreset.api_key}
-            serverValue={serverCurrentPreset?.api_key ?? ''}
-            onChange={(v) => updatePreset('api_key', v)}
-          />
-        </SettingsField>
-        <SettingsField label="model">
-          <div className="flex flex-col gap-1.5">
-            <div className="flex gap-1.5">
-              {currentPreset.model_ids.length > 0 ? (
-                <select
-                  value={currentPreset.model}
-                  onChange={(e) => updatePreset('model', e.target.value)}
-                  className={`${textInputClass} flex-1`}
+        {/* ── 01 连接 ─────────────────────────────────────────── */}
+        <LLMSubgroup index="01" title="连接" hint="openai-compatible">
+          <FieldRow label="base_url" required hint="可填 /v1、/chat/completions 或 /responses">
+            <input
+              type="text"
+              value={currentPreset.base_url}
+              onChange={(e) => updatePreset('base_url', e.target.value)}
+              placeholder="https://api.openai.com/v1"
+              className={textInputClass}
+            />
+          </FieldRow>
+          <FieldRow label="api_key" required>
+            <SensitiveInput
+              value={currentPreset.api_key}
+              serverValue={serverCurrentPreset?.api_key ?? ''}
+              onChange={(v) => updatePreset('api_key', v)}
+            />
+          </FieldRow>
+          <FieldRow label="model" required>
+            <div className="flex flex-col gap-1">
+              <div className="flex gap-1.5">
+                {currentPreset.model_ids.length > 0 ? (
+                  <select
+                    value={currentPreset.model}
+                    onChange={(e) => updatePreset('model', e.target.value)}
+                    className={`${textInputClass} flex-1`}
+                  >
+                    {!currentPreset.model_ids.includes(currentPreset.model) && currentPreset.model && (
+                      <option value={currentPreset.model}>{currentPreset.model}</option>
+                    )}
+                    {currentPreset.model_ids.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={currentPreset.model}
+                    onChange={(e) => updatePreset('model', e.target.value)}
+                    placeholder="如 gpt-4.1-mini / qwen-vl-max / 本地服务模型名"
+                    className={`${textInputClass} flex-1`}
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() => void refreshLLMModels()}
+                  disabled={llmModelsBusy || !currentPreset.base_url.trim()}
+                  className="btn btn-secondary btn-sm"
+                  title="从 base_url 的 /models 读取并保存模型列表"
                 >
-                  {!currentPreset.model_ids.includes(currentPreset.model) && currentPreset.model && (
-                    <option value={currentPreset.model}>{currentPreset.model}</option>
-                  )}
-                  {currentPreset.model_ids.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  value={currentPreset.model}
-                  onChange={(e) => updatePreset('model', e.target.value)}
-                  placeholder="如 gpt-4.1-mini / qwen-vl-max / 本地服务模型名"
-                  className={`${textInputClass} flex-1`}
-                />
-              )}
-              <button
-                type="button"
-                onClick={() => void refreshLLMModels()}
-                disabled={llmModelsBusy || !currentPreset.base_url.trim()}
-                className="btn btn-secondary btn-sm"
-                title="从 base_url 的 /models 读取并保存模型列表"
-              >
-                {llmModelsBusy ? '读取中...' : '读取模型'}
-              </button>
-              <button
-                type="button"
-                onClick={() => void testLLMConnection()}
-                disabled={llmTestBusy || !currentPreset.base_url.trim() || !currentPreset.model.trim()}
-                className="btn btn-secondary btn-sm"
-                title="发送纯文本长请求，测试 base_url / key / model / endpoint 是否通畅"
-              >
-                {llmTestBusy ? '测试中...' : '测试连接'}
-              </button>
-            </div>
-            {currentPreset.model_ids.length > 0 && (
-              <div className="text-[10px] text-fg-tertiary">
-                已保存 {currentPreset.model_ids.length} 个模型
+                  {llmModelsBusy ? '读取中...' : '从服务器拉取'}
+                </button>
               </div>
-            )}
-            {llmTestResult && (
-              <div className={`mt-1 rounded-sm border px-2 py-1.5 text-[11px] font-mono ${
-                llmTestResult.ok
-                  ? 'border-ok bg-ok-soft text-ok'
-                  : 'border-err bg-err-soft text-err'
-              }`}>
-                <div className="flex flex-wrap gap-x-3 gap-y-1">
-                  <span>{llmTestResult.ok ? 'OK' : 'FAILED'}</span>
-                  <span>{llmTestResult.endpoint}</span>
-                  {llmTestResult.status_code !== null && <span>HTTP {llmTestResult.status_code}</span>}
-                  {llmTestResult.elapsed_ms > 0 && <span>{llmTestResult.elapsed_ms}ms</span>}
+              {currentPreset.model_ids.length > 0 && (
+                <div className="text-[10px] text-fg-tertiary">
+                  已保存 {currentPreset.model_ids.length} 个模型
                 </div>
-                {llmTestResult.endpoint_url && (
-                  <div className="mt-1 break-all text-fg-secondary">{llmTestResult.endpoint_url}</div>
-                )}
-                {(llmTestResult.error || llmTestResult.response_preview) && (
-                  <div className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words text-fg-secondary">
-                    {llmTestResult.error || llmTestResult.response_preview}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </SettingsField>
-        <div className="grid grid-cols-2 gap-3">
-          <SettingsField label="endpoint">
-            <select
+              )}
+            </div>
+          </FieldRow>
+          <FieldRow label="endpoint 风格">
+            <EndpointTabs
               value={currentPreset.endpoint}
-              onChange={(e) => updatePreset('endpoint', e.target.value as LLMPreset['endpoint'])}
-              className={textInputClass}
+              onChange={(v) => updatePreset('endpoint', v)}
+            />
+          </FieldRow>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => void testLLMConnection()}
+              disabled={llmTestBusy || !currentPreset.base_url.trim() || !currentPreset.model.trim()}
+              className="btn btn-secondary btn-sm"
+              title="发送纯文本长请求，测试 base_url / key / model / endpoint 是否通畅"
             >
-              <option value="chat_completions">Chat Completions</option>
-              <option value="responses">Responses</option>
-            </select>
-          </SettingsField>
-          <SettingsField label="output_format">
-            <select
-              value={currentPreset.output_format}
-              onChange={(e) => updatePreset('output_format', e.target.value as LLMPreset['output_format'])}
-              className={textInputClass}
-            >
-              <option value="json">JSON caption</option>
-              <option value="text">Text caption</option>
-            </select>
-          </SettingsField>
-        </div>
-        <SettingsField label="messages" desc="按顺序铺开成 LLM API 的 messages；image 项是图片占位，打标时塞入图片；可拖拽调位置">
-          <div className="flex flex-col gap-1.5">
-            {currentPreset.endpoint === 'responses' && (
-              <div className="text-[10px] text-warn">
-                ⚠️ Responses endpoint 限制：只用合并后的 system + 第一条 user；其他 messages 会被忽略
-              </div>
+              {llmTestBusy ? '测试中...' : '测试连接'}
+            </button>
+            {llmTestResult && (
+              <span className={`text-[11px] font-mono ${
+                llmTestResult.ok ? 'text-ok' : 'text-err'
+              }`}>
+                {llmTestResult.ok ? '● 连接通过' : '● 连接失败'}
+                {llmTestResult.elapsed_ms > 0 && ` · ${llmTestResult.elapsed_ms} ms`}
+                {llmTestResult.status_code !== null && ` · HTTP ${llmTestResult.status_code}`}
+              </span>
             )}
-            <LLMMessagesEditor
-              messages={currentPreset.messages}
-              onChange={(msgs) => updatePreset('messages', msgs)}
-            />
           </div>
-        </SettingsField>
-        <div className="grid grid-cols-2 gap-3">
-          <SettingsField label="temperature">
-            <input
-              type="number" min={0} max={2} step={0.05}
+          {llmTestResult && (llmTestResult.error || llmTestResult.response_preview) && (
+            <div className={`rounded-sm border px-2 py-1.5 text-[11px] font-mono ${
+              llmTestResult.ok ? 'border-ok bg-ok-soft text-ok' : 'border-err bg-err-soft text-err'
+            }`}>
+              {llmTestResult.endpoint_url && (
+                <div className="break-all text-fg-secondary mb-1">{llmTestResult.endpoint_url}</div>
+              )}
+              <div className="max-h-24 overflow-auto whitespace-pre-wrap break-words text-fg-secondary">
+                {llmTestResult.error || llmTestResult.response_preview}
+              </div>
+            </div>
+          )}
+        </LLMSubgroup>
+
+        {/* ── 02 Prompt 模板 ─────────────────────────────────── */}
+        <LLMSubgroup
+          index="02"
+          title="Prompt 模板"
+          hint={`${currentPreset.messages.length} 条消息 · 拖动调整顺序`}
+          headerRight={
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-mono text-fg-tertiary uppercase">output</span>
+              <select
+                value={currentPreset.output_format}
+                onChange={(e) => updatePreset('output_format', e.target.value as LLMPreset['output_format'])}
+                className="input input-mono text-xs py-0.5"
+              >
+                <option value="json">JSON caption</option>
+                <option value="text">Text caption</option>
+              </select>
+            </div>
+          }
+        >
+          {currentPreset.endpoint === 'responses' && (
+            <div className="text-[10px] text-warn">
+              ⚠️ Responses endpoint 限制：只用合并后的 system + 第一条 user；其他 messages 会被忽略
+            </div>
+          )}
+          <LLMMessagesEditor
+            messages={currentPreset.messages}
+            onChange={(msgs) => updatePreset('messages', msgs)}
+          />
+        </LLMSubgroup>
+
+        {/* ── 03 采样参数 ─────────────────────────────────────── */}
+        <LLMSubgroup index="03" title="采样参数" hint="model-side">
+          <FieldRow label="temperature" hint="越低越稳定">
+            <SliderInput
               value={currentPreset.temperature}
-              onChange={(e) => updatePreset('temperature', Math.max(0, Math.min(2, Number(e.target.value) || 0)))}
-              className={`${textInputClass} max-w-24`}
+              min={0} max={2} step={0.05}
+              onChange={(v) => updatePreset('temperature', v)}
             />
-          </SettingsField>
-          <SettingsField label="max_tokens">
-            <input
-              type="number" min={64} max={4096}
+          </FieldRow>
+          <FieldRow label="max_tokens">
+            <SliderInput
               value={currentPreset.max_tokens}
-              onChange={(e) => updatePreset('max_tokens', Math.max(64, Number(e.target.value) || 64))}
-              className={`${textInputClass} max-w-24`}
+              min={64} max={4096} step={1}
+              onChange={(v) => updatePreset('max_tokens', Math.round(v))}
             />
-          </SettingsField>
-          <SettingsField label="timeout">
-            <input
-              type="number" min={5} max={600}
-              value={currentPreset.timeout}
-              onChange={(e) => updatePreset('timeout', Math.max(5, Number(e.target.value) || 5))}
-              className={`${textInputClass} max-w-24`}
-            />
-          </SettingsField>
-          <SettingsField label="max_retries">
-            <input
-              type="number" min={1} max={10}
-              value={currentPreset.max_retries}
-              onChange={(e) => updatePreset('max_retries', Math.max(1, Number(e.target.value) || 1))}
-              className={`${textInputClass} max-w-24`}
-            />
-          </SettingsField>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <SettingsField label="max_side" desc="上传给 VLM 前缩放最长边">
-            <input
-              type="number" min={64} max={4096}
+          </FieldRow>
+          <div className="grid grid-cols-2 gap-3">
+            <FieldRow label="timeout">
+              <input
+                type="number" min={5} max={600}
+                value={currentPreset.timeout}
+                onChange={(e) => updatePreset('timeout', Math.max(5, Number(e.target.value) || 5))}
+                className={textInputClass}
+              />
+            </FieldRow>
+            <FieldRow label="max_retries">
+              <input
+                type="number" min={1} max={10}
+                value={currentPreset.max_retries}
+                onChange={(e) => updatePreset('max_retries', Math.max(1, Number(e.target.value) || 1))}
+                className={textInputClass}
+              />
+            </FieldRow>
+          </div>
+        </LLMSubgroup>
+
+        {/* ── 04 图片预处理 ─────────────────────────────────── */}
+        <LLMSubgroup index="04" title="图片预处理" hint="before upload">
+          <FieldRow label="max_side" hint="px · 缩放最长边">
+            <SliderInput
               value={currentPreset.max_side}
-              onChange={(e) => updatePreset('max_side', Math.max(64, Number(e.target.value) || 64))}
-              className={`${textInputClass} max-w-24`}
+              min={64} max={4096} step={64}
+              onChange={(v) => updatePreset('max_side', Math.round(v))}
             />
-          </SettingsField>
-          <SettingsField label="jpeg_quality">
-            <input
-              type="number" min={1} max={100}
-              value={currentPreset.jpeg_quality}
-              onChange={(e) => updatePreset('jpeg_quality', Math.max(1, Math.min(100, Number(e.target.value) || 85)))}
-              className={`${textInputClass} max-w-24`}
-            />
-          </SettingsField>
-          <SettingsField label="max_image_mb" desc="压缩后单图 payload 上限；Claude 等服务常见限制为 5 MB">
-            <input
-              type="number" min={0.1} max={25} step={0.1}
-              value={currentPreset.max_image_mb}
-              onChange={(e) => updatePreset('max_image_mb', Math.max(0.1, Number(e.target.value) || 5))}
-              className={`${textInputClass} max-w-24`}
-            />
-          </SettingsField>
-        </div>
+          </FieldRow>
+          <div className="grid grid-cols-2 gap-3">
+            <FieldRow label="jpeg_quality">
+              <input
+                type="number" min={1} max={100}
+                value={currentPreset.jpeg_quality}
+                onChange={(e) => updatePreset('jpeg_quality', Math.max(1, Math.min(100, Number(e.target.value) || 85)))}
+                className={textInputClass}
+              />
+            </FieldRow>
+            <FieldRow label="max_image_mb">
+              <input
+                type="number" min={0.1} max={25} step={0.1}
+                value={currentPreset.max_image_mb}
+                onChange={(e) => updatePreset('max_image_mb', Math.max(0.1, Number(e.target.value) || 5))}
+                className={textInputClass}
+              />
+            </FieldRow>
+          </div>
+          <div className="text-[10px] text-fg-tertiary">
+            Claude 等服务限制 5 MB / 张。超过会被压缩到此值以下。
+          </div>
+        </LLMSubgroup>
       </SettingsSection>
 
       <SettingsSection title="WD14">
@@ -1098,6 +1154,109 @@ function SensitiveInput({ value, serverValue, onChange }: {
       placeholder={serverValue === MASK ? '已保存（不显示），输入新值才覆盖' : ''}
       onChange={(e) => onChange(e.target.value || MASK)}
       className={textInputClass}                />
+  )
+}
+
+// ── LLM Settings 子组件 ────────────────────────────────────────────────────
+
+/** LLM 卡片内的"分组"小标题 + 浅色左竖线；逻辑上不是独立 SettingsSection。 */
+function LLMSubgroup({ index, title, hint, headerRight, children }: {
+  index: string
+  title: string
+  hint?: string
+  headerRight?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-sm border-l-2 border-accent bg-bg-secondary px-3 py-2.5 flex flex-col gap-2 mt-1">
+      <div className="flex items-center gap-2 mb-0.5">
+        <span className="text-[10px] font-mono text-fg-tertiary px-1.5 py-0.5 rounded-sm bg-surface">
+          {index}
+        </span>
+        <h3 className="text-xs font-semibold text-fg-primary">{title}</h3>
+        {hint && <span className="text-[10px] text-fg-tertiary">· {hint}</span>}
+        <span className="flex-1" />
+        {headerRight}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+/** 单字段：label 在上、控件居中、可选 hint 在下。 */
+function FieldRow({ label, required, hint, children }: {
+  label: string
+  required?: boolean
+  hint?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-[11px] font-mono text-fg-secondary uppercase">
+        {label}
+        {required && <span className="text-warn ml-0.5">*</span>}
+      </label>
+      {children}
+      {hint && <p className="text-[10px] text-fg-tertiary m-0">{hint}</p>}
+    </div>
+  )
+}
+
+/** 滑动条 + 数值输入双向同步。 */
+function SliderInput({ value, min, max, step, onChange, disabled }: {
+  value: number
+  min: number
+  max: number
+  step?: number
+  onChange: (v: number) => void
+  disabled?: boolean
+}) {
+  const clamp = (v: number) => Math.max(min, Math.min(max, v))
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="range"
+        min={min} max={max} step={step ?? 1}
+        value={value}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        disabled={disabled}
+        className="flex-1 accent-[var(--accent)]"
+      />
+      <input
+        type="number"
+        min={min} max={max} step={step ?? 1}
+        value={value}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        disabled={disabled}
+        className={`${textInputClass} w-20 text-right`}
+      />
+    </div>
+  )
+}
+
+/** Chat Completions / Responses 的 tab 风格切换。 */
+function EndpointTabs({ value, onChange }: {
+  value: LLMPreset['endpoint']
+  onChange: (v: LLMPreset['endpoint']) => void
+}) {
+  const tab = (v: LLMPreset['endpoint'], label: string) => (
+    <button
+      type="button"
+      onClick={() => onChange(v)}
+      className={`flex-1 px-3 py-1.5 text-[11px] font-mono uppercase tracking-wide transition-colors ${
+        value === v
+          ? 'bg-accent-soft text-accent'
+          : 'text-fg-tertiary hover:text-fg-secondary'
+      }`}
+    >
+      {label}
+    </button>
+  )
+  return (
+    <div className="flex border border-subtle rounded-sm overflow-hidden">
+      {tab('chat_completions', 'Chat Completions')}
+      {tab('responses', 'Responses')}
+    </div>
   )
 }
 
