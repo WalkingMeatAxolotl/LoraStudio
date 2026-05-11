@@ -101,8 +101,18 @@ export interface ModelScopeConfig {
   token: string
 }
 
-/** 单个 LLM tagger preset = 一整套 endpoint + prompt + 生成参数。
- *  builtin 仅标识 id 在内置列表（用于 UI 显示 \"重置为默认\"），不锁字段。
+/** Preset messages 序列里的单条 item。
+ *  - type='text'：普通文本，需指定 role；content 是 prompt 内容
+ *  - type='image'：图片占位 item，打标时后端塞入当前图片；UI 不可编辑 content，但可拖动位置
+ */
+export interface LLMMessage {
+  type: 'text' | 'image'
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+/** 单个 LLM tagger preset = 一整套 endpoint + messages + 生成参数。
+ *  builtin 仅标识 id 在内置列表（用于 UI 显示 "重置为默认"），不锁字段。
  */
 export interface LLMPreset {
   id: string
@@ -113,7 +123,7 @@ export interface LLMPreset {
   model: string
   model_ids: string[]
   endpoint: 'chat_completions' | 'responses'
-  prompt: string
+  messages: LLMMessage[]
   output_format: 'json' | 'text'
   temperature: number
   max_tokens: number

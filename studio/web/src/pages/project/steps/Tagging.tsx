@@ -4,6 +4,7 @@ import {
   api,
   type Job,
   type CLTaggerConfig,
+  type LLMMessage,
   type LLMPreset,
   type LLMTaggerConfig,
   type ProjectDetail,
@@ -12,6 +13,7 @@ import {
   type Version,
   type WD14Config,
 } from '../../../api/client'
+import LLMMessagesEditor from '../../../components/LLMMessagesEditor'
 import JobProgress from '../../../components/JobProgress'
 import StepShell from '../../../components/StepShell'
 import { useToast } from '../../../components/Toast'
@@ -53,7 +55,7 @@ type LLMTaggerForm = {
   base_url: string
   model: string
   endpoint: LLMPreset['endpoint']
-  prompt: string
+  messages: LLMMessage[]
   output_format: LLMPreset['output_format']
   temperature: number
   max_tokens: number
@@ -98,7 +100,7 @@ function fromLLMPreset(p: LLMPreset): LLMTaggerForm {
     base_url: p.base_url,
     model: p.model,
     endpoint: p.endpoint,
-    prompt: p.prompt,
+    messages: p.messages.map((m) => ({ ...m })),
     output_format: p.output_format,
     temperature: p.temperature,
     max_tokens: p.max_tokens,
@@ -257,7 +259,7 @@ export default function TaggingPage() {
     }
     // 其他字段：对比 active preset 的值，不同才进 overrides
     const fields: ReadonlyArray<Exclude<keyof LLMTaggerForm, 'preset_id'>> = [
-      'base_url', 'model', 'endpoint', 'prompt', 'output_format',
+      'base_url', 'model', 'endpoint', 'messages', 'output_format',
       'temperature', 'max_tokens', 'timeout', 'max_retries',
       'max_side', 'jpeg_quality', 'max_image_mb',
     ]
@@ -901,13 +903,19 @@ function LLMTaggerPanel({
       {advOpen && (
         <>
           <label className="grid grid-cols-[140px_1fr] items-start gap-2">
-            <span className="text-fg-tertiary font-mono text-xs pt-1">prompt</span>
-            <textarea
-              value={form.prompt}
-              onChange={(e) => onChange({ ...form, prompt: e.target.value })}
-              disabled={disabled}
-              className={`input input-mono min-h-28 ${form.prompt !== activePreset.prompt ? 'border-warn' : ''}`}
-            />
+            <span className="text-fg-tertiary font-mono text-xs pt-1">messages</span>
+            <div className="flex flex-col gap-1.5">
+              {form.endpoint === 'responses' && (
+                <div className="text-[10px] text-warn">
+                  ⚠️ Responses endpoint：只用 system + 第一条 user；其余 messages 忽略
+                </div>
+              )}
+              <LLMMessagesEditor
+                messages={form.messages}
+                onChange={(msgs) => onChange({ ...form, messages: msgs })}
+                disabled={disabled}
+              />
+            </div>
           </label>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
             <LLMLabeledNumber label="timeout" value={form.timeout} base={activePreset.timeout} min={5} max={600} disabled={disabled} onChange={(v) => onChange({ ...form, timeout: Math.round(v) })} />

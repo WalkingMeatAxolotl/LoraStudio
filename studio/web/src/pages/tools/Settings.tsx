@@ -16,6 +16,7 @@ import {
   type WandBConfig,
   type WD14Runtime,
 } from '../../api/client'
+import LLMMessagesEditor from '../../components/LLMMessagesEditor'
 import PageHeader from '../../components/PageHeader'
 import { useToast } from '../../components/Toast'
 import { useEventStream } from '../../lib/useEventStream'
@@ -62,7 +63,10 @@ function _makeFallbackPreset(id: string, label: string, output_format: 'json' | 
     model: '',
     model_ids: [],
     endpoint: 'chat_completions',
-    prompt: '',
+    messages: [
+      { type: 'text', role: 'system', content: '' },
+      { type: 'image', role: 'user', content: '' },
+    ],
     output_format,
     temperature: 0.2,
     max_tokens: 700,
@@ -687,12 +691,18 @@ export default function SettingsPage() {
             </select>
           </SettingsField>
         </div>
-        <SettingsField label="prompt" desc="JSON 模式要求返回 schema；text 模式整段返回作为 caption">
-          <textarea
-            value={currentPreset.prompt}
-            onChange={(e) => updatePreset('prompt', e.target.value)}
-            className={`${textInputClass} min-h-36 font-mono`}
-          />
+        <SettingsField label="messages" desc="按顺序铺开成 LLM API 的 messages；image 项是图片占位，打标时塞入图片；可拖拽调位置">
+          <div className="flex flex-col gap-1.5">
+            {currentPreset.endpoint === 'responses' && (
+              <div className="text-[10px] text-warn">
+                ⚠️ Responses endpoint 限制：只用合并后的 system + 第一条 user；其他 messages 会被忽略
+              </div>
+            )}
+            <LLMMessagesEditor
+              messages={currentPreset.messages}
+              onChange={(msgs) => updatePreset('messages', msgs)}
+            />
+          </div>
         </SettingsField>
         <div className="grid grid-cols-2 gap-3">
           <SettingsField label="temperature">
