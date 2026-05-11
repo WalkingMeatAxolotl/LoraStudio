@@ -141,18 +141,27 @@ git checkout dev
 git pull origin dev
 ```
 
-**bump version 三处必须同步**：
+**bump version 四处必须同步**：
 
 1. `studio/__init__.py` — `__version__ = "0.X.0"`
 2. `studio/web/package.json` — `"version": "0.X.0"`
 3. `CHANGELOG.md` 顶部加新段（参考已有格式）
+4. `README.md` — 顶部 shields.io badge URL + 「## 版本」段「当前版本 **0.X.0**」（GitHub 主页直接展示，漏改用户看到的就是旧版本）
 
 > 前端 Sidebar 的版本号是从 `/api/health` 拉的，**不要去 Sidebar.tsx 硬编码**。
+
+bump 完跑一遍 grep 兜底，确认没漏掉别处展示版本号（如架构文档里的 Sidebar 示意图）：
+
+```bash
+grep -rn "<旧版本号，例 0.5.0>" --include="*.md" --include="*.json" --include="*.py"
+```
+
+输出里属于「历史记录」的保留不动（CHANGELOG 历史段、ADR 引用上次发版的事实）；属于「当前展示」的更新到新版本（README badge / docs 示意图 / 任何描述「当前版本」的句子）。
 
 提一个 commit：
 
 ```bash
-git add studio/__init__.py studio/web/package.json CHANGELOG.md
+git add studio/__init__.py studio/web/package.json CHANGELOG.md README.md
 git commit -m "chore(release): v0.X.0"
 git push origin dev
 ```
@@ -207,7 +216,7 @@ git checkout -b hotfix/<topic>
 # 3. Squash and merge 进 master
 
 # 4. 按上面 release 流程的第 2 / 5 / 6 步：
-#    - bump PATCH（__init__.py + package.json + CHANGELOG.md）
+#    - bump PATCH（__init__.py + package.json + CHANGELOG.md + README.md）
 #    - 直接在 master 上 commit version bump（也算 hotfix 例外）
 #    - 打 v0.X.Y tag + 发 GitHub Release
 
@@ -274,7 +283,7 @@ tests/       后端 pytest + 前端 vitest（前端测试在 studio/web/src/**/*
 **遵守的**：
 
 - 一个 PR = 一个完整 unit of work，别把不相关的改动塞一起
-- 改 version 时**三处必须同步**：`studio/__init__.py` + `studio/web/package.json` + `CHANGELOG.md` 顶部新段
+- 改 version 时**四处必须同步**：`studio/__init__.py` + `studio/web/package.json` + `CHANGELOG.md` 顶部新段 + `README.md`（顶部 badge + 「## 版本」段当前版本句）
 - 修 bug 不要顺手 refactor 别的代码（除非 maintainer 明确要求）
 - 测试覆盖：bug fix → 加 regression test；feat → 新功能 test
 - 中文 commit message 和文档没问题（仓库已有惯例），但 conventional commits 的 `type(scope):` 前缀用英文
