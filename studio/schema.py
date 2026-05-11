@@ -214,6 +214,16 @@ class TrainingConfig(BaseModel):
         description="层级 stochastic depth（整层级别随机跳过）",
         json_schema_extra=_meta("lora"),
     )
+    tlora_alpha_rank_scale: float = Field(
+        1.0, ge=0.1, le=5.0,
+        description="T-LoRA rank 曲线幂次（1.0=线性；>1 前期高 rank 后期陡降；仅 lora_type=tlora）",
+        json_schema_extra=_meta("lora", show_when="lora_type==tlora"),
+    )
+    tlora_sig_type: Literal["random", "last", "first"] = Field(
+        "last",
+        description="T-LoRA down.weight 初始化方向（last=最小奇异向量/推荐；first=最大；random=高斯）",
+        json_schema_extra=_meta("lora", show_when="lora_type==tlora"),
+    )
     tlora_reg_dims: Optional[dict] = Field(
         None,
         description='T-LoRA 模块级 rank 覆盖，正则→rank，如 {".*blocks_0.*": 8}（仅 lora_type=tlora）',

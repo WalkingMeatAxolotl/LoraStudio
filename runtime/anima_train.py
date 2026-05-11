@@ -2233,6 +2233,8 @@ def main():
             rank=args.lora_rank,
             alpha=args.lora_alpha,
             min_rank=int(getattr(args, "tlora_min_rank", 1) or 1),
+            alpha_rank_scale=float(getattr(args, "tlora_alpha_rank_scale", 1.0) or 1.0),
+            sig_type=str(getattr(args, "tlora_sig_type", "last") or "last"),
             reg_dims=getattr(args, "tlora_reg_dims", None) or None,
             reg_lrs=getattr(args, "tlora_reg_lrs", None) or None,
         )
