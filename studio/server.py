@@ -2435,6 +2435,24 @@ def _task_output_dir(task: dict[str, Any]) -> Optional[Path]:
     return versions.version_dir(int(pid), p["slug"], v["label"]) / "output"
 
 
+def _task_archive_basename(task: dict[str, Any]) -> Optional[str]:
+    """task 关联 project / version → "{slug}-{label}"，用作 outputs zip 文件名
+    前缀。和 train.zip 命名风格一致（PP7：{slug}-{label}.train.zip）。
+
+    没 project / version → None，调用方 fallback 到 task_{id}。
+    """
+    pid = task.get("project_id")
+    vid = task.get("version_id")
+    if not (pid and vid):
+        return None
+    with db.connection_for() as conn:
+        v = versions.get_version(conn, int(vid))
+        p = projects.get_project(conn, int(pid))
+    if not v or not p or v["project_id"] != pid:
+        return None
+    return f"{p['slug']}-{v['label']}"
+
+
 def _is_loopback(request: Request) -> bool:
     client = request.client
     return bool(client and client.host in _LOCALHOST_HOSTS)
@@ -2473,14 +2491,21 @@ def list_task_outputs(task_id: int, request: Request) -> dict[str, Any]:
         "exists": bool(out_dir and out_dir.exists()),
         "supports_open_folder": _is_loopback(request),
         "files": files,
+        "archive_basename": _task_archive_basename(task),
     }
 
 
 @app.get("/api/queue/{task_id}/outputs.zip")
 def download_task_outputs_zip(
-    task_id: int, background: BackgroundTasks
+    task_id: int,
+    background: BackgroundTasks,
+    files: Optional[str] = None,
 ) -> FileResponse:
-    """把 output 目录全部文件打包成 zip 一次性下载。
+    """把 output 目录里的文件打包成 zip 一次性下载。
+
+    没传 `files` → 全量打包（向后兼容）。
+    传了 `files`（逗号分隔的文件名）→ 仅打包这些，路径必须是 out_dir 下的直接
+    子文件，禁止 path traversal / 子目录。
 
     实现：写到临时文件再 FileResponse；响应发完后用 BackgroundTasks 清理。
     safetensors / pt 几乎都是已压缩二进制，用 ZIP_STORED（不再压缩，CPU 省一倍）。
@@ -2494,9 +2519,32 @@ def download_task_outputs_zip(
     out_dir = _task_output_dir(task)
     if not out_dir or not out_dir.exists():
         raise HTTPException(404, "no output dir")
-    files = [f for f in sorted(out_dir.iterdir()) if f.is_file()]
-    if not files:
+    all_files = [f for f in sorted(out_dir.iterdir()) if f.is_file()]
+    if not all_files:
         raise HTTPException(404, "empty output dir")
+
+    selected: list[Path]
+    partial = False
+    if files is None or files == "":
+        selected = all_files
+    else:
+        wanted = [n for n in files.split(",") if n]
+        if not wanted:
+            raise HTTPException(400, "empty files list")
+        by_name = {f.name: f for f in all_files}
+        missing: list[str] = []
+        selected = []
+        for name in wanted:
+            if "/" in name or "\\" in name or ".." in name:
+                raise HTTPException(400, f"invalid filename: {name}")
+            f = by_name.get(name)
+            if not f:
+                missing.append(name)
+                continue
+            selected.append(f)
+        if missing:
+            raise HTTPException(404, f"file(s) not found: {', '.join(missing)}")
+        partial = True
 
     tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
     tmp.close()
@@ -2505,15 +2553,25 @@ def download_task_outputs_zip(
         with zipfile.ZipFile(
             tmp_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True
         ) as zf:
-            for f in files:
+            for f in selected:
                 zf.write(f, arcname=f.name)
-    except Exception:
+    except Exception as e:
         tmp_path.unlink(missing_ok=True)
+        bus.publish({
+            "type": "task_outputs_zip_failed",
+            "task_id": task_id,
+            "error": str(e),
+        })
         raise
 
+    bus.publish({"type": "task_outputs_zip_ready", "task_id": task_id})
     background.add_task(lambda: tmp_path.unlink(missing_ok=True))
 
-    archive_name = f"task_{task_id}_outputs.zip"
+    basename = _task_archive_basename(task) or f"task_{task_id}"
+    archive_name = (
+        f"{basename}_outputs_selected.zip" if partial
+        else f"{basename}_outputs.zip"
+    )
     return FileResponse(
         tmp_path,
         media_type="application/zip",
