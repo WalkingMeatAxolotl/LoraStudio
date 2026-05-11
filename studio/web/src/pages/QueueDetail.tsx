@@ -396,6 +396,8 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
   const [busy, setBusy] = useState(false)
   const [zipping, setZipping] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
     let alive = true
@@ -403,7 +405,7 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
     return () => { alive = false }
   }, [taskId, refreshKey])
 
-  // 压缩中状态：点 "下载全部" 时 setZipping(true)，浏览器直链接管下载，
+  // 压缩中状态：点 "下载全部 / 下载所选" 时 setZipping(true)，浏览器直链接管下载，
   // 后端打包完 publish task_outputs_zip_ready → SSE 清状态。
   // 60s 兜底防止事件丢失 / 后端失败时按钮卡死。
   useEventStream((evt) => {
@@ -427,6 +429,45 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
 
   const sortedFiles = useMemo(() => data ? [...data.files].sort((a, b) => b.mtime - a.mtime) : [], [data])
 
+  // 刷新后剔除选中里已不存在的文件名（比如有人手动删了 ep_001.safetensors）
+  useEffect(() => {
+    if (selected.size === 0) return
+    const names = new Set(sortedFiles.map((f) => f.name))
+    let dropped = false
+    const next = new Set<string>()
+    for (const n of selected) {
+      if (names.has(n)) next.add(n); else dropped = true
+    }
+    if (dropped) setSelected(next)
+  }, [sortedFiles, selected])
+
+  const selectedSize = useMemo(() => {
+    let total = 0
+    for (const f of sortedFiles) if (selected.has(f.name)) total += f.size
+    return total
+  }, [sortedFiles, selected])
+
+  const allSelected = sortedFiles.length > 0 && selected.size === sortedFiles.length
+  const noneSelected = selected.size === 0
+  const partialSelected = !allSelected && !noneSelected
+
+  const toggleSelectAll = () => {
+    setSelected(allSelected ? new Set() : new Set(sortedFiles.map((f) => f.name)))
+  }
+  const toggleOne = (name: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name); else next.add(name)
+      return next
+    })
+  }
+  const toggleSelectMode = () => {
+    setSelectMode((m) => {
+      if (m) setSelected(new Set())  // 退出批量时清空选中
+      return !m
+    })
+  }
+
   const openFolder = async () => {
     setBusy(true)
     try { const r = await api.openTaskFolder(taskId); toast(`已打开 ${r.opened}`, 'success') }
@@ -436,11 +477,15 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
 
   const handleDownloadZip = () => {
     if (zipping) return
+    const partial = selectMode && selected.size > 0
+    if (selectMode && !partial) return  // 批量模式下没选任何文件，按钮应已 disabled
     setZipping(true)
     const safe = taskName && /^[A-Za-z0-9_.-]+$/.test(taskName)
-    const zipName = safe ? `${taskName}_outputs.zip` : `task_${taskId}_outputs.zip`
+    const baseName = safe ? taskName : `task_${taskId}`
+    const zipName = partial ? `${baseName}_outputs_selected.zip` : `${baseName}_outputs.zip`
+    const files = partial ? Array.from(selected) : undefined
     const a = document.createElement('a')
-    a.href = api.taskOutputsZipUrl(taskId)
+    a.href = api.taskOutputsZipUrl(taskId, files)
     a.download = zipName
     document.body.appendChild(a)
     a.click()
@@ -469,9 +514,25 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
           )}
           <button onClick={() => setRefreshKey((k) => k + 1)} className="btn btn-ghost btn-sm">刷新</button>
           {data.exists && data.files.length > 0 && (
-            <button onClick={handleDownloadZip} disabled={zipping} className="btn btn-primary btn-sm">
-              {zipping ? '压缩中...' : '下载全部'}
-            </button>
+            <>
+              <button
+                onClick={toggleSelectMode}
+                className={selectMode ? 'btn btn-secondary btn-sm' : 'btn btn-ghost btn-sm'}
+              >
+                {selectMode ? '退出批量' : '批量'}
+              </button>
+              <button
+                onClick={handleDownloadZip}
+                disabled={zipping || (selectMode && noneSelected)}
+                className="btn btn-primary btn-sm"
+              >
+                {zipping
+                  ? '压缩中...'
+                  : selectMode
+                    ? (noneSelected ? '下载所选 (0)' : `下载所选 (${selected.size} · ${fmtBytes(selectedSize)})`)
+                    : '下载全部'}
+              </button>
+            </>
           )}
         </div>
       ) : data && !data.output_dir ? (
@@ -498,12 +559,26 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
               <span>文件</span>
               <span className="text-right">大小</span>
               <span className="text-right">修改时间</span>
-              <span className="text-right"></span>
+              <span className="text-right">
+                {selectMode ? (
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => { if (el) el.indeterminate = partialSelected }}
+                    onChange={toggleSelectAll}
+                    style={{ width: 14, height: 14, accentColor: 'var(--accent)', cursor: 'pointer' }}
+                    aria-label="全选"
+                  />
+                ) : null}
+              </span>
             </div>
-            {sortedFiles.map((f) => (
+            {sortedFiles.map((f) => {
+              const isSel = selected.has(f.name)
+              return (
               <div
                 key={f.name}
-                className="grid gap-2 px-4 py-2 items-center border-b border-subtle text-xs hover:bg-overlay transition-colors"
+                onClick={selectMode ? () => toggleOne(f.name) : undefined}
+                className={`grid gap-2 px-4 py-2 items-center border-b border-subtle text-xs transition-colors ${selectMode ? `cursor-pointer ${isSel ? 'bg-accent-soft' : 'hover:bg-overlay'}` : 'hover:bg-overlay'}`}
                 style={{ gridTemplateColumns: '1fr 100px 160px 80px' }}
               >
                 <div className="flex items-center gap-1.5 min-w-0">
@@ -513,12 +588,24 @@ function OutputsTab({ taskId, taskName }: { taskId: number; taskName: string }) 
                 <span className="text-right font-mono text-fg-tertiary">{fmtBytes(f.size)}</span>
                 <span className="text-right font-mono text-fg-tertiary">{fmtTime(f.mtime)}</span>
                 <span className="text-right">
-                  <a href={api.taskOutputDownloadUrl(taskId, f.name)} download={f.name}
-                    className="text-accent no-underline hover:underline text-xs"
-                  >下载</a>
+                  {selectMode ? (
+                    <input
+                      type="checkbox"
+                      checked={isSel}
+                      onChange={() => toggleOne(f.name)}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ width: 14, height: 14, accentColor: 'var(--accent)', cursor: 'pointer' }}
+                      aria-label={`选中 ${f.name}`}
+                    />
+                  ) : (
+                    <a href={api.taskOutputDownloadUrl(taskId, f.name)} download={f.name}
+                      className="text-accent no-underline hover:underline text-xs"
+                    >下载</a>
+                  )}
                 </span>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

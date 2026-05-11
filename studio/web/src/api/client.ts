@@ -1376,9 +1376,15 @@ export const api = {
   /** 下载单个 output 文件的直链，不发请求。<a href={...} download> 即可。 */
   taskOutputDownloadUrl: (id: number, filename: string) =>
     `/api/queue/${id}/output/${encodeURIComponent(filename)}`,
-  /** 把 output 目录全部文件打包成 zip 下载的直链。
-   * 推荐用 downloadBlob() 调它，能显示 loading（后端打 zip 要时间）。 */
-  taskOutputsZipUrl: (id: number) => `/api/queue/${id}/outputs.zip`,
+  /** output 目录打包 zip 下载直链。
+   * 不传 files → 全量；传文件名数组 → 仅打包这些（后端 whitelist 校验）。
+   * 配合 <a href download> 触发，浏览器原生接管下载条；后端 zip 写完会
+   * publish task_outputs_zip_ready / task_outputs_zip_failed 事件供前端清 loading。 */
+  taskOutputsZipUrl: (id: number, files?: ReadonlyArray<string>) => {
+    if (!files || files.length === 0) return `/api/queue/${id}/outputs.zip`
+    const q = files.map((n) => encodeURIComponent(n)).join(',')
+    return `/api/queue/${id}/outputs.zip?files=${q}`
+  },
 
   // PP8 — WD14 运行时 / GPU 装包 ------------------------------------------
   /** 当前 onnxruntime 状态：包名 / 版本 / providers / nvidia-smi 检测结果。 */
