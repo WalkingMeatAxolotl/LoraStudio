@@ -198,6 +198,11 @@ class LLMTagger:
         *,
         session: Optional[requests.Session] = None,
     ) -> None:
+        # overrides 可以包含两类键：
+        #   - "current_preset"：切换 active preset id
+        #   - 任意 LLMPresetConfig 字段（base_url / model / endpoint / temperature / ...）
+        # `api_key` 出于安全考虑不允许从 overrides 传（避免泄漏到 task 日志）；要改用
+        # Settings 持久化或显式 secrets.update()。
         self._overrides = {
             k: v
             for k, v in (overrides or {}).items()
@@ -205,12 +210,22 @@ class LLMTagger:
         }
         self._session = session or requests.Session()
 
-    def _cfg(self) -> "secrets.LLMTaggerConfig":
-        base = secrets.load().llm_tagger.model_dump()
+    def _cfg(self) -> "secrets.LLMPresetConfig":
+        """返回最终生效的 active preset（已 apply overrides）。"""
+        tagger_cfg = secrets.load().llm_tagger
+        # 1) 决定 active preset
+        preset_id = str(self._overrides.get("current_preset") or tagger_cfg.current_preset)
+        active = next((p for p in tagger_cfg.presets if p.id == preset_id), None)
+        if active is None:
+            active = tagger_cfg.active
+        # 2) apply 字段 overrides
+        preset_dict = active.model_dump()
         for k, v in self._overrides.items():
-            if k in base:
-                base[k] = v
-        return secrets.LLMTaggerConfig(**base)
+            if k == "current_preset":
+                continue
+            if k in preset_dict:
+                preset_dict[k] = v
+        return secrets.LLMPresetConfig(**preset_dict)
 
     def is_available(self) -> tuple[bool, str]:
         cfg = self._cfg()
@@ -242,7 +257,7 @@ class LLMTagger:
                     max_image_mb=cfg.max_image_mb,
                 )
                 content = self._call_with_retry(cfg, data_url, p)
-                if self._output_format(cfg) == "text":
+                if cfg.output_format == "text":
                     text = content.strip()
                     if not text:
                         raise RuntimeError("LLM 返回空内容")
@@ -260,29 +275,7 @@ class LLMTagger:
                 yield {"image": p, "tags": [], "error": str(exc)}
             on_progress(i + 1, total)
 
-    def _selected_preset(
-        self, cfg: "secrets.LLMTaggerConfig"
-    ) -> Optional["secrets.LLMPromptPresetConfig"]:
-        for preset in cfg.prompt_presets:
-            if preset.id == cfg.prompt_preset:
-                return preset
-        return cfg.prompt_presets[0] if cfg.prompt_presets else None
-
-    def _prompt(self, cfg: "secrets.LLMTaggerConfig") -> str:
-        if cfg.prompt_preset == "custom":
-            prompt = cfg.custom_prompt.strip()
-            if prompt:
-                return prompt
-        preset = self._selected_preset(cfg)
-        return preset.prompt if preset else ""
-
-    def _output_format(self, cfg: "secrets.LLMTaggerConfig") -> str:
-        if cfg.prompt_preset == "custom":
-            return "text" if self._overrides.get("_output_format") == "text" else "json"
-        preset = self._selected_preset(cfg)
-        return preset.output_format if preset else "json"
-
-    def _headers(self, cfg: "secrets.LLMTaggerConfig") -> dict[str, str]:
+    def _headers(self, cfg: "secrets.LLMPresetConfig") -> dict[str, str]:
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
         if cfg.api_key:
             headers["Authorization"] = f"Bearer {cfg.api_key}"
@@ -290,7 +283,7 @@ class LLMTagger:
 
     def _call_with_retry(
         self,
-        cfg: "secrets.LLMTaggerConfig",
+        cfg: "secrets.LLMPresetConfig",
         data_url: str,
         image_path: Path,
     ) -> str:
@@ -347,7 +340,7 @@ class LLMTagger:
 
     def _chat_payload(
         self,
-        cfg: "secrets.LLMTaggerConfig",
+        cfg: "secrets.LLMPresetConfig",
         data_url: str,
         image_path: Path,
     ) -> dict[str, Any]:
@@ -356,7 +349,7 @@ class LLMTagger:
             "temperature": cfg.temperature,
             "max_tokens": cfg.max_tokens,
             "messages": [
-                {"role": "system", "content": self._prompt(cfg)},
+                {"role": "system", "content": cfg.prompt},
                 {
                     "role": "user",
                     "content": [
@@ -369,13 +362,13 @@ class LLMTagger:
 
     def _responses_payload(
         self,
-        cfg: "secrets.LLMTaggerConfig",
+        cfg: "secrets.LLMPresetConfig",
         data_url: str,
         image_path: Path,
     ) -> dict[str, Any]:
         return {
             "model": cfg.model,
-            "instructions": self._prompt(cfg),
+            "instructions": cfg.prompt,
             "temperature": cfg.temperature,
             "max_output_tokens": cfg.max_tokens,
             "input": [
@@ -389,12 +382,12 @@ class LLMTagger:
             ],
         }
 
-    def _user_text(self, image_path: Path, cfg: "secrets.LLMTaggerConfig") -> str:
+    def _user_text(self, image_path: Path, cfg: "secrets.LLMPresetConfig") -> str:
         return json.dumps(
             {
                 "file_name": image_path.name,
                 "target": "anima_lora_caption",
-                "return_json_only": self._output_format(cfg) == "json",
+                "return_json_only": cfg.output_format == "json",
             },
             ensure_ascii=False,
         )

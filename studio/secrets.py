@@ -15,12 +15,13 @@ from .paths import STUDIO_DATA
 
 SECRETS_FILE = STUDIO_DATA / "secrets.json"
 MASK = "***"
+# 点路径 + `*` 通配支持：`llm_tagger.presets.*.api_key` 会遍历 list 内每个 dict。
 SENSITIVE_FIELDS: tuple[str, ...] = (
     "gelbooru.api_key",
     "danbooru.api_key",
     "huggingface.token",
     "wandb.api_key",
-    "llm_tagger.api_key",
+    "llm_tagger.presets.*.api_key",
     "modelscope.token",
 )
 
@@ -96,91 +97,52 @@ class DownloadConfig(BaseModel):
     cdn_rate_per_sec: float = 5.0
 
 
-class JoyCaptionConfig(BaseModel):
-    base_url: str = "http://localhost:8000/v1"
-    model: str = "fancyfeast/llama-joycaption-beta-one-hf-llava"
-    prompt_template: str = "Descriptive Caption"
+class LLMPresetConfig(BaseModel):
+    """完整 LLM tagger 预设：每条 preset 承载一整套 endpoint + prompt + 生成参数。
 
+    Refactor: 之前 LLMPromptPresetConfig 只含 {id/label/prompt/output_format}，
+    base_url / api_key / model / temperature 等都在 LLMTaggerConfig 顶层。
+    JoyCaption 卡片独立维护一份 base_url/model/prompt_template —— 用户面对
+    \"两条 LLM 链路\" 误判。新设计：preset 一票到底，JoyCaption 退化为 builtin
+    preset 的初始预填值。
 
-class LLMPromptPresetConfig(BaseModel):
+    builtin: bool 仅标识 id 是否来自 builtin 列表（用于 UI 显示「重置为默认」）
+    —— 不锁字段，用户改 builtin preset 的任何字段都会持久化。
+    """
     id: str
-    label: str
-    prompt: str
+    label: str = ""
     builtin: bool = False
-    output_format: str = "json"  # json | text
-
-
-def _default_llm_prompt_presets() -> list[LLMPromptPresetConfig]:
-    from .llm_presets import builtin_llm_presets
-
-    return [LLMPromptPresetConfig(**item) for item in builtin_llm_presets()]
-
-
-class LLMTaggerConfig(BaseModel):
-    base_url: str = "http://localhost:8000/v1"
+    # endpoint 身份
+    base_url: str = ""
     api_key: str = ""
     model: str = ""
     model_ids: list[str] = Field(default_factory=list)
     endpoint: str = "chat_completions"  # chat_completions | responses
-    prompt_preset: str = "style_json"
-    prompt_presets: list[LLMPromptPresetConfig] = Field(
-        default_factory=_default_llm_prompt_presets
-    )
-    custom_prompt: str = ""
+    # prompt
+    prompt: str = ""
+    output_format: str = "json"  # json | text
+    # 生成参数
     temperature: float = 0.2
     max_tokens: int = 700
-    timeout: int = 60
-    max_retries: int = 3
+    # 图片处理
     max_side: int = 1280
     jpeg_quality: int = 85
     max_image_mb: float = 5.0
+    # 重试 / 超时
+    timeout: int = 60
+    max_retries: int = 3
 
     @model_validator(mode="after")
-    def _normalize_values(self) -> "LLMTaggerConfig":
+    def _normalize_values(self) -> "LLMPresetConfig":
+        self.id = "".join(
+            ch if ch.isalnum() or ch in ("_", "-") else "_"
+            for ch in str(self.id or "").strip()
+        ).strip("_")
+        self.label = str(self.label or self.id).strip()
         if self.endpoint not in {"chat_completions", "responses"}:
             self.endpoint = "chat_completions"
-        builtin_presets = _default_llm_prompt_presets()
-        builtin_by_id = {preset.id: preset for preset in builtin_presets}
-        presets: list[LLMPromptPresetConfig] = []
-        seen: set[str] = set()
-        for preset in builtin_presets:
-            presets.append(preset)
-            seen.add(preset.id)
-        for preset in self.prompt_presets or []:
-            preset.id = "".join(
-                ch if ch.isalnum() or ch in ("_", "-") else "_"
-                for ch in str(preset.id or "").strip()
-            ).strip("_")
-            preset.label = str(preset.label or preset.id).strip()
-            preset.prompt = str(preset.prompt or "").strip()
-            preset.output_format = (
-                "text" if str(preset.output_format).strip() == "text" else "json"
-            )
-            if preset.id in builtin_by_id:
-                continue
-            if not preset.id or not preset.prompt or preset.id in seen:
-                continue
-            preset.builtin = False
-            seen.add(preset.id)
-            presets.append(preset)
-        if not presets:
-            presets = _default_llm_prompt_presets()
-        self.prompt_presets = presets
-        preset_ids = {p.id for p in self.prompt_presets}
-        if self.prompt_preset not in preset_ids and self.prompt_preset != "custom":
-            self.prompt_preset = self.prompt_presets[0].id
-        if self.model and self.model not in self.model_ids:
-            self.model_ids = [self.model, *self.model_ids]
-        model_seen: set[str] = set()
-        clean_model_ids: list[str] = []
-        for model_id in self.model_ids:
-            text = str(model_id or "").strip()
-            key = text.lower()
-            if not text or key in model_seen:
-                continue
-            model_seen.add(key)
-            clean_model_ids.append(text)
-        self.model_ids = clean_model_ids
+        if self.output_format not in {"json", "text"}:
+            self.output_format = "json"
         self.temperature = max(0.0, min(float(self.temperature), 2.0))
         self.max_tokens = max(64, int(self.max_tokens or 700))
         self.timeout = max(5, int(self.timeout or 60))
@@ -188,7 +150,78 @@ class LLMTaggerConfig(BaseModel):
         self.max_side = max(64, int(self.max_side or 1280))
         self.jpeg_quality = max(1, min(100, int(self.jpeg_quality or 85)))
         self.max_image_mb = max(0.1, float(self.max_image_mb or 5.0))
+        # 当前选中的 model 始终出现在候选列表头部（与 WD14Config 一致）
+        if self.model and self.model not in self.model_ids:
+            self.model_ids = [self.model, *self.model_ids]
+        seen: set[str] = set()
+        clean: list[str] = []
+        for mid in self.model_ids:
+            text = str(mid or "").strip()
+            key = text.lower()
+            if not text or key in seen:
+                continue
+            seen.add(key)
+            clean.append(text)
+        self.model_ids = clean
         return self
+
+
+def _default_llm_presets() -> list[LLMPresetConfig]:
+    from .llm_presets import builtin_llm_presets
+
+    return [LLMPresetConfig(**item) for item in builtin_llm_presets()]
+
+
+class LLMTaggerConfig(BaseModel):
+    """LLM tagger 顶层配置：只保留 \"当前选中 preset id\" + \"preset 列表\"。
+
+    所有 endpoint / prompt / 生成参数都下沉到 LLMPresetConfig。
+    """
+    current_preset: str = "style_json"
+    presets: list[LLMPresetConfig] = Field(default_factory=_default_llm_presets)
+
+    @model_validator(mode="after")
+    def _normalize_values(self) -> "LLMTaggerConfig":
+        from .llm_presets import BUILTIN_PRESET_ORDER, builtin_llm_presets
+
+        builtin_defaults = {item["id"]: item for item in builtin_llm_presets()}
+        user_by_id = {p.id: p for p in self.presets if p.id}
+
+        merged: list[LLMPresetConfig] = []
+        seen_ids: set[str] = set()
+        # 1) 按 builtin 顺序排列：用户改过的覆盖 builtin default；缺失则补回 default
+        for bid in BUILTIN_PRESET_ORDER:
+            if bid in user_by_id:
+                preset = user_by_id[bid]
+                preset.builtin = True
+                merged.append(preset)
+                seen_ids.add(bid)
+            elif bid in builtin_defaults:
+                preset = LLMPresetConfig(**builtin_defaults[bid])
+                preset.builtin = True
+                merged.append(preset)
+                seen_ids.add(bid)
+        # 2) 追加用户自定义 preset（id 不在 builtin 列表）
+        for preset in self.presets:
+            if preset.id and preset.id not in seen_ids:
+                preset.builtin = False
+                merged.append(preset)
+                seen_ids.add(preset.id)
+        if not merged:
+            merged = _default_llm_presets()
+        self.presets = merged
+        preset_ids = {p.id for p in self.presets}
+        if self.current_preset not in preset_ids:
+            self.current_preset = self.presets[0].id
+        return self
+
+    @property
+    def active(self) -> LLMPresetConfig:
+        """当前选中的 preset；validator 保证至少有一个。"""
+        for preset in self.presets:
+            if preset.id == self.current_preset:
+                return preset
+        return self.presets[0]
 
 
 # 默认 WD14 候选模型；用户可在「设置 → WD14 → 候选模型」里增删，
@@ -294,7 +327,8 @@ class Secrets(BaseModel):
     # 模型下载源。"huggingface"（默认）走 HF + endpoint 配置；
     # "modelscope" 走魔搭社区，没有对应映射的模型自动回退 HF。
     download_source: str = "huggingface"
-    joycaption: JoyCaptionConfig = Field(default_factory=JoyCaptionConfig)
+    # JoyCaptionConfig 已并入 llm_tagger 的 joycaption builtin preset；
+    # secrets.json 里若残留 joycaption 字段，由 _migrate_legacy_schema 迁移后丢弃。
     llm_tagger: LLMTaggerConfig = Field(default_factory=LLMTaggerConfig)
     wd14: WD14Config = Field(default_factory=WD14Config)
     cltagger: CLTaggerConfig = Field(default_factory=CLTaggerConfig)
@@ -313,7 +347,9 @@ def load() -> Secrets:
     if not SECRETS_FILE.exists():
         return Secrets()
     try:
-        return Secrets.model_validate_json(SECRETS_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(SECRETS_FILE.read_text(encoding="utf-8"))
+        raw = _migrate_legacy_schema(raw) if isinstance(raw, dict) else raw
+        return Secrets.model_validate(raw)
     except Exception:
         # 文件损坏不应阻断 Studio 启动；用默认值覆盖
         return Secrets()
@@ -336,6 +372,8 @@ def update(partial: dict[str, Any]) -> Secrets:
     """deep-merge `partial` 进当前持久化值；返回新 Secrets 并落盘。
 
     - `partial` 里 leaf 值为 MASK ("***") 时，表示「保持原值不变」。
+    - llm_tagger.presets 是 list[dict]，按 preset.id 匹配做按 id deep-merge，
+      让前端 PUT 整个 list 时单个 preset 的 api_key=MASK 也能保持原值。
     - 未提及的字段沿用旧值。
     """
     current_dict = load().model_dump()
@@ -346,16 +384,33 @@ def update(partial: dict[str, Any]) -> Secrets:
 
 
 def to_masked_dict(s: Secrets) -> dict[str, Any]:
-    """GET /api/secrets 返回此结构；敏感字段非空时替换为 MASK。"""
+    """GET /api/secrets 返回此结构；敏感字段非空时替换为 MASK。
+
+    SENSITIVE_FIELDS 支持 `*` 通配（用于 llm_tagger.presets.*.api_key 这种
+    list-of-dict 场景）。
+    """
     d = s.model_dump()
     for path in SENSITIVE_FIELDS:
-        segs = path.split(".")
-        cur: Any = d
-        for seg in segs[:-1]:
-            cur = cur[seg]
-        if cur.get(segs[-1]):
-            cur[segs[-1]] = MASK
+        _apply_mask(d, path.split("."))
     return d
+
+
+def _apply_mask(node: Any, segs: list[str]) -> None:
+    if not segs:
+        return
+    head, *rest = segs
+    if head == "*":
+        if isinstance(node, list):
+            for item in node:
+                _apply_mask(item, rest)
+        return
+    if not isinstance(node, dict):
+        return
+    if not rest:
+        if node.get(head):
+            node[head] = MASK
+        return
+    _apply_mask(node.get(head), rest)
 
 
 # ---------------------------------------------------------------------------
@@ -363,10 +418,185 @@ def to_masked_dict(s: Secrets) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _migrate_legacy_schema(raw: dict[str, Any]) -> dict[str, Any]:
+    """老 schema → 新 schema 一次性迁移。
+
+    迁移目标 (PR #18 schema → preset-unified schema)：
+    1. 顶层 LLMTaggerConfig.base_url / api_key / model / endpoint / temperature /
+       max_tokens / max_side / jpeg_quality / max_image_mb / timeout / max_retries
+       下沉到每个 preset
+    2. prompt_presets[{id,label,prompt,builtin,output_format}] 升级为完整 preset
+       （继承顶层 endpoint + 生成参数字段）
+    3. prompt_preset = "custom" + custom_prompt 非空 → 建一个 `user_custom` preset
+    4. JoyCaptionConfig.base_url / model / prompt_template → 写入 joycaption preset
+       （base_url/model 直接覆盖；prompt_template 非默认时建 `user_joycaption`）
+    5. 删 raw["joycaption"] 字段
+
+    幂等：新 schema（llm_tagger 含 current_preset / presets）直接返回。
+    """
+    llm_old = raw.get("llm_tagger")
+    if not isinstance(llm_old, dict):
+        # 不存在 llm_tagger 字段：可能是更老的 secrets.json；交给 pydantic 用默认值
+        raw.pop("joycaption", None)
+        return raw
+
+    # 已经是新 schema：仅清理可能残留的 joycaption 字段后直接返回
+    if "presets" in llm_old or "current_preset" in llm_old:
+        raw.pop("joycaption", None)
+        return raw
+
+    # 老顶层字段（PR #18 schema）
+    def _get(key: str, default: Any) -> Any:
+        val = llm_old.get(key)
+        return default if val is None else val
+
+    old_base_url = _get("base_url", "")
+    old_api_key = _get("api_key", "")
+    old_model = _get("model", "")
+    old_model_ids = list(_get("model_ids", []) or [])
+    old_endpoint = _get("endpoint", "chat_completions")
+    old_temperature = _get("temperature", 0.2)
+    old_max_tokens = _get("max_tokens", 700)
+    old_timeout = _get("timeout", 60)
+    old_max_retries = _get("max_retries", 3)
+    old_max_side = _get("max_side", 1280)
+    old_jpeg_quality = _get("jpeg_quality", 85)
+    old_max_image_mb = _get("max_image_mb", 5.0)
+    old_custom_prompt = str(_get("custom_prompt", "")).strip()
+    old_prompt_preset = _get("prompt_preset", "style_json")
+    old_prompt_presets = list(_get("prompt_presets", []) or [])
+
+    from .llm_presets import builtin_llm_presets  # 局部 import 避免循环
+
+    builtin_defaults = {item["id"]: item for item in builtin_llm_presets()}
+
+    def _endpoint_fields() -> dict[str, Any]:
+        return {
+            "base_url": old_base_url,
+            "api_key": old_api_key,
+            "model": old_model,
+            "model_ids": list(old_model_ids),
+            "endpoint": old_endpoint,
+            "temperature": old_temperature,
+            "max_tokens": old_max_tokens,
+            "max_side": old_max_side,
+            "jpeg_quality": old_jpeg_quality,
+            "max_image_mb": old_max_image_mb,
+            "timeout": old_timeout,
+            "max_retries": old_max_retries,
+        }
+
+    new_presets: list[dict[str, Any]] = []
+    for p in old_prompt_presets:
+        if not isinstance(p, dict):
+            continue
+        pid = str(p.get("id") or "").strip()
+        if not pid:
+            continue
+        base_default = builtin_defaults.get(pid, {})
+        merged = {
+            **_endpoint_fields(),
+            "id": pid,
+            "label": p.get("label") or base_default.get("label") or pid,
+            "builtin": pid in builtin_defaults,
+            "prompt": p.get("prompt") or base_default.get("prompt", ""),
+            "output_format": p.get("output_format") or base_default.get("output_format", "json"),
+        }
+        # joycaption builtin 用其自己的推荐 temperature/max_tokens（如果用户没改过老顶层）
+        if pid in builtin_defaults and old_temperature == 0.2 and old_max_tokens == 700:
+            merged["temperature"] = base_default.get("temperature", old_temperature)
+            merged["max_tokens"] = base_default.get("max_tokens", old_max_tokens)
+        new_presets.append(merged)
+
+    current = str(old_prompt_preset or "").strip() or "style_json"
+    if current == "custom" and old_custom_prompt:
+        new_presets.append({
+            **_endpoint_fields(),
+            "id": "user_custom",
+            "label": "自定义",
+            "builtin": False,
+            "prompt": old_custom_prompt,
+            "output_format": "json",
+        })
+        current = "user_custom"
+
+    # JoyCaption 卡片合并 ----
+    joycap = raw.get("joycaption") if isinstance(raw.get("joycaption"), dict) else {}
+    joy_base_url = str(joycap.get("base_url", "") or "").strip()
+    joy_model = str(joycap.get("model", "") or "").strip()
+    joy_prompt = str(joycap.get("prompt_template", "") or "").strip()
+
+    joycap_default_base = "http://localhost:8000/v1"
+    joycap_default_model = "fancyfeast/llama-joycaption-beta-one-hf-llava"
+    joycap_default_prompt = "Descriptive Caption"
+
+    if joy_base_url or joy_model:
+        # 写入 joycaption preset（如果 old prompt_presets 没含 joycaption，建一个）
+        joy_preset = next((p for p in new_presets if p["id"] == "joycaption"), None)
+        if joy_preset is None:
+            joy_default = builtin_defaults.get("joycaption", {})
+            joy_preset = {**_endpoint_fields(), **joy_default, "id": "joycaption", "builtin": True}
+            new_presets.append(joy_preset)
+        if joy_base_url and joy_base_url != joycap_default_base:
+            joy_preset["base_url"] = joy_base_url
+        if joy_model and joy_model != joycap_default_model:
+            joy_preset["model"] = joy_model
+            if joy_model not in joy_preset.get("model_ids", []):
+                joy_preset["model_ids"] = [joy_model, *joy_preset.get("model_ids", [])]
+    if joy_prompt and joy_prompt != joycap_default_prompt:
+        # 用户改过 joycaption prompt_template → 建 user 自定义 preset，保留这份 prompt
+        new_presets.append({
+            "base_url": joy_base_url or joycap_default_base,
+            "api_key": "",
+            "model": joy_model or joycap_default_model,
+            "model_ids": [joy_model] if joy_model else [],
+            "endpoint": "chat_completions",
+            "temperature": 0.6,
+            "max_tokens": 300,
+            "max_side": 1280,
+            "jpeg_quality": 85,
+            "max_image_mb": 5.0,
+            "timeout": 60,
+            "max_retries": 3,
+            "id": "user_joycaption",
+            "label": "JoyCaption（自定义 prompt）",
+            "builtin": False,
+            "prompt": joy_prompt,
+            "output_format": "text",
+        })
+
+    raw["llm_tagger"] = {
+        "current_preset": current,
+        "presets": new_presets,
+    }
+    raw.pop("joycaption", None)
+    return raw
+
+
 def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    """把 patch 合并到 base：嵌套 dict 递归合并；leaf 值为 MASK 则丢弃。"""
+    """把 patch 合并到 base：嵌套 dict 递归合并；leaf 值为 MASK 则丢弃。
+
+    list[dict] 含 id 字段时（如 llm_tagger.presets）按 id deep-merge：保留 base
+    里 patch 没动到的 preset；patch 中存在的 preset 与 base 同 id 项 deep-merge。
+    """
     out = dict(base)
     for key, val in patch.items():
+        if (
+            isinstance(val, list)
+            and isinstance(out.get(key), list)
+            and val
+            and all(isinstance(x, dict) and "id" in x for x in val)
+            and all(isinstance(x, dict) and "id" in x for x in out[key])
+        ):
+            base_by_id = {x["id"]: x for x in out[key]}
+            merged_list: list[Any] = []
+            seen: set[str] = set()
+            for px in val:
+                bx = base_by_id.get(px["id"], {})
+                merged_list.append(_deep_merge(bx, px))
+                seen.add(px["id"])
+            out[key] = merged_list
+            continue
         if isinstance(val, dict) and isinstance(out.get(key), dict):
             out[key] = _deep_merge(out[key], val)
         elif val == MASK:
