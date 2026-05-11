@@ -101,41 +101,37 @@ export interface ModelScopeConfig {
   token: string
 }
 
-export interface JoyCaptionConfig {
-  base_url: string
-  model: string
-  prompt_template: string
-}
-
-export interface LLMPromptPreset {
+/** 单个 LLM tagger preset = 一整套 endpoint + prompt + 生成参数。
+ *  builtin 仅标识 id 在内置列表（用于 UI 显示 \"重置为默认\"），不锁字段。
+ */
+export interface LLMPreset {
   id: string
   label: string
-  prompt: string
   builtin: boolean
-  output_format: 'json' | 'text'
-}
-
-export interface LLMTaggerConfig {
   base_url: string
   api_key: string
   model: string
   model_ids: string[]
   endpoint: 'chat_completions' | 'responses'
-  prompt_preset: string
-  prompt_presets: LLMPromptPreset[]
-  custom_prompt: string
+  prompt: string
+  output_format: 'json' | 'text'
   temperature: number
   max_tokens: number
-  timeout: number
-  max_retries: number
   max_side: number
   jpeg_quality: number
   max_image_mb: number
+  timeout: number
+  max_retries: number
+}
+
+export interface LLMTaggerConfig {
+  current_preset: string
+  presets: LLMPreset[]
 }
 
 export interface LLMConnectionTestResult {
   ok: boolean
-  endpoint: LLMTaggerConfig['endpoint']
+  endpoint: LLMPreset['endpoint']
   endpoint_url: string
   model: string
   elapsed_ms: number
@@ -315,7 +311,7 @@ export interface Secrets {
   /** 模型下载源：'huggingface'（默认）或 'modelscope'。
    *  选 modelscope 时，有映射的模型走魔搭 CLI 下载；无映射的自动回退 HF。 */
   download_source: string
-  joycaption: JoyCaptionConfig
+  // JoyCaption 已合并为 llm_tagger 的 builtin preset
   llm_tagger: LLMTaggerConfig
   wd14: WD14Config
   cltagger: CLTaggerConfig
@@ -1017,12 +1013,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  refreshLLMModels: (body: { base_url?: string; api_key?: string; timeout?: number }) =>
-    req<{ items: string[]; secrets: Secrets }>('/api/llm-tagger/models/refresh', {
+  refreshLLMModels: (body: {
+    preset_id?: string
+    base_url?: string
+    api_key?: string
+    timeout?: number
+  }) =>
+    req<{ items: string[]; preset_id: string; secrets: Secrets }>('/api/llm-tagger/models/refresh', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  testLLMConnection: (body: Partial<Pick<LLMTaggerConfig, 'base_url' | 'api_key' | 'model' | 'endpoint' | 'timeout' | 'max_tokens' | 'temperature'>>) =>
+  testLLMConnection: (
+    body:
+      & { preset_id?: string }
+      & Partial<Pick<LLMPreset, 'base_url' | 'api_key' | 'model' | 'endpoint' | 'timeout' | 'max_tokens' | 'temperature'>>,
+  ) =>
     req<LLMConnectionTestResult>('/api/llm-tagger/test', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -1226,9 +1231,12 @@ export const api = {
         add_model_tag?: boolean | null
         blacklist_tags?: string[] | null
       }
+      // current_preset 切换 active preset；其他字段覆盖 preset 同名字段。
+      // api_key / model_ids / id / label / builtin 不允许 override。
+      // PR #34 (P0-2) 的 `_output_format` 被本次重构吸收 — preset 自己有 output_format 字段。
       llm_overrides?:
-        & Omit<Partial<LLMTaggerConfig>, 'api_key' | 'model_ids' | 'prompt_presets'>
-        & { _output_format?: 'json' | 'text' }
+        & { current_preset?: string }
+        & Partial<Omit<LLMPreset, 'id' | 'label' | 'builtin' | 'api_key' | 'model_ids'>>
     }
   ) =>
     req<Job>(`/api/projects/${pid}/versions/${vid}/tag`, {
