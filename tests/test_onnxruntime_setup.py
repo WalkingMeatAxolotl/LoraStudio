@@ -597,22 +597,22 @@ def test_current_runtime_exposes_cuda_load_error(
 def test_has_system_cuda_libs_via_cuda_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """CUDA_HOME 指向带 lib64 的目录 → True。"""
+    """CUDA_HOME + 系统也有 cuDNN → True。"""
     fake_root = tmp_path / "fake-cuda"
     (fake_root / "lib64").mkdir(parents=True)
     monkeypatch.setenv("CUDA_HOME", str(fake_root))
     monkeypatch.delenv("CUDA_PATH", raising=False)
-    # 确保 /usr/local/cuda/lib64 不存在 + ctypes.find_library 不命中（隔离环境）
     monkeypatch.setattr(ors.os.path, "isdir", lambda p: p.endswith(str(fake_root / "lib64")))
     import ctypes.util as _cu  # noqa: PLC0415
-    monkeypatch.setattr(_cu, "find_library", lambda _name: None)
+    # cuDNN 在系统 ld 里
+    monkeypatch.setattr(_cu, "find_library", lambda name: "libcudnn.so.9" if name == "cudnn" else None)
     assert ors._has_system_cuda_libs() is True
 
 
 def test_has_system_cuda_libs_via_default_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """没设 CUDA_HOME 但 /usr/local/cuda/lib64 存在 → True。"""
+    """/usr/local/cuda/lib64 + 系统 cuDNN → True。"""
     monkeypatch.delenv("CUDA_HOME", raising=False)
     monkeypatch.delenv("CUDA_PATH", raising=False)
     monkeypatch.setattr(
@@ -621,7 +621,7 @@ def test_has_system_cuda_libs_via_default_path(
         lambda p: p == "/usr/local/cuda/lib64",
     )
     import ctypes.util as _cu  # noqa: PLC0415
-    monkeypatch.setattr(_cu, "find_library", lambda _name: None)
+    monkeypatch.setattr(_cu, "find_library", lambda name: "libcudnn.so.9" if name == "cudnn" else None)
     assert ors._has_system_cuda_libs() is True
 
 
@@ -633,6 +633,38 @@ def test_has_system_cuda_libs_returns_false_when_no_signals(
     monkeypatch.setattr(ors.os.path, "isdir", lambda _p: False)
     import ctypes.util as _cu  # noqa: PLC0415
     monkeypatch.setattr(_cu, "find_library", lambda _name: None)
+    assert ors._has_system_cuda_libs() is False
+
+
+def test_has_system_cuda_libs_returns_false_when_cudnn_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """关键修复回归：系统有 CUDA Toolkit（cuBLAS 在 /usr/local/cuda）但**没装 cuDNN** —
+    必须返回 False，让 torch wheel preload 兜底补 cuDNN。否则 onnxruntime
+    dlopen libcudnn.so.9 失败 → 静默降 CPU（用户在云上实测踩到）。"""
+    monkeypatch.delenv("CUDA_HOME", raising=False)
+    monkeypatch.delenv("CUDA_PATH", raising=False)
+    monkeypatch.setattr(
+        ors.os.path,
+        "isdir",
+        lambda p: p == "/usr/local/cuda/lib64",
+    )
+    import ctypes.util as _cu  # noqa: PLC0415
+    # cuBLAS 在系统里，cuDNN 不在
+    monkeypatch.setattr(_cu, "find_library", lambda name: "libcublas.so.12" if name == "cublas" else None)
+    assert ors._has_system_cuda_libs() is False
+
+
+def test_has_system_cuda_libs_returns_false_when_only_cublas_in_ld(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """没 CUDA_HOME、没 /usr/local/cuda，只有 ld 路径里的 cuBLAS（apt 装的）+
+    没 cuDNN → False（同上：部分系统 CUDA 也算不完整）。"""
+    monkeypatch.delenv("CUDA_HOME", raising=False)
+    monkeypatch.delenv("CUDA_PATH", raising=False)
+    monkeypatch.setattr(ors.os.path, "isdir", lambda _p: False)
+    import ctypes.util as _cu  # noqa: PLC0415
+    monkeypatch.setattr(_cu, "find_library", lambda name: "libcublas.so.12" if name == "cublas" else None)
     assert ors._has_system_cuda_libs() is False
 
 

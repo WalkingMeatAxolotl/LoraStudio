@@ -92,28 +92,44 @@ _CUDA_LOAD_ERROR: Optional[str] = None
 
 
 def _has_system_cuda_libs() -> bool:
-    """Linux 系统是否自带 CUDA 运行时（/usr/local/cuda、apt 装的 libcublas、nvidia docker）。
+    """Linux 系统是否自带**完整** CUDA 运行时（cuBLAS + cuDNN 都在 ld 路径）。
 
-    有系统 CUDA 时跳过 PP9.5 preload —— torch wheel 自带的 CUDA so（cu128 →
-    cuBLAS 12.8）与 onnxruntime-gpu wheel 编译目标的 CUDA so（typically 12.x
-    某子版本）ABI 不匹配；RTLD_GLOBAL 把 torch 的强行塞进全局符号表后，
-    onnxruntime 后续 dlopen cuBLAS 解到错位版本 → 推理时 CUBLAS_STATUS_INVALID_VALUE。
-    系统 CUDA 路径下让 onnxruntime 直接 dlopen 系统提供的版本反而是对的。
+    有**完整**系统 CUDA 时跳过 PP9.5 preload —— torch wheel 自带的 CUDA so
+    （cu128 → cuBLAS 12.8）与 onnxruntime-gpu wheel 编译目标的 CUDA so
+    （typically 12.x 某子版本）ABI 不匹配；RTLD_GLOBAL 把 torch 的强行塞进
+    全局符号表后，onnxruntime 后续 dlopen cuBLAS 解到错位版本 → 推理时
+    CUBLAS_STATUS_INVALID_VALUE。系统 CUDA 完整时让 onnxruntime 直接 dlopen
+    系统版本反而是对的。
 
-    检测策略：
-    - CUDA_HOME / CUDA_PATH 环境变量指向带 lib64 的目录
-    - /usr/local/cuda/lib64 存在（标准安装位置）
-    - ctypes.util.find_library("cublas") 命中（apt 装的 libcublas-dev 等会进 ld 路径）
+    **关键**：必须 cuBLAS + cuDNN 都在系统里才算完整。云镜像装 CUDA Toolkit
+    （带 cuBLAS）但**没装** cuDNN 极常见（cuDNN 要 NVIDIA Developer 账号单独
+    下）；只检测 cuBLAS 会误判 → preload 跳过 → onnxruntime dlopen
+    libcudnn.so.9 失败 → 静默降 CPU。这种「部分系统 CUDA」场景必须让 torch
+    wheel preload 兜底补 cuDNN（torch GPU build 自带 cuDNN 9.x 在
+    nvidia.cudnn 子包里）。
+
+    检测分两步，都满足才返回 True：
+    1. CUDA Toolkit：CUDA_HOME / CUDA_PATH 指向带 lib64 / 默认 /usr/local/cuda
+       存在 / ld 路径里有 libcublas —— 任一命中
+    2. cuDNN：ld 路径里有 libcudnn —— 必须命中
     """
     import ctypes.util  # noqa: PLC0415  仅 Linux 路径用，避免顶层 import 副作用
     cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or ""
+    has_toolkit = False
     if cuda_home and os.path.isdir(os.path.join(cuda_home, "lib64")):
-        return True
-    if os.path.isdir("/usr/local/cuda/lib64"):
-        return True
-    if ctypes.util.find_library("cublas"):
-        return True
-    return False
+        has_toolkit = True
+    elif os.path.isdir("/usr/local/cuda/lib64"):
+        has_toolkit = True
+    elif ctypes.util.find_library("cublas"):
+        has_toolkit = True
+    if not has_toolkit:
+        return False
+    # 关键：cuDNN 同样必须在系统 ld 路径里。云镜像装 CUDA Toolkit（含 cuBLAS）
+    # 但没装 cuDNN 是非常常见的场景；只检测 cuBLAS 会误判 → preload 被跳过 →
+    # onnxruntime dlopen libcudnn.so.9 失败 → 静默降 CPU。这种部分系统 CUDA
+    # 场景下让 torch wheel preload 兜底补 cuDNN（torch GPU build 在
+    # nvidia.cudnn 子包里自带 cuDNN 9.x）。
+    return bool(ctypes.util.find_library("cudnn"))
 
 
 def _add_torch_dll_dirs_windows() -> dict[str, Any]:
