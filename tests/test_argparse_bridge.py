@@ -176,3 +176,43 @@ def test_training_config_help_does_not_crash() -> None:
     text = parser.format_help()
     assert "--lora-rank" in text
     assert "--no-cache-latents" in text  # bool 字段的反向 flag
+
+
+def test_training_config_cli_ppsf() -> None:
+    """ProdigyPlusScheduleFree CLI 字段都能解析出来。"""
+    parser = bridge.build_parser(TrainingConfig)
+    ns = parser.parse_args([
+        "--optimizer-type", "prodigy_plus_schedulefree",
+        "--ppsf-d-coef", "0.5",
+        "--ppsf-prodigy-steps", "500",
+        "--ppsf-beta2", "0.95",
+        "--ppsf-use-speed",
+        "--no-ppsf-split-groups-mean",
+    ])
+    assert ns.optimizer_type == "prodigy_plus_schedulefree"
+    assert ns.ppsf_d_coef == 0.5
+    assert ns.ppsf_prodigy_steps == 500
+    assert ns.ppsf_beta2 == 0.95
+    assert ns.ppsf_use_speed is True
+    assert ns.ppsf_split_groups_mean is False
+
+
+def test_training_config_yaml_ppsf() -> None:
+    """PPSF 字段能通过 YAML 合并到 namespace。"""
+    parser = bridge.build_parser(TrainingConfig)
+    args = parser.parse_args([])
+    yaml_data = {
+        "optimizer_type": "prodigy_plus_schedulefree",
+        "ppsf_d_coef": 0.3,
+        "ppsf_beta1": 0.9,
+        "ppsf_beta2": 0.99,
+        "ppsf_prodigy_steps": 1000,
+        "ppsf_use_stableadamw": True,
+    }
+    bridge.merge_yaml_into_namespace(args, yaml_data, TrainingConfig)
+    assert args.optimizer_type == "prodigy_plus_schedulefree"
+    assert args.ppsf_d_coef == 0.3
+    assert args.ppsf_beta1 == 0.9
+    assert args.ppsf_beta2 == 0.99
+    assert args.ppsf_prodigy_steps == 1000
+    assert args.ppsf_use_stableadamw is True

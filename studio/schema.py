@@ -243,8 +243,12 @@ class TrainingConfig(BaseModel):
     )
     lr_scheduler: Literal["none", "cosine", "cosine_with_restart"] = Field(
         "none",
-        description="学习率调度",
-        json_schema_extra=_meta("training"),
+        description="学习率调度（选 prodigy_plus_schedulefree 时必须 none）",
+        json_schema_extra=_meta(
+            "training",
+            disable_when="optimizer_type==prodigy_plus_schedulefree",
+            disable_hint="Schedule-Free 自带调度",
+        ),
     )
     lr_scheduler_t0: int = Field(
         500, ge=1,
@@ -261,9 +265,9 @@ class TrainingConfig(BaseModel):
         description="最小学习率",
         json_schema_extra=_meta("training", show_when="lr_scheduler!=none"),
     )
-    optimizer_type: Literal["adamw", "prodigy"] = Field(
+    optimizer_type: Literal["adamw", "prodigy", "prodigy_plus_schedulefree"] = Field(
         "adamw",
-        description="优化器（prodigy 需 pip install prodigyopt）",
+        description="优化器（prodigy 需 pip install prodigyopt；prodigy_plus_schedulefree 需 prodigy-plus-schedule-free，DiT LoRA 训练推荐，解决 Prodigy 风格突变 ep 问题）",
         json_schema_extra=_meta("training"),
     )
     prodigy_d_coef: float = Field(
@@ -275,6 +279,54 @@ class TrainingConfig(BaseModel):
         True,
         description="Prodigy warmup 期间保护 d 增长",
         json_schema_extra=_meta("training", show_when="optimizer_type==prodigy"),
+    )
+    # ---------------- ProdigyPlusScheduleFree (PPSF) 专属字段 ----------------
+    # 选 PPSF 时 lr_scheduler 必须为 none（Schedule-Free 不需要 scheduler，
+    # 启动期校验会 fatal）。lr 强制 1.0（工厂内部覆盖）。
+    ppsf_d_coef: float = Field(
+        1.0, ge=0.1, le=10.0,
+        description="PPSF d 缩放系数（小数据集 0.5，过拟合 2.0）",
+        json_schema_extra=_meta("training", show_when="optimizer_type==prodigy_plus_schedulefree"),
+    )
+    ppsf_prodigy_steps: int = Field(
+        0, ge=0,
+        description="PPSF 在第 N 步后冻结 d（0=训练全程不冻结，建议为总步数 1/4 到 1/2）",
+        json_schema_extra=_meta("training", show_when="optimizer_type==prodigy_plus_schedulefree"),
+    )
+    ppsf_beta1: float = Field(
+        0.9, ge=0.0, le=1.0,
+        description="PPSF Adam β1（PPSF 默认 0.9）",
+        json_schema_extra=_meta("training", show_when="optimizer_type==prodigy_plus_schedulefree"),
+    )
+    ppsf_beta2: float = Field(
+        0.99, ge=0.0, le=1.0,
+        description="PPSF Adam β2（PPSF 默认 0.99，比 AdamW 默认 0.999 更适合小 epoch）",
+        json_schema_extra=_meta("training", show_when="optimizer_type==prodigy_plus_schedulefree"),
+    )
+    ppsf_split_groups: bool = Field(
+        True,
+        description="PPSF 按 param group 分别估计 d（推荐开启）",
+        json_schema_extra=_meta("training", show_when="optimizer_type==prodigy_plus_schedulefree"),
+    )
+    ppsf_split_groups_mean: bool = Field(
+        False,
+        description="PPSF split_groups 启用时取各组 d 均值（LoRA 多 param group 建议关闭）",
+        json_schema_extra=_meta("training", show_when="optimizer_type==prodigy_plus_schedulefree"),
+    )
+    ppsf_use_speed: bool = Field(
+        False,
+        description="PPSF 加速模式（实验性，可能引入不稳定）",
+        json_schema_extra=_meta("training", show_when="optimizer_type==prodigy_plus_schedulefree"),
+    )
+    ppsf_fused_back_pass: bool = Field(
+        False,
+        description="PPSF 与 fused backward 集成（显存吃紧时开，可显著降显存）",
+        json_schema_extra=_meta("training", show_when="optimizer_type==prodigy_plus_schedulefree"),
+    )
+    ppsf_use_stableadamw: bool = Field(
+        True,
+        description="PPSF 用 stable AdamW 归一化（推荐开启）",
+        json_schema_extra=_meta("training", show_when="optimizer_type==prodigy_plus_schedulefree"),
     )
     weight_decay: float = Field(
         0.0, ge=0.0,
@@ -311,6 +363,17 @@ class TrainingConfig(BaseModel):
     @classmethod
     def _migrate_attention(cls, data: Any) -> Any:
         return migrate_legacy_attention(data)
+
+    @model_validator(mode="after")
+    def _validate_ppsf_scheduler(self) -> "TrainingConfig":
+        """ProdigyPlusScheduleFree 内置 Schedule-Free，外面再叠 scheduler 会破坏
+        averaged weights 的收敛保证。UI/CLI/YAML 三个入口在这里统一拦下来。"""
+        if self.optimizer_type == "prodigy_plus_schedulefree" and self.lr_scheduler != "none":
+            raise ValueError(
+                "optimizer_type=prodigy_plus_schedulefree requires lr_scheduler=none "
+                "(Schedule-Free 不需要 scheduler；强行叠加会破坏 averaged weights)."
+            )
+        return self
 
     # ---------------------------------------------------------------- 输出/保存
     output_dir: str = Field(
