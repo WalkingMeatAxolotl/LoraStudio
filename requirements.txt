@@ -35,6 +35,9 @@ python-multipart>=0.0.6
 pydantic>=2.5.0
 pyyaml>=6.0.1
 psutil>=5.9.0
+# topbar 系统监控小组件用：拿 GPU/VRAM。非 NVIDIA / 无驱动时 services/system_stats.py
+# 会 try/except 兜底，前端只显示 CPU/RAM；安装本身在所有平台都能 succeed (纯 Python wrapper)。
+pynvml>=11.5.0
 rich>=13.7.0
 requests>=2.31.0
 

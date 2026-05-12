@@ -65,6 +65,7 @@ from .services import (
     pending_install,
     torch_setup,
     reg_builder,
+    system_stats,
     tagedit,
     train_io,
     uploads as uploads_svc,
@@ -193,6 +194,12 @@ EMPTY_STATE: dict[str, Any] = {
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {"status": "ok", "version": app.version}
+
+
+@app.get("/api/system/stats")
+def get_system_stats() -> dict[str, Any]:
+    """Topbar 系统资源小组件用 (CPU/RAM/GPU/VRAM)。前端按 2-3s 轮询。"""
+    return system_stats.stats_to_json(system_stats.collect_stats())
 
 
 @app.get("/api/state")

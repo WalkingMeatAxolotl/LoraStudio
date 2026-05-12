@@ -4,6 +4,7 @@ import { useProjectCtx } from '../context/ProjectContext'
 import { api, type MonitorState, type Task } from '../api/client'
 import { useEventStream, type StudioEvent } from '../lib/useEventStream'
 import CommandPalette from './CommandPalette'
+import SystemStats from './SystemStats'
 
 const SearchIcon = (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -237,15 +238,18 @@ export default function Topbar() {
           })}
         </div>
 
-        {/* 搜索按钮 */}
+        {/* 实时系统监控 (CPU / RAM / GPU / VRAM)，每 ~2.5s 轮询；无 NVIDIA 时只显示 CPU/RAM。 */}
+        <SystemStats />
+
+        {/* 搜索按钮 — 缩成 icon-only，⌘K 仍可弹出完整 palette (含跨图标签搜索)。 */}
         <button
           ref={searchBtnRef}
           onClick={() => setPaletteOpen(true)}
-          className="flex items-center gap-2 text-fg-tertiary text-sm bg-surface border border-dim rounded-md cursor-pointer min-w-[200px] py-[5px] pl-3 pr-[10px] hover:border-bold transition-colors shrink-0"
+          title="搜索 (⌘K)"
+          aria-label="搜索"
+          className="flex items-center justify-center text-fg-tertiary bg-surface border border-dim rounded-md cursor-pointer w-8 h-8 hover:border-bold hover:text-fg-secondary transition-colors shrink-0"
         >
           {SearchIcon}
-          <span className="flex-1 text-left">跳转 / 搜索…</span>
-          <span className="kbd">⌘K</span>
         </button>
 
         {/* 运行中训练胶囊 */}
