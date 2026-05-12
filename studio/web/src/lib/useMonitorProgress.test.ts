@@ -77,19 +77,37 @@ describe('mergeDelta (PR #37 增量协议)', () => {
     expect(out.samples?.map((s) => s.path)).toEqual(['/a.png', '/b.png', '/c.png', '/d.png'])
   })
 
-  it('caps losses at MAX_LOSSES=5000', () => {
+  it('caps losses at MAX_LOSSES=50000 (matches backend disk cap)', () => {
+    // 长训练 + 全量 snapshot 场景：早期上限 5000 会立刻 slice 掉历史；
+    // 改对齐 backend train_monitor 的 50000 cap，前端只在真的爆量时兜底。
     const prev = {
-      losses: Array.from({ length: 4500 }, (_, i) => ({ step: i, loss: 0.0 })),
+      losses: Array.from({ length: 49500 }, (_, i) => ({ step: i, loss: 0.0 })),
       lr_history: [],
       samples: [],
     }
     const out = mergeDelta(prev, {
-      appended_losses: Array.from({ length: 1000 }, (_, i) => ({ step: 4500 + i, loss: 0.0 })),
+      appended_losses: Array.from({ length: 1000 }, (_, i) => ({ step: 49500 + i, loss: 0.0 })),
     })
-    expect(out.losses).toHaveLength(5000)
+    expect(out.losses).toHaveLength(50000)
     // 留尾部
     expect(out.losses?.[0].step).toBe(500)
-    expect(out.losses?.[4999].step).toBe(5499)
+    expect(out.losses?.[49999].step).toBe(50499)
+  })
+
+  it('keeps 10k step training intact without truncation', () => {
+    // 回归 cold-start 拿全量后立刻被裁的 bug：10k 历史 + 一两个 delta，不应
+    // 任何 slice。
+    const prev = {
+      losses: Array.from({ length: 10000 }, (_, i) => ({ step: i, loss: 0.0 })),
+      lr_history: [],
+      samples: [],
+    }
+    const out = mergeDelta(prev, {
+      appended_losses: [{ step: 10000, loss: 0.1 }, { step: 10001, loss: 0.1 }],
+    })
+    expect(out.losses).toHaveLength(10002)
+    expect(out.losses?.[0].step).toBe(0)
+    expect(out.losses?.[10001].step).toBe(10001)
   })
 
   it('caps samples at MAX_SAMPLES=50 (same as backend)', () => {

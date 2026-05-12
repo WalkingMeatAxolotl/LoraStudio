@@ -354,6 +354,27 @@ def test_state_max_points_zero_disables_downsample(
     assert len(resp.json()["losses"]) == 100
 
 
+def test_state_default_returns_full_payload(
+    client: TestClient, isolated_paths: dict[str, Path]
+) -> None:
+    """新默认（PR #43）：不传 max_points 等价于 max_points=0，返回全量历史。
+
+    10k 步训练 cold start 时用户能拿到完整数据；想降采样的 caller 必须显式
+    传具体数字。
+    """
+    losses = [{"step": i, "loss": 0.1} for i in range(10000)]
+    payload = {
+        "losses": losses, "lr_history": [], "epoch": 0, "step": 9999,
+        "total_steps": 10000, "speed": 0.0, "samples": [],
+        "start_time": None, "config": {},
+    }
+    tid = _make_task_with_state(isolated_paths, payload)
+    # 不传 max_points 任何参数
+    resp = client.get(f"/api/state?task_id={tid}")
+    assert resp.status_code == 200
+    assert len(resp.json()["losses"]) == 10000
+
+
 # ---------------------------------------------------------------------------
 # /samples/{filename}
 # ---------------------------------------------------------------------------

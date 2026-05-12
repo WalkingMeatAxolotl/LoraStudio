@@ -29,8 +29,12 @@ interface MonitorProgressDelta {
   config?: Record<string, string | number | boolean>
 }
 
-const MAX_LOSSES = 5000
-const MAX_LR = 5000
+// 与 backend train_monitor.update_monitor 的内置裁尾上限对齐 (runtime/train_monitor.py:108-116)。
+// 早期 5000 上限是因为 server 默认降采样 1500；改成全量 snapshot 后 cold-start
+// 已经可能 ≥10k 点，5000 会立刻 slice 掉早期。50000 跟 backend 一致，cap 由 disk
+// 端兜底；前端 chart 内部 downsample(600) 渲染，不影响 perf。
+const MAX_LOSSES = 50000
+const MAX_LR = 50000
 const MAX_SAMPLES = 50
 
 function mergeDelta(prev: MonitorState | null, delta: MonitorProgressDelta): MonitorState {
