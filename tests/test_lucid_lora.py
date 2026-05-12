@@ -142,3 +142,37 @@ def test_lucid_save_writes_compat_metadata(tmp_path) -> None:
     assert args["lucid_algo"] == "lucid"
     assert "base" not in args
     assert args["compat"] == "lycoris_compat"
+
+
+def test_lucid_native_state_keeps_role_split_but_compat_export_pads_qk(tmp_path) -> None:
+    model = _Model()
+    adapter = AnimaLucidLoRAAdapter(rank=8, qk_rank_ratio=0.25, sig_type="random")
+    adapter.inject(model)
+
+    native = adapter.state_dict()
+    assert native["lora_unet_blocks_0_self_attn_q_proj.lora_down.weight"].shape == (2, 8)
+    assert native["lora_unet_blocks_0_self_attn_q_proj.lora_up.weight"].shape == (8, 2)
+    assert native["lora_unet_blocks_0_self_attn_v_proj.lora_down.weight"].shape == (8, 8)
+    assert native["lora_unet_blocks_0_self_attn_v_proj.lora_up.weight"].shape == (8, 8)
+
+    compat = adapter.export_state_dict()
+    assert compat["lora_unet_blocks_0_self_attn_q_proj.lora_down.weight"].shape == (8, 8)
+    assert compat["lora_unet_blocks_0_self_attn_q_proj.lora_up.weight"].shape == (8, 8)
+    assert torch.all(compat["lora_unet_blocks_0_self_attn_q_proj.lora_down.weight"][2:] == 0)
+    assert torch.all(compat["lora_unet_blocks_0_self_attn_q_proj.lora_up.weight"][:, 2:] == 0)
+
+    path = tmp_path / "lucid_compat.safetensors"
+    adapter.save(path)
+    with safe_open(str(path), framework="pt", device="cpu") as f:
+        assert f.get_tensor("lora_unet_blocks_0_self_attn_q_proj.lora_down.weight").shape == (8, 8)
+        assert f.get_tensor("lora_unet_blocks_0_self_attn_q_proj.lora_up.weight").shape == (8, 8)
+
+
+def test_lucid_native_export_keeps_actual_qk_rank() -> None:
+    model = _Model()
+    adapter = AnimaLucidLoRAAdapter(rank=8, qk_rank_ratio=0.25, sig_type="random", export_mode="native")
+    adapter.inject(model)
+
+    exported = adapter.export_state_dict()
+    assert exported["lora_unet_blocks_0_self_attn_q_proj.lora_down.weight"].shape == (2, 8)
+    assert exported["lora_unet_blocks_0_self_attn_q_proj.lora_up.weight"].shape == (8, 2)

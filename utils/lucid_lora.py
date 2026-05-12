@@ -371,6 +371,34 @@ class AnimaLucidLoRAAdapter:
                 sd[f"{key}.lokr_w2_b"] = layer.lokr_w2_b.data.clone()
         return sd
 
+    def _pad_lora_down(self, weight: torch.Tensor) -> torch.Tensor:
+        if weight.shape[0] == self.rank:
+            return weight.data.clone()
+        padded = weight.new_zeros(self.rank, weight.shape[1])
+        padded[: weight.shape[0], :] = weight.data
+        return padded
+
+    def _pad_lora_up(self, weight: torch.Tensor) -> torch.Tensor:
+        if weight.shape[1] == self.rank:
+            return weight.data.clone()
+        padded = weight.new_zeros(weight.shape[0], self.rank)
+        padded[:, : weight.shape[1]] = weight.data
+        return padded
+
+    def export_state_dict(self) -> dict[str, torch.Tensor]:
+        if self.export_mode == "native":
+            return self.state_dict()
+
+        sd: dict[str, torch.Tensor] = {}
+        for key, layer in self._layer_keys.items():
+            if isinstance(layer, LucidLoRALinear):
+                sd[f"{key}.lora_down.weight"] = self._pad_lora_down(layer.down.weight)
+                sd[f"{key}.lora_up.weight"] = self._pad_lora_up(layer.up.weight)
+            else:
+                sd[f"{key}.lokr_w1"] = layer.lokr_w1.data.clone()
+                sd[f"{key}.lokr_w2_b"] = layer.lokr_w2_b.data.clone()
+        return sd
+
     def load_state_dict(self, sd: dict[str, torch.Tensor], strict: bool = True):
         missing, unexpected = [], []
         expected: set[str] = set()
@@ -435,7 +463,7 @@ class AnimaLucidLoRAAdapter:
         }
 
     def save(self, path: str | Path) -> None:
-        save_file(self.state_dict(), str(path), metadata=self._metadata())
+        save_file(self.export_state_dict(), str(path), metadata=self._metadata())
         logger.info(f"LucidLoRA 保存到: {path}")
 
     def load(self, path: str | Path) -> None:
