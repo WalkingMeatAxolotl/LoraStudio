@@ -20,13 +20,31 @@ from typing import Any, Optional
 import requests
 from PIL import Image
 
+from .. import __version__
 
-DOWNLOAD_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    ),
-}
+
+# 标识应用身份的 UA。背景（hotfix 0.5.x）：
+# - danbooru 现在挂 Cloudflare bot-protection；不带 UA / 默认 `python-requests/X.Y.Z`
+#   会被直接 403 → CF 挑战页（"Just a moment..."）；
+# - 套 Chrome 浏览器 UA 反而更可疑 ("浏览器但不跑 JS" 模式)，也照 403；
+# - 用应用名 UA 同时能过 CF 过滤 + 符合 danbooru TOS 里 "请使用描述性 User-Agent"
+#   的要求。gelbooru 没那么严但同样建议描述性 UA。
+_USER_AGENT_BASE = f"AnimaLoraStudio/{__version__}"
+
+
+def _build_user_agent(username: str = "") -> str:
+    """构造 UA。优先带 (by username) — 符合 danbooru TOS 推荐格式，且后端能
+    把请求归属到具体账户，CF 收紧时不容易被一锅端到匿名 UA。"""
+    u = (username or "").strip()
+    return f"{_USER_AGENT_BASE} (by {u})" if u else _USER_AGENT_BASE
+
+
+def _api_headers(username: str = "") -> dict[str, str]:
+    return {"User-Agent": _build_user_agent(username), "Accept": "application/json"}
+
+
+def _download_headers(username: str = "") -> dict[str, str]:
+    return {"User-Agent": _build_user_agent(username)}
 
 
 def default_base_url(api_source: str) -> str:
@@ -86,7 +104,7 @@ def search_posts(
         url = f"{url_base}/posts.json"
         auth = (username, api_key) if username and api_key else None
 
-    resp = sess.get(url, params=params, auth=auth, timeout=timeout)
+    resp = sess.get(url, params=params, auth=auth, headers=_api_headers(username), timeout=timeout)
     resp.raise_for_status()
     data = resp.json()
     if api_source == "gelbooru":
@@ -211,13 +229,17 @@ def download_image(
     timeout: float = 60.0,
     referer: Optional[str] = None,
     session: Optional[requests.Session] = None,
+    username: str = "",
 ) -> Path:
     """下载单图到 save_path（或 .png 重命名后版本）；失败抛 RuntimeError。
+
+    `username` 用于构造 UA `(by username)`，与 search 路径一致；下载也走
+    Cloudflare，UA 带账户标识能降低被一锅端的风险。
 
     返回最终落盘路径。
     """
     sess = session or requests
-    headers = dict(DOWNLOAD_HEADERS)
+    headers = _download_headers(username)
     if referer:
         headers["Referer"] = referer
     resp = sess.get(url, headers=headers, timeout=timeout, stream=True)

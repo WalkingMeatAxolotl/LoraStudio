@@ -8,6 +8,30 @@
 
 ---
 
+## [0.5.2] — 2026-05-12
+
+**Hotfix**：Danbooru 挂 Cloudflare 后 search API 全部 403 (`Just a moment...` 挑战页)。从 master 派生，目标 master + dev 双向合并。
+
+### 修复
+
+- **Danbooru 403** — `services/booru_api.search_posts` 没设 `headers`，requests 默认 UA `python-requests/X.Y.Z` 被 CF 直接拦
+  - 用应用名 UA `AnimaLoraStudio/0.5.2` 而不是浏览器伪装（实测 Chrome UA 也照 403，CF 把它当作"浏览器但不跑 JS"的爬虫）
+  - 加 `Accept: application/json` 让中间件路由更确定
+  - `pynvml` → `nvidia-ml-py`（PR #37 已加过，这版统一）
+
+### 改进
+
+- **UA 带 `(by username)`** — 符合 danbooru TOS 推荐格式；CF 收紧时按账户白名单比按匿名 UA 更安全
+- **Danbooru 强制绑定** — `secrets.has_credentials_for("danbooru")` 现在校 `username + api_key`；与 gelbooru 行为一致
+  - 之前注释说"匿名也能跑"已不再属实（CF 时代匿名 = 0），改为明确强制
+  - Settings UI placeholder 改为"必填 — danbooru 挂了 Cloudflare 后不再支持匿名"
+
+### 测试
+
+`tests/test_booru_api.py`（新）+ `test_downloader.py` 共 +12 用例锁定 UA 字符 / Accept / 路由 / danbooru 强制 auth 边界；`test_reg_builder.py` FakeBooru mock 跟随真实签名。
+
+---
+
 ## [0.5.1] — 2026-05-10
 
 UI 体验小改进 + onnxruntime-gpu 跨平台修复（Windows / Linux 都踩到「装了 GPU 包但实际跑 CPU」）。
