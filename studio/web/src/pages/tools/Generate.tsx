@@ -320,7 +320,6 @@ export default function GeneratePage() {
   return (
     <div className="fade-in flex flex-col" style={{ height: '100%', overflow: 'hidden' }}>
       <PageHeader
-        eyebrow="工具"
         title="测试"
         subtitle="独立推理 · 单图 / XY 矩阵 / 双图对比（出图不保存，关页面即丢）"
         actions={<DaemonControls />}
