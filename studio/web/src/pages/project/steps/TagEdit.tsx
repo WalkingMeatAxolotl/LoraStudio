@@ -201,9 +201,9 @@ export default function TagEditPage() {
 
   const onAfterRestore = async () => { await reloadCache(); await reload() }
 
-  const exportForCnb = async () => {
+  const downloadTrainZip = async () => {
     if (dirty) {
-      toast('先保存标签，再导出给 CNB', 'error')
+      toast('先保存标签，再下载训练集', 'error')
       return
     }
     setExporting(true)
@@ -211,7 +211,7 @@ export default function TagEditPage() {
       const filename = `${project.slug}-${activeVersion.label}.train.zip`
       await downloadBlob(api.versionTrainZipUrl(project.id, activeVersion.id), filename)
     } catch (e) {
-      toast(`导出失败: ${e}`, 'error')
+      toast(`下载失败: ${e}`, 'error')
     } finally {
       setExporting(false)
     }
@@ -244,10 +244,10 @@ export default function TagEditPage() {
           <button
             className="btn btn-primary btn-sm"
             disabled={exporting || dirty || trainTotal === 0}
-            onClick={exportForCnb}
-            title={dirty ? '先保存标签再导出' : '导出当前版本训练集 zip，上传到 CNB 训练'}
+            onClick={downloadTrainZip}
+            title={dirty ? '先保存标签再下载' : '下载当前版本训练集 zip'}
           >
-            {exporting ? '打包中…' : '导出给 CNB'}
+            {exporting ? '打包中…' : '下载训练集'}
           </button>
           <SaveBar
             pid={project.id}
