@@ -17,12 +17,17 @@ def isolated_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     secrets.update(
         {
             "llm_tagger": {
-                "base_url": "http://x/v1",
-                "api_key": "k",
-                "model": "vision",
-                "endpoint": "chat_completions",
-                "prompt_preset": "style_json",
-                "max_retries": 1,
+                "current_preset": "style_json",
+                "presets": [
+                    {
+                        "id": "style_json",
+                        "base_url": "http://x/v1",
+                        "api_key": "k",
+                        "model": "vision",
+                        "endpoint": "chat_completions",
+                        "max_retries": 1,
+                    }
+                ],
             }
         }
     )
@@ -57,7 +62,9 @@ def _responses_response(content: str):
 
 
 def test_is_available_requires_model(isolated_secrets) -> None:
-    secrets.update({"llm_tagger": {"model": ""}})
+    secrets.update(
+        {"llm_tagger": {"presets": [{"id": "style_json", "model": ""}]}}
+    )
     ok, msg = llm_tagger.LLMTagger(session=MagicMock()).is_available()
     assert ok is False
     assert "model" in msg
@@ -86,7 +93,8 @@ def test_chat_completions_tag_normalizes_json(isolated_secrets, tmp_path: Path) 
     assert body["model"] == "vision"
     assert "anime style LoRA" in body["messages"][0]["content"]
     assert kwargs["timeout"] == (10, 60)
-    assert body["messages"][1]["content"][1]["image_url"]["url"].startswith(
+    # messages[1] 是 image item，被铺开成 user/[image_url]
+    assert body["messages"][1]["content"][0]["image_url"]["url"].startswith(
         "data:image/jpeg;base64,"
     )
 
@@ -107,9 +115,19 @@ def test_uses_editable_prompt_preset(isolated_secrets, tmp_path: Path) -> None:
     secrets.update(
         {
             "llm_tagger": {
-                "prompt_preset": "my_style",
-                "prompt_presets": [
-                    {"id": "my_style", "label": "My Style", "prompt": "MY PROMPT"}
+                "current_preset": "my_style",
+                "presets": [
+                    {
+                        "id": "my_style",
+                        "label": "My Style",
+                        "messages": [
+                            {"type": "text", "role": "system", "content": "MY PROMPT"},
+                            {"type": "image"},
+                        ],
+                        "base_url": "http://x/v1",
+                        "model": "vision",
+                        "max_retries": 1,
+                    }
                 ],
             }
         }
@@ -126,7 +144,9 @@ def test_uses_editable_prompt_preset(isolated_secrets, tmp_path: Path) -> None:
 
 
 def test_responses_endpoint_payload(isolated_secrets, tmp_path: Path) -> None:
-    secrets.update({"llm_tagger": {"endpoint": "responses"}})
+    secrets.update(
+        {"llm_tagger": {"presets": [{"id": "style_json", "endpoint": "responses"}]}}
+    )
     sess = MagicMock()
     sess.post.return_value = _responses_response('{"tags":["ink","limited palette"]}')
     tagger = llm_tagger.LLMTagger(session=sess)
@@ -139,10 +159,9 @@ def test_responses_endpoint_payload(isolated_secrets, tmp_path: Path) -> None:
     assert args[0] == "http://x/v1/responses"
     body = kwargs["json"]
     assert body["instructions"]
-    assert body["input"][0]["content"][1]["type"] == "input_image"
-    assert body["input"][0]["content"][1]["image_url"].startswith(
-        "data:image/jpeg;base64,"
-    )
+    # builtin style_json 只有 system message，无 user → input content 仅 input_image
+    image_part = next(c for c in body["input"][0]["content"] if c["type"] == "input_image")
+    assert image_part["image_url"].startswith("data:image/jpeg;base64,")
 
 
 def test_fetch_openai_compatible_models() -> None:
@@ -225,7 +244,9 @@ def test_text_connectivity_uses_responses_shape() -> None:
 
 
 def test_responses_payload_uses_instructions(isolated_secrets, tmp_path: Path) -> None:
-    secrets.update({"llm_tagger": {"endpoint": "responses"}})
+    secrets.update(
+        {"llm_tagger": {"presets": [{"id": "style_json", "endpoint": "responses"}]}}
+    )
     sess = MagicMock()
     sess.post.return_value = _responses_response('{"tags":["ink"]}')
     tagger = llm_tagger.LLMTagger(session=sess)
@@ -239,7 +260,22 @@ def test_responses_payload_uses_instructions(isolated_secrets, tmp_path: Path) -
 
 
 def test_text_preset_returns_natural_caption(isolated_secrets, tmp_path: Path) -> None:
-    secrets.update({"llm_tagger": {"prompt_preset": "joycaption"}})
+    # 切换到 joycaption preset 并把 endpoint 重新指向测试 URL
+    secrets.update(
+        {
+            "llm_tagger": {
+                "current_preset": "joycaption",
+                "presets": [
+                    {
+                        "id": "joycaption",
+                        "base_url": "http://x/v1",
+                        "model": "vision",
+                        "max_retries": 1,
+                    }
+                ],
+            }
+        }
+    )
     sess = MagicMock()
     sess.post.return_value = _chat_response("a calm natural caption")
     tagger = llm_tagger.LLMTagger(session=sess)

@@ -163,7 +163,7 @@ def test_start_tag_with_cltagger_overrides(client: TestClient) -> None:
 
 
 def test_start_tag_with_llm_overrides(client: TestClient) -> None:
-    """传 llm_overrides 时，端点应把它落进 params。"""
+    """传 llm_overrides 时，端点应把它落进 params。`api_key` 不在 schema 里被忽略。"""
     import json as _json
     pid, vid = _make(client)
     r = client.post(
@@ -172,10 +172,9 @@ def test_start_tag_with_llm_overrides(client: TestClient) -> None:
             "tagger": "llm",
             "output_format": "json",
             "llm_overrides": {
+                "current_preset": "joycaption",
                 "endpoint": "responses",
                 "model": "vision-model",
-                "prompt_preset": "style_json",
-                "api_key": "should-not-persist",
                 "temperature": 0.1,
             },
         },
@@ -183,9 +182,9 @@ def test_start_tag_with_llm_overrides(client: TestClient) -> None:
     assert r.status_code == 200, r.text
     params = _json.loads(r.json()["params"])
     assert params["llm_overrides"] == {
+        "current_preset": "joycaption",
         "endpoint": "responses",
         "model": "vision-model",
-        "prompt_preset": "style_json",
         "temperature": 0.1,
     }
 
@@ -204,20 +203,30 @@ def test_refresh_llm_models_saves_masked_config(
     monkeypatch.setattr(llm_tagger, "fetch_openai_compatible_models", _fake_fetch)
     r = client.post(
         "/api/llm-tagger/models/refresh",
-        json={"base_url": "http://x/v1", "api_key": "secret", "timeout": 12},
+        json={
+            "preset_id": "style_json",
+            "base_url": "http://x/v1",
+            "api_key": "secret",
+            "timeout": 12,
+        },
     )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["items"] == ["vision-a", "vision-b"]
-    assert body["secrets"]["llm_tagger"]["api_key"] == secrets.MASK
-    assert body["secrets"]["llm_tagger"]["model"] == "vision-a"
-    assert body["secrets"]["llm_tagger"]["model_ids"] == ["vision-a", "vision-b"]
+    assert body["preset_id"] == "style_json"
+    style_masked = next(
+        p for p in body["secrets"]["llm_tagger"]["presets"] if p["id"] == "style_json"
+    )
+    assert style_masked["api_key"] == secrets.MASK
+    assert style_masked["model"] == "vision-a"
+    assert style_masked["model_ids"] == ["vision-a", "vision-b"]
     assert captured == {
         "base_url": "http://x/v1",
         "api_key": "secret",
         "timeout": 12,
     }
-    assert secrets.load().llm_tagger.api_key == "secret"
+    style_loaded = next(p for p in secrets.load().llm_tagger.presets if p.id == "style_json")
+    assert style_loaded.api_key == "secret"
 
 
 def test_llm_connection_test_uses_masked_saved_key(
@@ -226,11 +235,17 @@ def test_llm_connection_test_uses_masked_saved_key(
     secrets.update(
         {
             "llm_tagger": {
-                "base_url": "http://saved/v1",
-                "api_key": "saved-secret",
-                "model": "saved-model",
-                "endpoint": "chat_completions",
-                "timeout": 22,
+                "current_preset": "style_json",
+                "presets": [
+                    {
+                        "id": "style_json",
+                        "base_url": "http://saved/v1",
+                        "api_key": "saved-secret",
+                        "model": "saved-model",
+                        "endpoint": "chat_completions",
+                        "timeout": 22,
+                    }
+                ],
             }
         }
     )
@@ -269,7 +284,9 @@ def test_llm_connection_test_uses_masked_saved_key(
     assert captured["api_key"] == "saved-secret"
     assert captured["model"] == "draft-model"
     assert captured["timeout"] == 9
-    assert secrets.load().llm_tagger.model == "saved-model"
+    # 测试只是 dry-run，不应改 secrets 里的 model
+    style_loaded = next(p for p in secrets.load().llm_tagger.presets if p.id == "style_json")
+    assert style_loaded.model == "saved-model"
 
 
 def test_start_tag_drops_empty_wd14_overrides(client: TestClient) -> None:

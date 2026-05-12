@@ -1220,12 +1220,18 @@ class CLTaggerOverrides(BaseModel):
 
 
 class LLMTaggerOverrides(BaseModel):
-    """打标页对 LLM tagger 设置的「本次任务覆盖」—— 仅在 worker 进程内生效。"""
+    """打标页对 LLM tagger 设置的「本次任务覆盖」—— 仅在 worker 进程内生效。
+
+    - `current_preset`：切换 active preset id
+    - 其余字段：覆盖 active preset 的同名字段
+    - `api_key` 不允许 override（避免出现在 task params/日志）
+    """
+    current_preset: Optional[str] = None
     base_url: Optional[str] = None
     model: Optional[str] = None
     endpoint: Optional[str] = None
-    prompt_preset: Optional[str] = None
-    custom_prompt: Optional[str] = None
+    prompt: Optional[str] = None
+    output_format: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     timeout: Optional[int] = None
@@ -1244,12 +1250,15 @@ class TagJobRequest(BaseModel):
 
 
 class LLMModelsRefreshRequest(BaseModel):
+    # preset_id 指定要更新的 preset；不传则用当前 current_preset
+    preset_id: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     timeout: Optional[int] = None
 
 
 class LLMConnectionTestRequest(BaseModel):
+    preset_id: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     model: Optional[str] = None
@@ -1449,15 +1458,29 @@ def check_tagger(name: str) -> dict[str, Any]:
     }
 
 
+def _select_preset(
+    tagger_cfg: "secrets.LLMTaggerConfig", preset_id: Optional[str]
+) -> "secrets.LLMPresetConfig":
+    pid = preset_id or tagger_cfg.current_preset
+    for preset in tagger_cfg.presets:
+        if preset.id == pid:
+            return preset
+    return tagger_cfg.active
+
+
 @app.post("/api/llm-tagger/models/refresh")
 def refresh_llm_tagger_models(body: LLMModelsRefreshRequest) -> dict[str, Any]:
-    """读取 OpenAI-compatible /models，并保存到 llm_tagger.model_ids。"""
+    """读取 OpenAI-compatible /models，并保存到指定 preset 的 model_ids。
+
+    `preset_id` 不传时用 current_preset。成功后才落 secrets，避免请求失败时写脏。
+    """
     from .services import llm_tagger as llm_tagger_svc
 
-    current = secrets.load().llm_tagger
-    base_url = (body.base_url if body.base_url is not None else current.base_url).strip()
+    tagger_cfg = secrets.load().llm_tagger
+    target = _select_preset(tagger_cfg, body.preset_id)
+    base_url = (body.base_url if body.base_url is not None else target.base_url).strip()
     api_key = (
-        current.api_key
+        target.api_key
         if body.api_key is None or body.api_key == secrets.MASK
         else body.api_key.strip()
     )
@@ -1467,41 +1490,46 @@ def refresh_llm_tagger_models(body: LLMModelsRefreshRequest) -> dict[str, Any]:
         model_ids = llm_tagger_svc.fetch_openai_compatible_models(
             base_url,
             api_key,
-            timeout=body.timeout or current.timeout,
+            timeout=body.timeout or target.timeout,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, str(exc)) from exc
-    selected = current.model if current.model in model_ids else (model_ids[0] if model_ids else current.model)
-    patch: dict[str, Any] = {
-        "llm_tagger": {
-            "base_url": base_url,
-            "model_ids": model_ids,
-            "model": selected,
-        }
+    selected = target.model if target.model in model_ids else (model_ids[0] if model_ids else target.model)
+    preset_patch: dict[str, Any] = {
+        "id": target.id,
+        "base_url": base_url,
+        "model_ids": model_ids,
+        "model": selected,
     }
     if body.api_key not in (None, secrets.MASK):
-        patch["llm_tagger"]["api_key"] = api_key
-    new = secrets.update(patch)
+        preset_patch["api_key"] = api_key
+    new = secrets.update({"llm_tagger": {"presets": [preset_patch]}})
     return {
         "items": model_ids,
+        "preset_id": target.id,
         "secrets": secrets.to_masked_dict(new),
     }
 
 
 @app.post("/api/llm-tagger/test")
 def test_llm_tagger_connection(body: LLMConnectionTestRequest) -> dict[str, Any]:
-    """Run a text-only LLM connectivity test without saving form values."""
+    """Run a text-only LLM connectivity test without saving form values.
+
+    Defaults come from the target preset (preset_id or current); body fields
+    override on top.
+    """
     from .services import llm_tagger as llm_tagger_svc
 
-    current = secrets.load().llm_tagger
-    merged = current.model_dump()
+    tagger_cfg = secrets.load().llm_tagger
+    target = _select_preset(tagger_cfg, body.preset_id)
+    merged = target.model_dump()
     for key in ("base_url", "model", "endpoint", "timeout", "max_tokens", "temperature"):
         value = getattr(body, key)
         if value is not None:
             merged[key] = value
     if body.api_key is not None and body.api_key != secrets.MASK:
         merged["api_key"] = body.api_key
-    cfg = secrets.LLMTaggerConfig(**merged)
+    cfg = secrets.LLMPresetConfig(**merged)
     if not cfg.base_url.strip():
         raise HTTPException(400, "base_url is required")
     if not cfg.model.strip():
