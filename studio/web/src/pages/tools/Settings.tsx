@@ -315,14 +315,6 @@ export default function SettingsPage() {
     // current_preset 不变；validator 会重建 preset
   }
 
-  const discardCurrentPreset = () => {
-    if (!serverCurrentPreset) return
-    const next = draft.llm_tagger.presets.map((p) =>
-      p.id === currentPreset.id ? { ...serverCurrentPreset } : p
-    )
-    update('llm_tagger', 'presets', next)
-  }
-
   const saveAsNewPreset = () => {
     const label = window.prompt('新预设名称：', `${currentPreset.label} 副本`)
     if (!label) return
@@ -579,7 +571,6 @@ export default function SettingsPage() {
         onSaveAs={saveAsNewPreset}
         onAddPreset={addPreset}
         onDeletePreset={deleteCurrentPreset}
-        onDiscardPreset={discardCurrentPreset}
         llmModelsBusy={llmModelsBusy}
         llmTestBusy={llmTestBusy}
         llmTestResult={llmTestResult}

@@ -26,7 +26,6 @@ interface Props {
   onSaveAs: () => void
   onAddPreset: () => void
   onDeletePreset: () => void
-  onDiscardPreset: () => void
   llmModelsBusy: boolean
   llmTestBusy: boolean
   llmTestResult: LLMConnectionTestResult | null
@@ -60,7 +59,6 @@ export default function LLMTaggerWorkspace(props: Props) {
     onSaveAs,
     onAddPreset,
     onDeletePreset,
-    onDiscardPreset,
     llmModelsBusy,
     llmTestBusy,
     llmTestResult,
@@ -88,7 +86,11 @@ export default function LLMTaggerWorkspace(props: Props) {
   }, [currentPreset, serverCurrentPreset])
 
   return (
-    <div className="flex flex-col gap-5">
+    // 整个 LLM 模块外层 — preset bar + workspace 5 个 section 包裹在同一个 card 里
+    <div
+      className="bg-surface border border-subtle"
+      style={{ borderRadius: 'var(--r-lg)', overflow: 'hidden' }}
+    >
       <PresetBar
         currentPreset={currentPreset}
         presets={presets}
@@ -102,14 +104,17 @@ export default function LLMTaggerWorkspace(props: Props) {
         dirtyCount={dirtyCount}
       />
 
-      {/* workspace grid: 左 360px / 右 1fr */}
+      {/* workspace 双栏 grid：左 360px 三个 section 纵向 / 右 1fr composer 撑满 */}
       <div
-        className="grid items-start gap-5"
+        className="grid items-stretch"
         style={{ gridTemplateColumns: '360px 1fr' }}
       >
-        {/* LEFT column */}
-        <div className="flex flex-col" style={{ gap: 14 }}>
-          <ConnectionCard
+        {/* LEFT column：3 section 用 border-bottom 分隔，整列右边 border 跟右栏分隔 */}
+        <div
+          className="flex flex-col"
+          style={{ borderRight: '1px solid var(--border-subtle)' }}
+        >
+          <ConnectionSection
             preset={currentPreset}
             serverPreset={serverCurrentPreset}
             onUpdate={onUpdatePreset}
@@ -118,21 +123,15 @@ export default function LLMTaggerWorkspace(props: Props) {
             llmTestResult={llmTestResult}
             onRefreshModels={onRefreshModels}
             onTestConnection={onTestConnection}
+            bottomBorder
           />
-          <SamplingCard preset={currentPreset} onUpdate={onUpdatePreset} />
-          <ImageCard preset={currentPreset} onUpdate={onUpdatePreset} />
+          <SamplingSection preset={currentPreset} onUpdate={onUpdatePreset} bottomBorder />
+          <ImageSection preset={currentPreset} onUpdate={onUpdatePreset} />
         </div>
 
-        {/* RIGHT column */}
-        <ComposerCard preset={currentPreset} onUpdate={onUpdatePreset} />
+        {/* RIGHT column：composer 撑满高度；messages 区域内部滚动 */}
+        <ComposerSection preset={currentPreset} onUpdate={onUpdatePreset} />
       </div>
-
-      {dirtyCount > 0 && (
-        <SaveBar
-          dirtyCount={dirtyCount}
-          onDiscard={onDiscardPreset}
-        />
-      )}
     </div>
   )
 }
@@ -163,14 +162,13 @@ function PresetBar({
 }) {
   return (
     <div
-      className="bg-surface border border-subtle"
       style={{
-        borderRadius: 'var(--r-lg)',
         padding: '10px 12px 10px 16px',
         display: 'grid',
         gridTemplateColumns: '1fr auto',
         alignItems: 'center',
         gap: 12,
+        borderBottom: '1px solid var(--border-subtle)',
       }}
     >
       <div className="flex items-center gap-3.5 min-w-0">
@@ -257,11 +255,12 @@ function PresetBar({
   )
 }
 
-// ── Connection card (01) ────────────────────────────────────────────────
-function ConnectionCard({
+// ── Connection section (01) ────────────────────────────────────────────
+function ConnectionSection({
   preset, serverPreset, onUpdate,
   llmModelsBusy, llmTestBusy, llmTestResult,
   onRefreshModels, onTestConnection,
+  bottomBorder,
 }: {
   preset: LLMPreset
   serverPreset?: LLMPreset
@@ -271,11 +270,12 @@ function ConnectionCard({
   llmTestResult: LLMConnectionTestResult | null
   onRefreshModels: () => void
   onTestConnection: () => void
+  bottomBorder?: boolean
 }) {
   return (
-    <Card>
-      <CardHeader step="01" title="连接" hint="openai-compatible" />
-      <CardBody>
+    <Section bottomBorder={bottomBorder}>
+      <SectionHeader step="01" title="连接" hint="openai-compatible" />
+      <SectionBody>
         <Field label="Base URL" required help={<>可填 <Code>/v1</Code>、<Code>/chat/completions</Code> 或 <Code>/responses</Code></>}>
           <input
             type="text"
@@ -348,20 +348,21 @@ function ConnectionCard({
           onTest={onTestConnection}
           disabled={!preset.base_url.trim() || !preset.model.trim()}
         />
-      </CardBody>
-    </Card>
+      </SectionBody>
+    </Section>
   )
 }
 
-// ── Sampling card (03) ──────────────────────────────────────────────────
-function SamplingCard({ preset, onUpdate }: {
+// ── Sampling section (03) ───────────────────────────────────────────────
+function SamplingSection({ preset, onUpdate, bottomBorder }: {
   preset: LLMPreset
   onUpdate: <K extends keyof LLMPreset>(field: K, value: LLMPreset[K]) => void
+  bottomBorder?: boolean
 }) {
   return (
-    <Card>
-      <CardHeader step="03" title="采样参数" hint="model-side" />
-      <CardBody>
+    <Section bottomBorder={bottomBorder}>
+      <SectionHeader step="03" title="采样参数" hint="model-side" />
+      <SectionBody>
         <Field label="Temperature" optional="— 越低越稳定">
           <SliderRow value={preset.temperature} min={0} max={2} step={0.05}
             onChange={(v) => onUpdate('temperature', v)} />
@@ -388,20 +389,21 @@ function SamplingCard({ preset, onUpdate }: {
             />
           </Field>
         </Row2>
-      </CardBody>
-    </Card>
+      </SectionBody>
+    </Section>
   )
 }
 
-// ── Image preprocessing card (04) ───────────────────────────────────────
-function ImageCard({ preset, onUpdate }: {
+// ── Image preprocessing section (04) ────────────────────────────────────
+function ImageSection({ preset, onUpdate, bottomBorder }: {
   preset: LLMPreset
   onUpdate: <K extends keyof LLMPreset>(field: K, value: LLMPreset[K]) => void
+  bottomBorder?: boolean
 }) {
   return (
-    <Card>
-      <CardHeader step="04" title="图片预处理" hint="before upload" />
-      <CardBody>
+    <Section bottomBorder={bottomBorder}>
+      <SectionHeader step="04" title="图片预处理" hint="before upload" />
+      <SectionBody>
         <Field label="Max side" optional="px · 缩放最长边">
           <SliderRow value={preset.max_side} min={512} max={2048} step={64}
             onChange={(v) => onUpdate('max_side', Math.round(v))} integer />
@@ -429,24 +431,25 @@ function ImageCard({ preset, onUpdate }: {
         <Help>
           Claude 等服务限制 <b style={{ color: 'var(--fg-secondary)' }}>5 MB</b> / 张。超过会被压缩到此值以下。
         </Help>
-      </CardBody>
-    </Card>
+      </SectionBody>
+    </Section>
   )
 }
 
-// ── Composer card (02) — the hero ───────────────────────────────────────
-function ComposerCard({ preset, onUpdate }: {
+// ── Composer section (02) — the hero ────────────────────────────────────
+// 高度撑满左栏总高（grid items-stretch + h-full）；messages 区域内部滚动。
+function ComposerSection({ preset, onUpdate }: {
   preset: LLMPreset
   onUpdate: <K extends keyof LLMPreset>(field: K, value: LLMPreset[K]) => void
 }) {
   return (
     <div
-      className="bg-surface border border-subtle"
-      style={{ borderRadius: 'var(--r-lg)', overflow: 'hidden' }}
+      className="flex flex-col"
+      style={{ height: '100%', minHeight: 0, overflow: 'hidden' }}
     >
-      {/* composer-tabbar */}
+      {/* composer-tabbar — 固定高 */}
       <div
-        className="flex items-center justify-between"
+        className="flex items-center justify-between shrink-0"
         style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)' }}
       >
         <div className="flex items-center gap-4">
@@ -492,13 +495,17 @@ function ComposerCard({ preset, onUpdate }: {
         </div>
       </div>
 
-      {/* msg-list */}
-      <div className="grid" style={{ padding: '14px 16px', gap: 10 }}>
+      {/* msg-list — flex-1 + 内滚 */}
+      <div
+        className="flex-1 min-h-0 overflow-y-auto"
+        style={{ padding: '14px 16px' }}
+      >
         {preset.endpoint === 'responses' && (
           <div
             style={{
               fontSize: 'var(--t-xs)', color: 'var(--warn)',
               fontFamily: 'var(--font-mono)', letterSpacing: '0.04em',
+              marginBottom: 10,
             }}
           >
             ⚠️ Responses endpoint 只用 system + 第一条 user；其他 messages 会被忽略
@@ -513,59 +520,26 @@ function ComposerCard({ preset, onUpdate }: {
   )
 }
 
-// ── Save bar ────────────────────────────────────────────────────────────
-function SaveBar({ dirtyCount, onDiscard }: {
-  dirtyCount: number
-  onDiscard: () => void
-}) {
-  return (
-    <div
-      className="bg-surface border border-subtle flex items-center justify-between"
-      style={{
-        borderRadius: 'var(--r-lg)',
-        padding: '14px 18px',
-        gap: 12,
-      }}
-    >
-      <div className="flex items-center gap-3.5" style={{
-        fontSize: 'var(--t-sm)', color: 'var(--fg-tertiary)',
-      }}>
-        <span style={{
-          width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)',
-          display: 'inline-block',
-        }} />
-        <span>
-          有未保存的修改 — 这个 Preset 距上次保存{' '}
-          <b style={{ color: 'var(--fg-secondary)', fontWeight: 500 }}>{dirtyCount} 处</b>{' '}
-          差异（请用顶部「保存」落盘，或「放弃修改」撤销）
-        </span>
-      </div>
-      <div className="flex gap-2">
-        <PBtn onClick={onDiscard}>放弃修改</PBtn>
-      </div>
-    </div>
-  )
-}
-
 // ── Reusable primitives ─────────────────────────────────────────────────
 
-function Card({ children }: { children: React.ReactNode }) {
+/** 左栏内的一个 section（无独立 border + radius；section 之间用 bottomBorder 分隔）。 */
+function Section({ children, bottomBorder }: {
+  children: React.ReactNode
+  bottomBorder?: boolean
+}) {
   return (
-    <div
-      className="bg-surface border border-subtle"
-      style={{ borderRadius: 'var(--r-lg)' }}
-    >
+    <div style={bottomBorder ? { borderBottom: '1px solid var(--border-subtle)' } : undefined}>
       {children}
     </div>
   )
 }
 
-function CardHeader({ step, title, hint }: { step: string; title: string; hint?: string }) {
+function SectionHeader({ step, title, hint }: { step: string; title: string; hint?: string }) {
   return (
     <div
       className="flex items-center justify-between"
       style={{
-        padding: '13px 16px 11px',
+        padding: '11px 16px 10px',
         borderBottom: '1px solid var(--border-subtle)',
       }}
     >
@@ -587,8 +561,8 @@ function CardHeader({ step, title, hint }: { step: string; title: string; hint?:
   )
 }
 
-function CardBody({ children }: { children: React.ReactNode }) {
-  return <div style={{ padding: '14px 16px 16px' }}>{children}</div>
+function SectionBody({ children }: { children: React.ReactNode }) {
+  return <div style={{ padding: '12px 16px 14px' }}>{children}</div>
 }
 
 function Step({ children }: { children: React.ReactNode }) {
