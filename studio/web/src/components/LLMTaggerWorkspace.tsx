@@ -10,12 +10,14 @@
  * - savebar 只保留「放弃修改」按钮；保存依赖全局 Settings 顶部"保存"按钮
  */
 import { useMemo } from 'react'
-import type { LLMConnectionTestResult, LLMPreset } from '../api/client'
+import type { LLMPreset } from '../api/client'
 import LLMMessagesEditor from './LLMMessagesEditor'
 
 const MASK = '***'
 
 interface Props {
+  /** 卡片内顶部的 section 标题；与 SettingsSection 的 h2 视觉对齐。 */
+  title?: string
   currentPreset: LLMPreset
   serverCurrentPreset?: LLMPreset
   presets: LLMPreset[]
@@ -28,7 +30,6 @@ interface Props {
   onDeletePreset: () => void
   llmModelsBusy: boolean
   llmTestBusy: boolean
-  llmTestResult: LLMConnectionTestResult | null
   onRefreshModels: () => void
   onTestConnection: () => void
 }
@@ -49,6 +50,7 @@ const inputStyle: React.CSSProperties = {
 
 export default function LLMTaggerWorkspace(props: Props) {
   const {
+    title,
     currentPreset,
     serverCurrentPreset,
     presets,
@@ -61,7 +63,6 @@ export default function LLMTaggerWorkspace(props: Props) {
     onDeletePreset,
     llmModelsBusy,
     llmTestBusy,
-    llmTestResult,
     onRefreshModels,
     onTestConnection,
   } = props
@@ -86,11 +87,23 @@ export default function LLMTaggerWorkspace(props: Props) {
   }, [currentPreset, serverCurrentPreset])
 
   return (
-    // 整个 LLM 模块外层 — preset bar + workspace 5 个 section 包裹在同一个 card 里
+    // 整个 LLM 模块外层 — title + preset bar + workspace 5 个 section 包裹在同一个 card 里
     <div
       className="bg-surface border border-subtle"
       style={{ borderRadius: 'var(--r-lg)', overflow: 'hidden' }}
     >
+      {/* 标题与 SettingsSection 的 h2 对齐：text-sm font-semibold + p-4 间距 */}
+      {title && (
+        <h2
+          className="text-sm font-semibold text-fg-primary m-0"
+          style={{
+            padding: '14px 16px',
+            borderBottom: '1px solid var(--border-subtle)',
+          }}
+        >
+          {title}
+        </h2>
+      )}
       <PresetBar
         currentPreset={currentPreset}
         presets={presets}
@@ -120,13 +133,11 @@ export default function LLMTaggerWorkspace(props: Props) {
             onUpdate={onUpdatePreset}
             llmModelsBusy={llmModelsBusy}
             llmTestBusy={llmTestBusy}
-            llmTestResult={llmTestResult}
             onRefreshModels={onRefreshModels}
             onTestConnection={onTestConnection}
             bottomBorder
           />
-          <SamplingSection preset={currentPreset} onUpdate={onUpdatePreset} bottomBorder />
-          <ImageSection preset={currentPreset} onUpdate={onUpdatePreset} />
+          <AdvancedSection preset={currentPreset} onUpdate={onUpdatePreset} />
         </div>
 
         {/* RIGHT column：composer 撑满高度；messages 区域内部滚动 */}
@@ -258,7 +269,7 @@ function PresetBar({
 // ── Connection section (01) ────────────────────────────────────────────
 function ConnectionSection({
   preset, serverPreset, onUpdate,
-  llmModelsBusy, llmTestBusy, llmTestResult,
+  llmModelsBusy, llmTestBusy,
   onRefreshModels, onTestConnection,
   bottomBorder,
 }: {
@@ -267,7 +278,6 @@ function ConnectionSection({
   onUpdate: <K extends keyof LLMPreset>(field: K, value: LLMPreset[K]) => void
   llmModelsBusy: boolean
   llmTestBusy: boolean
-  llmTestResult: LLMConnectionTestResult | null
   onRefreshModels: () => void
   onTestConnection: () => void
   bottomBorder?: boolean
@@ -332,28 +342,82 @@ function ConnectionSection({
         </Field>
 
         <Field label="Endpoint 风格">
-          <Segmented
-            value={preset.endpoint}
-            onChange={(v) => onUpdate('endpoint', v)}
-            options={[
-              { value: 'chat_completions', label: 'CHAT COMPLETIONS' },
-              { value: 'responses', label: 'RESPONSES' },
-            ]}
-          />
+          {/* 测试连接按钮内联在 Segmented 末尾；结果走 toast 通知，不在 UI 常驻。 */}
+          <div className="flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <Segmented
+                value={preset.endpoint}
+                onChange={(v) => onUpdate('endpoint', v)}
+                options={[
+                  { value: 'chat_completions', label: 'CHAT COMPLETIONS' },
+                  { value: 'responses', label: 'RESPONSES' },
+                ]}
+              />
+            </div>
+            <ChipButton
+              onClick={onTestConnection}
+              disabled={llmTestBusy || !preset.base_url.trim() || !preset.model.trim()}
+            >
+              {llmTestBusy ? '测试中…' : '测试连接'}
+            </ChipButton>
+          </div>
         </Field>
-
-        <ConnBar
-          busy={llmTestBusy}
-          result={llmTestResult}
-          onTest={onTestConnection}
-          disabled={!preset.base_url.trim() || !preset.model.trim()}
-        />
       </SectionBody>
     </Section>
   )
 }
 
 // ── Sampling section (03) ───────────────────────────────────────────────
+// ── 高级参数：默认折叠的 details 面板，包住 03 采样 + 04 图片预处理 ──────
+// 折叠时显示 summary 行（temp / max / max-side / q）；展开后内部完整渲染两个 sub-section。
+function AdvancedSection({ preset, onUpdate }: {
+  preset: LLMPreset
+  onUpdate: <K extends keyof LLMPreset>(field: K, value: LLMPreset[K]) => void
+}) {
+  return (
+    <details className="group">
+      <summary
+        className="cursor-pointer list-none flex items-center justify-between gap-2"
+        style={{
+          padding: '11px 16px 10px',
+          // 用 SectionHeader 同款下边框；展开时由内层 SamplingSection 自带 border 继续分隔。
+          borderBottom: '1px solid var(--border-subtle)',
+        }}
+      >
+        <h3
+          className="m-0 flex items-center gap-2 whitespace-nowrap"
+          style={{ fontSize: 'var(--t-md)', fontWeight: 600, letterSpacing: '-0.005em' }}
+        >
+          <span
+            className="text-fg-tertiary text-xs transition-transform group-open:rotate-90 inline-block w-3"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          >
+            ▸
+          </span>
+          <Step>⚙</Step>
+          <span>高级参数</span>
+        </h3>
+        {/* summary 值：折叠时显示当前关键数值（紧凑形式，避免 360px 左栏装不下）。
+         * truncate + min-w-0 让超长时优雅省略而不是把标题挤竖。 */}
+        <span
+          className="group-open:hidden truncate min-w-0"
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--t-xs)',
+            color: 'var(--fg-tertiary)',
+          }}
+          title={`temperature ${preset.temperature} · max_tokens ${preset.max_tokens} · max_side ${preset.max_side}px · jpeg_quality ${preset.jpeg_quality}`}
+        >
+          {preset.temperature} · {preset.max_tokens}t · {preset.max_side}px · q{preset.jpeg_quality}
+        </span>
+      </summary>
+      {/* 展开内容：03 采样 + 04 图片预处理 原样堆叠 */}
+      <SamplingSection preset={preset} onUpdate={onUpdate} bottomBorder />
+      <ImageSection preset={preset} onUpdate={onUpdate} />
+    </details>
+  )
+}
+
 function SamplingSection({ preset, onUpdate, bottomBorder }: {
   preset: LLMPreset
   onUpdate: <K extends keyof LLMPreset>(field: K, value: LLMPreset[K]) => void
@@ -840,86 +904,6 @@ function SliderRow({ value, min, max, step, onChange, integer }: {
         }}
       />
     </div>
-  )
-}
-
-function ConnBar({ busy, result, onTest, disabled }: {
-  busy: boolean
-  result: LLMConnectionTestResult | null
-  onTest: () => void
-  disabled: boolean
-}) {
-  const bg = result?.ok ? 'var(--ok-soft)' : result ? 'var(--err-soft)' : 'var(--bg-sunken)'
-  const fg = result?.ok ? 'var(--ok)' : result ? 'var(--err)' : 'var(--fg-tertiary)'
-
-  return (
-    <>
-      <div
-        className="flex items-center justify-between"
-        style={{
-          marginTop: 4,
-          padding: '9px 12px',
-          background: bg,
-          borderRadius: 'var(--r-md)',
-          fontSize: 'var(--t-xs)',
-          color: fg,
-          fontFamily: 'var(--font-mono)',
-          gap: 10,
-        }}
-      >
-        <div className="flex items-center gap-2">
-          {result && (
-            <span style={{
-              width: 7, height: 7, borderRadius: '50%',
-              background: 'currentColor',
-              boxShadow: `0 0 0 3px ${result.ok ? 'rgba(95,199,140,0.12)' : 'rgba(232,118,92,0.12)'}`,
-            }} />
-          )}
-          <span>
-            {busy
-              ? '测试中…'
-              : result
-                ? `${result.ok ? '连接通过' : '连接失败'}${result.elapsed_ms > 0 ? ` · ${result.elapsed_ms} ms` : ''}${result.status_code !== null ? ` · HTTP ${result.status_code}` : ''}`
-                : '未测试 — 点击右侧按钮验证 base_url / key / model / endpoint'}
-          </span>
-        </div>
-        <a
-          onClick={(e) => { e.preventDefault(); if (!disabled && !busy) onTest() }}
-          style={{
-            textDecoration: 'underline',
-            opacity: disabled || busy ? 0.4 : 0.85,
-            cursor: disabled || busy ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {result ? '重新测试' : '测试连接'}
-        </a>
-      </div>
-      {result && (result.error || result.response_preview) && (
-        <div
-          style={{
-            marginTop: 6,
-            padding: '8px 10px',
-            background: 'var(--bg-sunken)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--r-sm)',
-            fontSize: 'var(--t-2xs)',
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--fg-tertiary)',
-            maxHeight: 96,
-            overflow: 'auto',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {result.endpoint_url && (
-            <div style={{ color: 'var(--fg-secondary)', marginBottom: 4 }}>
-              {result.endpoint_url}
-            </div>
-          )}
-          {result.error || result.response_preview}
-        </div>
-      )}
-    </>
   )
 }
 

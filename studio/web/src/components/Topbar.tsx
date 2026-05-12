@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useProjectCtx } from '../context/ProjectContext'
 import { api, type MonitorState, type Task } from '../api/client'
 import { useEventStream, type StudioEvent } from '../lib/useEventStream'
@@ -39,42 +39,47 @@ function formatElapsed(from: number): string {
 
 // ── breadcrumb ──────────────────────────────────────────────────────────────
 
-interface Crumb { label: string; mono?: boolean }
+interface Crumb { label: string; mono?: boolean; to?: string }
 
 function useBreadcrumbs(): Crumb[] {
   const { pathname } = useLocation()
   const ctx = useProjectCtx()
   const parts = pathname.split('/').filter(Boolean)
 
-  if (parts.length === 0) return [{ label: '项目' }]
+  if (parts.length === 0) return [{ label: '项目', to: '/' }]
 
   if (parts[0] === 'queue') {
-    if (parts.length === 1) return [{ label: '队列' }]
-    return [{ label: '队列' }, { label: `#${parts[1]}`, mono: true }]
+    if (parts.length === 1) return [{ label: '队列', to: '/queue' }]
+    return [{ label: '队列', to: '/queue' }, { label: `#${parts[1]}`, mono: true }]
   }
 
   if (parts[0] === 'tools') {
-    const labels: Record<string, string> = { presets: '预设', monitor: '监控', settings: '设置' }
+    const labels: Record<string, string> = { presets: '预设', monitor: '监控', settings: '设置', generate: '测试' }
     return [{ label: labels[parts[1]] ?? parts[1] }]
   }
 
   if (parts[0] === 'projects') {
-    const crumbs: Crumb[] = [{ label: '项目' }]
+    const crumbs: Crumb[] = [{ label: '项目', to: '/' }]
 
     const projectLabel = ctx?.project?.title ?? (parts[1] ? `#${parts[1]}` : null)
-    if (projectLabel) crumbs.push({ label: projectLabel })
+    const projectId = parts[1]
+    if (projectLabel) crumbs.push({ label: projectLabel, to: projectId ? `/projects/${projectId}` : undefined })
 
     const vIdx = parts.indexOf('v')
     if (vIdx !== -1 && parts[vIdx + 1]) {
       const versionLabel = ctx?.activeVersion?.label ?? `v${parts[vIdx + 1]}`
+      const vid = parts[vIdx + 1]
+      // version 节点没有独立页面，不可跳；step 才有路由。
       crumbs.push({ label: versionLabel, mono: true })
       const stepLabels: Record<string, string> = {
         curate: '筛选', tag: '打标', edit: '标签编辑', reg: '正则集', train: '训练',
       }
       const step = parts[vIdx + 2]
-      if (step && stepLabels[step]) crumbs.push({ label: stepLabels[step] })
+      if (step && stepLabels[step]) {
+        crumbs.push({ label: stepLabels[step], to: `/projects/${projectId}/v/${vid}/${step}` })
+      }
     } else if (parts[2] === 'download') {
-      crumbs.push({ label: '下载' })
+      crumbs.push({ label: '下载', to: `/projects/${projectId}/download` })
     }
     return crumbs
   }
@@ -210,19 +215,26 @@ export default function Topbar() {
         className="flex items-center gap-3 border-b border-subtle bg-canvas shrink-0 px-5"
         style={{ height: 'var(--topbar-h)' }}
       >
-        {/* breadcrumb */}
+        {/* breadcrumb — 非最后一节且有 to 字段时渲染成 Link 可点击。 */}
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          {crumbs.map((b, i) => (
-            <span key={i} className="flex items-center gap-2">
-              {i > 0 && <span className="text-fg-tertiary select-none">/</span>}
-              <span className={
-                `text-sm ${b.mono ? 'font-mono' : ''} ` +
-                (i === crumbs.length - 1 ? 'text-fg-primary font-semibold' : 'text-fg-secondary')
-              }>
-                {b.label}
+          {crumbs.map((b, i) => {
+            const isLast = i === crumbs.length - 1
+            const cls =
+              `text-sm ${b.mono ? 'font-mono' : ''} ` +
+              (isLast
+                ? 'text-fg-primary font-semibold'
+                : 'text-fg-secondary hover:text-fg-primary transition-colors')
+            return (
+              <span key={i} className="flex items-center gap-2">
+                {i > 0 && <span className="text-fg-tertiary select-none">/</span>}
+                {!isLast && b.to ? (
+                  <Link to={b.to} className={cls}>{b.label}</Link>
+                ) : (
+                  <span className={cls}>{b.label}</span>
+                )}
               </span>
-            </span>
-          ))}
+            )
+          })}
         </div>
 
         {/* 搜索按钮 */}

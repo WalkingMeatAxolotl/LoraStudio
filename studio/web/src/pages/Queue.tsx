@@ -179,7 +179,6 @@ export default function QueuePage() {
   return (
     <StepShell
       idx={-1}
-      eyebrow="全局 · queue"
       title="队列"
       subtitle="同一时刻仅运行一个任务 · 完成后自动启动下一个"
       actions={
