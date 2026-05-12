@@ -36,6 +36,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, model_validator
@@ -77,6 +78,7 @@ from .paths import (
     LOGS_DIR,
     OUTPUT_DIR,
     REPO_ROOT,
+    STUDIO_DATA,
     STUDIO_DB,
     USER_PRESETS_DIR,
     WEB_DIST,
@@ -184,6 +186,33 @@ async def _lifespan(app_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="AnimaStudio", version=__version__, lifespan=_lifespan)
 
 
+# ── gzip ────────────────────────────────────────────────────────────
+# 给 JSON / 文本响应自动 gzip 压缩。对 /api/state（10k 步训练 ~500KB → ~100KB）
+# 这种大数组高度可压；对小响应 (< 1000B) 跳过避免 framing overhead 反而变大。
+#
+# 显式排除两类路径：
+#   - /api/events：SSE 流。GZipMiddleware 会 buffer chunks 到 minimum_size
+#     才发，破坏 SSE 实时性 + 某些 EventSource 实现解析 gzip 流有兼容问题
+#   - /samples/*：图片字节（PNG/JPEG/WEBP 已经是压缩格式），gzip 再压净浪费
+#     CPU 且 size 略增
+_GZIP_SKIP_PREFIXES = ("/api/events", "/samples/")
+
+
+class _SelectiveGZipMiddleware(GZipMiddleware):
+    """GZipMiddleware 的子类，按 path 前缀绕过指定路由。"""
+
+    async def __call__(self, scope, receive, send):  # type: ignore[override]
+        if scope.get("type") == "http":
+            path = scope.get("path", "")
+            if any(path.startswith(p) for p in _GZIP_SKIP_PREFIXES):
+                await self.app(scope, receive, send)
+                return
+        await super().__call__(scope, receive, send)
+
+
+app.add_middleware(_SelectiveGZipMiddleware, minimum_size=1000)
+
+
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
@@ -214,7 +243,7 @@ def get_system_stats() -> dict[str, Any]:
 
 
 @app.get("/api/state")
-def get_state(task_id: Optional[int] = None, max_points: int = 1000) -> JSONResponse:
+def get_state(task_id: Optional[int] = None, max_points: int = 0) -> JSONResponse:
     """读取训练监控 state.json（PP6.1 改造 — per-task）。
 
     `task_id` 给了 → 查 tasks.monitor_state_path 对应文件；没有 / 文件缺失 →
@@ -223,9 +252,10 @@ def get_state(task_id: Optional[int] = None, max_points: int = 1000) -> JSONResp
     （done / failed / canceled）带 monitor_state_path 的 task，让监控页结束
     后还能看到上一次训练的曲线。都没有再返回 EMPTY_STATE。
 
-    `max_points` (PR #37) — losses / lr_history 超过此点数时均匀降采样。前端
-    chart 内部还会再 downsample 到 600，所以服务端给到 1000 已经够。这一步
-    把跨公网冷启动 payload 从 O(N) 降到 O(1)。
+    `max_points`（默认 0 = 不降采样）— PR #37 引入时默认 1000，PR (此处)
+    改成默认 0：cold start 是一次性 HTTP，10k+ 步训练用户经常碰到，宁可
+    payload 大一点也要给完整历史。想降采样的 caller 显式传 max_points=N
+    （留着给未来 thumbnail / 预览之类的轻量场景）。
 
     旧的全局 `monitor_data/state.json` 路径已退役（PP6.1）。
     """

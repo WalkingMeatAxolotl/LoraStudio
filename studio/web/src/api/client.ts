@@ -1581,8 +1581,15 @@ export const api = {
       body: JSON.stringify({ ordered_ids: orderedIds }),
     }),
   getLog: (id: number) => req<LogResponse>(`/api/logs/${id}`),
-  getMonitorState: (taskId: number, maxPoints = 1500) =>
-    req<MonitorState>(`/api/state?task_id=${taskId}&max_points=${maxPoints}&_=${Date.now()}`),
+  /** 默认拉全量历史（max_points=0，server 跳过降采样）；想要降采样预览
+   *  传具体数字。cold start 是一次性 HTTP，长训练（10k+ 步）下也只是 ~500KB
+   *  payload，不值得为视觉损耗换网络节省。 */
+  getMonitorState: (taskId: number, maxPoints?: number) =>
+    req<MonitorState>(
+      `/api/state?task_id=${taskId}` +
+      (maxPoints != null ? `&max_points=${maxPoints}` : '') +
+      `&_=${Date.now()}`,
+    ),
   sampleImageUrl: (filename: string, taskId: number, w?: number) =>
     `/samples/${filename}?task_id=${taskId}${w ? `&w=${w}` : ''}`,
 
