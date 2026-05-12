@@ -267,7 +267,7 @@ class TrainingConfig(BaseModel):
     )
     optimizer_type: Literal["adamw", "prodigy", "prodigy_plus_schedulefree"] = Field(
         "adamw",
-        description="优化器（prodigy 需 pip install prodigyopt；prodigy_plus_schedulefree 需 prodigy-plus-schedule-free，DiT LoRA 训练推荐，解决 Prodigy 风格突变 ep 问题）",
+        description="优化器（prodigy_plus_schedulefree 是 DiT LoRA 训练推荐，averaged weights 解决 Prodigy 的风格突变 ep 问题）",
         json_schema_extra=_meta("training"),
     )
     prodigy_d_coef: float = Field(
