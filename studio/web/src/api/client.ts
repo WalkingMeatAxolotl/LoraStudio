@@ -6,6 +6,23 @@ export interface HealthResponse {
   version: string
 }
 
+export interface GpuStats {
+  index: number
+  name: string
+  util_pct: number
+  vram_used_gb: number
+  vram_total_gb: number
+  temp_c: number | null
+}
+
+export interface SystemStats {
+  cpu_pct: number
+  ram_used_gb: number
+  ram_total_gb: number
+  /** null = NVML 不可用 (无 NVIDIA / 驱动缺失)；[] = NVML 可用但 0 卡。两种都不显示 GPU pill。 */
+  gpu: GpuStats[] | null
+}
+
 export interface SchemaProperty {
   type?: string | string[]
   default?: unknown
@@ -975,6 +992,7 @@ export async function downloadBlob(url: string, filename: string): Promise<void>
 
 export const api = {
   health: () => req<HealthResponse>('/api/health'),
+  systemStats: () => req<SystemStats>('/api/system/stats'),
   state: () => req<Record<string, unknown>>('/api/state'),
 
   schema: () => req<SchemaResponse>('/api/schema'),

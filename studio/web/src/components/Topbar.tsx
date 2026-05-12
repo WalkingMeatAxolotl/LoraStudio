@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useProjectCtx } from '../context/ProjectContext'
-import { api, type MonitorState, type Task } from '../api/client'
+import { api, type Task } from '../api/client'
 import { useEventStream, type StudioEvent } from '../lib/useEventStream'
+import { useMonitorProgress } from '../lib/useMonitorProgress'
 import CommandPalette from './CommandPalette'
+import SystemStats from './SystemStats'
 
 const SearchIcon = (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -99,7 +101,11 @@ export default function Topbar() {
   // 队列详细状态
   const [runningTask, setRunningTask] = useState<Task | null>(null)
   const [pendingCount, setPendingCount] = useState(0)
-  const [monitor, setMonitor] = useState<MonitorState | null>(null)
+
+  // monitor 状态走 useMonitorProgress hook (PR #37 增量协议)：自动管理
+  // /api/state 冷启动 + monitor_progress delta 合并 + 重连补拉，本组件只
+  // 关心结果的 step/total_steps/speed/start_time 几个 scalar 字段。
+  const { state: monitor } = useMonitorProgress(runningTask?.id ?? null)
 
   const refreshQueue = useCallback(async () => {
     try {
@@ -107,29 +113,16 @@ export default function Topbar() {
         api.listQueue('running'),
         api.listQueue('pending'),
       ])
-      const firstRunning = running.length > 0 ? running[0] : null
-      setRunningTask(firstRunning)
+      setRunningTask(running.length > 0 ? running[0] : null)
       setPendingCount(pending.length)
-
-      if (firstRunning) {
-        try {
-          const ms = await api.getMonitorState(firstRunning.id)
-          setMonitor(ms)
-        } catch {
-          setMonitor(null)
-        }
-      } else {
-        setMonitor(null)
-      }
     } catch {
       // 忽略
     }
   }, [])
 
-  // 队列状态走 SSE：mount 拉一次冷启动，之后只在 task_state_changed /
-  // monitor_state_updated 事件来时更新。SSE 重连后 onOpen 也补一次冷启动
-  // 防漏事件。不再轮询（之前 3-10s setInterval 在 1 个 running task 下会
-  // 攒成每秒 7+ 请求的死循环 bug，根因是 useEffect deps 用了 Task 对象）。
+  // 队列任务列表走 SSE task_state_changed；mount + 重连各拉一次冷启动。
+  // 之前 3-10s setInterval 在 1 个 running task 下会攒成每秒 7+ 请求的死
+  // 循环 bug，根因是 useEffect deps 用了 Task 对象。
   useEffect(() => {
     void refreshQueue()
   }, [refreshQueue])
@@ -138,14 +131,6 @@ export default function Topbar() {
     (evt: StudioEvent) => {
       if (evt.type === 'task_state_changed') {
         void refreshQueue()
-      } else if (
-        evt.type === 'monitor_state_updated' &&
-        runningTask &&
-        String(evt.task_id) === String(runningTask.id) &&
-        evt.state
-      ) {
-        // 后端 SSE 已经把 state 全量塞 payload 里，直接 setState，不再 fetch
-        setMonitor(evt.state as MonitorState)
       }
     },
     { onOpen: () => void refreshQueue() },
@@ -237,15 +222,18 @@ export default function Topbar() {
           })}
         </div>
 
-        {/* 搜索按钮 */}
+        {/* 实时系统监控 (CPU / RAM / GPU / VRAM)，每 ~2.5s 轮询；无 NVIDIA 时只显示 CPU/RAM。 */}
+        <SystemStats />
+
+        {/* 搜索按钮 — 缩成 icon-only，⌘K 仍可弹出完整 palette (含跨图标签搜索)。 */}
         <button
           ref={searchBtnRef}
           onClick={() => setPaletteOpen(true)}
-          className="flex items-center gap-2 text-fg-tertiary text-sm bg-surface border border-dim rounded-md cursor-pointer min-w-[200px] py-[5px] pl-3 pr-[10px] hover:border-bold transition-colors shrink-0"
+          title="搜索 (⌘K)"
+          aria-label="搜索"
+          className="flex items-center justify-center text-fg-tertiary bg-surface border border-dim rounded-md cursor-pointer w-8 h-8 hover:border-bold hover:text-fg-secondary transition-colors shrink-0"
         >
           {SearchIcon}
-          <span className="flex-1 text-left">跳转 / 搜索…</span>
-          <span className="kbd">⌘K</span>
         </button>
 
         {/* 运行中训练胶囊 */}
