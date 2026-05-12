@@ -37,10 +37,18 @@ def test_schema_is_complete() -> None:
     for name in (
         "transformer_path", "data_dir", "lora_type", "lora_rank", "epochs",
         "optimizer_type", "prodigy_d_coef", "prodigy_safeguard_warmup",
+        # ProdigyPlusScheduleFree 字段
+        "ppsf_d_coef", "ppsf_prodigy_steps", "ppsf_beta1", "ppsf_beta2",
+        "ppsf_split_groups", "ppsf_split_groups_mean", "ppsf_use_speed",
+        "ppsf_fused_back_pass", "ppsf_use_stableadamw",
         "sample_prompt", "sample_prompts", "no_monitor",
     ):
         assert name in fields, f"missing: {name}"
     assert "wandb_enabled" not in fields
+    # optimizer_type Literal 包含 PPSF
+    optimizer_annotation = fields["optimizer_type"].annotation
+    # Literal 的 __args__ 包含所有合法值
+    assert "prodigy_plus_schedulefree" in getattr(optimizer_annotation, "__args__", ())
 
 
 def test_schema_endpoint_returns_groups(client: TestClient) -> None:
@@ -61,11 +69,36 @@ def test_schema_carries_ui_metadata(client: TestClient) -> None:
     assert props["transformer_path"]["control"] == "path"
     assert "show_when" in props["prodigy_d_coef"]
     assert "wandb_enabled" not in props
+    # PPSF 字段都按 optimizer_type==prodigy_plus_schedulefree 显示
+    for ppsf_field in (
+        "ppsf_d_coef", "ppsf_prodigy_steps", "ppsf_beta1", "ppsf_beta2",
+        "ppsf_split_groups", "ppsf_use_speed", "ppsf_fused_back_pass",
+    ):
+        assert "show_when" in props[ppsf_field], f"{ppsf_field} missing show_when"
+        assert "prodigy_plus_schedulefree" in props[ppsf_field]["show_when"]
 
 
 def test_extra_fields_are_forbidden() -> None:
     with pytest.raises(Exception):
         TrainingConfig.model_validate({"learning_ratee": 1e-4})
+
+
+def test_ppsf_rejects_non_none_scheduler() -> None:
+    """PPSF + lr_scheduler != none 应该在 pydantic 层就被拒。"""
+    payload = TrainingConfig().model_dump(mode="python")
+    payload["optimizer_type"] = "prodigy_plus_schedulefree"
+    payload["lr_scheduler"] = "cosine"
+    with pytest.raises(Exception):  # pydantic ValidationError
+        TrainingConfig.model_validate(payload)
+
+
+def test_ppsf_accepts_none_scheduler() -> None:
+    """PPSF + lr_scheduler=none 是合法组合。"""
+    payload = TrainingConfig().model_dump(mode="python")
+    payload["optimizer_type"] = "prodigy_plus_schedulefree"
+    payload["lr_scheduler"] = "none"
+    cfg = TrainingConfig.model_validate(payload)
+    assert cfg.optimizer_type == "prodigy_plus_schedulefree"
 
 
 # ---------------------------------------------------------------------------

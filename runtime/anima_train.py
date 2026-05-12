@@ -2222,16 +2222,39 @@ def main():
     weight_decay = float(getattr(args, "weight_decay", 0.01) or 0.0)
     param_groups = injector.get_param_groups(weight_decay)
     optimizer_type = (getattr(args, "optimizer_type", "adamw") or "adamw").lower()
-    from utils.optimizer_utils import create_optimizer
-    optimizer_extra = {}
+    from utils.optimizer_utils import create_optimizer, optimizer_eval_mode
+    optimizer_extra: dict = {}
+    optimizer_overrides: dict = {}
     if optimizer_type == "prodigy":
         optimizer_extra["d_coef"] = float(getattr(args, "prodigy_d_coef", 1.0))
         optimizer_extra["safeguard_warmup"] = bool(getattr(args, "prodigy_safeguard_warmup", True))
+    elif optimizer_type == "prodigy_plus_schedulefree":
+        # Schedule-Free 不需要 scheduler，启动期强校验
+        lr_sched_cfg = (getattr(args, "lr_scheduler", "none") or "none").lower()
+        if lr_sched_cfg != "none":
+            raise SystemExit(
+                f"ProdigyPlusScheduleFree requires lr_scheduler=none "
+                f"(Schedule-Free is scheduler-free by construction); got "
+                f"lr_scheduler={lr_sched_cfg!r}. Set lr_scheduler=none or pick a "
+                f"different optimizer."
+            )
+        optimizer_extra["d_coef"] = float(getattr(args, "ppsf_d_coef", 1.0))
+        optimizer_extra["prodigy_steps"] = int(getattr(args, "ppsf_prodigy_steps", 0))
+        optimizer_extra["split_groups"] = bool(getattr(args, "ppsf_split_groups", True))
+        optimizer_extra["split_groups_mean"] = bool(getattr(args, "ppsf_split_groups_mean", False))
+        optimizer_extra["use_speed"] = bool(getattr(args, "ppsf_use_speed", False))
+        optimizer_extra["fused_back_pass"] = bool(getattr(args, "ppsf_fused_back_pass", False))
+        optimizer_extra["use_stableadamw"] = bool(getattr(args, "ppsf_use_stableadamw", True))
+        optimizer_overrides["betas"] = (
+            float(getattr(args, "ppsf_beta1", 0.9)),
+            float(getattr(args, "ppsf_beta2", 0.99)),
+        )
     optimizer = create_optimizer(
         optimizer_type=optimizer_type,
         params=param_groups,
         learning_rate=args.learning_rate,
         weight_decay=weight_decay,
+        **optimizer_overrides,
         **optimizer_extra,
     )
     if weight_decay > 0:
@@ -2366,10 +2389,13 @@ def main():
                 monitor_data = get_state()
             except Exception:
                 pass
-        save_training_state(state_path, injector, optimizer, current_epoch, global_step, loss_history, monitor_state=monitor_data, scheduler=scheduler)
-        # 同时保存 LoRA 权重
-        lora_path = output_dir / f"{args.output_name}_interrupted_step{global_step}.safetensors"
-        injector.save(lora_path)
+        # Schedule-Free 系优化器（PPSF）保存前切到 averaged weights — 否则存的是
+        # 训练用的 y 而不是真正应该被使用的 x。非 SF 优化器此 ctx 静默 no-op。
+        with optimizer_eval_mode(optimizer):
+            save_training_state(state_path, injector, optimizer, current_epoch, global_step, loss_history, monitor_state=monitor_data, scheduler=scheduler)
+            # 同时保存 LoRA 权重
+            lora_path = output_dir / f"{args.output_name}_interrupted_step{global_step}.safetensors"
+            injector.save(lora_path)
         wandb_monitor.finish()
         emit(f"已保存！下次使用 --resume-state \"{state_path}\" 继续训练")
         sys.exit(0)
@@ -2401,42 +2427,44 @@ def main():
     sampling_enabled = args.sample_steps > 0 or args.sample_every > 0
     if global_step == 0 and sampling_enabled:
         emit("采样中 (step 0, 基线)...")
-        model.eval()
-        s_w = int(getattr(args, "sample_width", 0) or 0) or int(args.resolution)
-        s_h = int(getattr(args, "sample_height", 0) or 0) or int(args.resolution)
-        s_cfg = float(getattr(args, "sample_cfg_scale", 4.0) or 4.0)
-        s_neg = str(getattr(args, "sample_negative_prompt", "") or "")
-        s_seed = int(getattr(args, "sample_seed", 0) or 0)
-        s_steps = int(getattr(args, "sample_infer_steps", 25) or 25)
-        s_sampler = str(getattr(args, "sample_sampler_name", "er_sde") or "er_sde")
-        s_sched = str(getattr(args, "sample_scheduler", "simple") or "simple")
-        for i, prompt in enumerate(sample_prompts[:3]):  # 最多测试 3 个
-            if s_seed:
-                torch.manual_seed(s_seed + i)
-            img = sample_image(
-                model, vae, qwen_model, qwen_tok, t5_tok,
-                prompt, height=s_h, width=s_w, steps=s_steps, cfg_scale=s_cfg,
-                negative_prompt=(s_neg or None),
-                sampler_name=s_sampler,
-                scheduler=s_sched,
-                device=device, dtype=dtype
-            )
-            sample_path = sample_dir / f"step_0_baseline_{i}.png"
-            img.save(sample_path)
-            emit(f"基线采样保存: step_0_baseline_{i}.png")
-            if wandb_monitor.log_samples:
-                wandb_monitor.log_image(
-                    "samples/baseline",
-                    sample_path,
-                    caption=f"step 0 baseline {i}: {prompt}",
-                    step=0,
+        # PPSF：sample 时切到 averaged weights，事后切回训练权重
+        with optimizer_eval_mode(optimizer):
+            model.eval()
+            s_w = int(getattr(args, "sample_width", 0) or 0) or int(args.resolution)
+            s_h = int(getattr(args, "sample_height", 0) or 0) or int(args.resolution)
+            s_cfg = float(getattr(args, "sample_cfg_scale", 4.0) or 4.0)
+            s_neg = str(getattr(args, "sample_negative_prompt", "") or "")
+            s_seed = int(getattr(args, "sample_seed", 0) or 0)
+            s_steps = int(getattr(args, "sample_infer_steps", 25) or 25)
+            s_sampler = str(getattr(args, "sample_sampler_name", "er_sde") or "er_sde")
+            s_sched = str(getattr(args, "sample_scheduler", "simple") or "simple")
+            for i, prompt in enumerate(sample_prompts[:3]):  # 最多测试 3 个
+                if s_seed:
+                    torch.manual_seed(s_seed + i)
+                img = sample_image(
+                    model, vae, qwen_model, qwen_tok, t5_tok,
+                    prompt, height=s_h, width=s_w, steps=s_steps, cfg_scale=s_cfg,
+                    negative_prompt=(s_neg or None),
+                    sampler_name=s_sampler,
+                    scheduler=s_sched,
+                    device=device, dtype=dtype
                 )
-            if monitor_server:
-                try:
-                    update_monitor(sample_path=sample_path)
-                except Exception:
-                    pass
-        model.train()
+                sample_path = sample_dir / f"step_0_baseline_{i}.png"
+                img.save(sample_path)
+                emit(f"基线采样保存: step_0_baseline_{i}.png")
+                if wandb_monitor.log_samples:
+                    wandb_monitor.log_image(
+                        "samples/baseline",
+                        sample_path,
+                        caption=f"step 0 baseline {i}: {prompt}",
+                        step=0,
+                    )
+                if monitor_server:
+                    try:
+                        update_monitor(sample_path=sample_path)
+                    except Exception:
+                        pass
+            model.train()
     elif global_step > 0 and sampling_enabled:
         emit(f"跳过启动基线采样（从 step {global_step} 恢复，非 step 0）")
 
@@ -2561,6 +2589,91 @@ def main():
                     prompt = get_next_sample_prompt()
                     prompt_short = prompt[:50] + "..." if len(prompt) > 50 else prompt
                     emit(f"采样中 (step {global_step}): {prompt_short}")
+                    # PPSF：sample 走 averaged weights
+                    with optimizer_eval_mode(optimizer):
+                        model.eval()
+                        s_w = int(getattr(args, "sample_width", 0) or 0) or int(args.resolution)
+                        s_h = int(getattr(args, "sample_height", 0) or 0) or int(args.resolution)
+                        s_cfg = float(getattr(args, "sample_cfg_scale", 4.0) or 4.0)
+                        s_neg = str(getattr(args, "sample_negative_prompt", "") or "")
+                        s_steps = int(getattr(args, "sample_infer_steps", 25) or 25)
+                        s_sampler = str(getattr(args, "sample_sampler_name", "er_sde") or "er_sde")
+                        s_sched = str(getattr(args, "sample_scheduler", "simple") or "simple")
+                        img = sample_image(
+                            model, vae, qwen_model, qwen_tok, t5_tok,
+                            prompt, height=s_h, width=s_w, steps=s_steps, cfg_scale=s_cfg,
+                            negative_prompt=(s_neg or None),
+                            sampler_name=s_sampler,
+                            scheduler=s_sched,
+                            device=device, dtype=dtype
+                        )
+                        sample_path = sample_dir / f"step_{global_step}.png"
+                        img.save(sample_path)
+                        emit(f"采样保存: step_{global_step}.png")
+                        if wandb_monitor.log_samples:
+                            wandb_monitor.log_image(
+                                "samples/step",
+                                sample_path,
+                                caption=f"step {global_step}: {prompt}",
+                                step=global_step,
+                            )
+                        if monitor_server:
+                            try:
+                                update_monitor(sample_path=sample_path)
+                            except Exception:
+                                pass
+                        model.train()
+
+                # 定期保存 LoRA 权重（按 step）
+                save_every_steps = getattr(args, "save_every_steps", 0)
+                if save_every_steps > 0 and global_step % save_every_steps == 0:
+                    lora_path = output_dir / f"{args.output_name}_step{global_step}.safetensors"
+                    # PPSF：保存 averaged weights 的 LoRA
+                    with optimizer_eval_mode(optimizer):
+                        injector.save(lora_path)
+                    emit(f"Saved LoRA: {lora_path}")
+
+                # 定期保存训练状态（断点续训）
+                save_state_every = getattr(args, "save_state_every", 0)
+                if save_state_every > 0 and global_step % save_state_every == 0:
+                    state_path = output_dir / f"training_state_step{global_step}.pt"
+                    # 获取监控面板数据用于恢复 loss 曲线
+                    monitor_data = None
+                    if monitor_server:
+                        try:
+                            from train_monitor import get_state
+                            monitor_data = get_state()
+                        except Exception:
+                            pass
+                    # PPSF：state + LoRA 都走 averaged weights
+                    with optimizer_eval_mode(optimizer):
+                        save_training_state(state_path, injector, optimizer, epoch, global_step, loss_history, monitor_state=monitor_data, scheduler=scheduler)
+                        # 同时保存 LoRA 权重
+                        lora_path = output_dir / f"{args.output_name}_step{global_step}.safetensors"
+                        injector.save(lora_path)
+
+                # 检查 max_steps
+                if args.max_steps and global_step >= args.max_steps:
+                    break
+
+        # epoch 结束后的操作
+        current_epoch = epoch + 1
+        if not args.max_steps or global_step < args.max_steps:
+            # 保存 checkpoint
+            if args.save_every > 0 and current_epoch % args.save_every == 0:
+                save_path = output_dir / f"{args.output_name}_epoch{current_epoch}.safetensors"
+                # PPSF：保存 averaged weights 的 LoRA
+                with optimizer_eval_mode(optimizer):
+                    injector.save(save_path)
+                emit(f"Saved LoRA: {save_path}")
+
+            # 采样（轮换提示词）
+            if args.sample_every > 0 and current_epoch % args.sample_every == 0:
+                prompt = get_next_sample_prompt()
+                prompt_short = prompt[:50] + "..." if len(prompt) > 50 else prompt
+                emit(f"采样中 (epoch {current_epoch}): {prompt_short}")
+                # PPSF：sample 走 averaged weights
+                with optimizer_eval_mode(optimizer):
                     model.eval()
                     s_w = int(getattr(args, "sample_width", 0) or 0) or int(args.resolution)
                     s_h = int(getattr(args, "sample_height", 0) or 0) or int(args.resolution)
@@ -2577,99 +2690,24 @@ def main():
                         scheduler=s_sched,
                         device=device, dtype=dtype
                     )
-                    sample_path = sample_dir / f"step_{global_step}.png"
+                    sample_path = sample_dir / f"epoch_{current_epoch}.png"
                     img.save(sample_path)
-                    emit(f"采样保存: step_{global_step}.png")
+                    emit(f"采样保存: epoch_{current_epoch}.png")
                     if wandb_monitor.log_samples:
                         wandb_monitor.log_image(
-                            "samples/step",
+                            "samples/epoch",
                             sample_path,
-                            caption=f"step {global_step}: {prompt}",
+                            caption=f"epoch {current_epoch}: {prompt}",
                             step=global_step,
                         )
+                    model.train()
+
+                    # 更新监控面板
                     if monitor_server:
                         try:
                             update_monitor(sample_path=sample_path)
                         except Exception:
                             pass
-                    model.train()
-
-                # 定期保存 LoRA 权重（按 step）
-                save_every_steps = getattr(args, "save_every_steps", 0)
-                if save_every_steps > 0 and global_step % save_every_steps == 0:
-                    lora_path = output_dir / f"{args.output_name}_step{global_step}.safetensors"
-                    injector.save(lora_path)
-                    emit(f"Saved LoRA: {lora_path}")
-
-                # 定期保存训练状态（断点续训）
-                save_state_every = getattr(args, "save_state_every", 0)
-                if save_state_every > 0 and global_step % save_state_every == 0:
-                    state_path = output_dir / f"training_state_step{global_step}.pt"
-                    # 获取监控面板数据用于恢复 loss 曲线
-                    monitor_data = None
-                    if monitor_server:
-                        try:
-                            from train_monitor import get_state
-                            monitor_data = get_state()
-                        except Exception:
-                            pass
-                    save_training_state(state_path, injector, optimizer, epoch, global_step, loss_history, monitor_state=monitor_data, scheduler=scheduler)
-                    # 同时保存 LoRA 权重
-                    lora_path = output_dir / f"{args.output_name}_step{global_step}.safetensors"
-                    injector.save(lora_path)
-
-                # 检查 max_steps
-                if args.max_steps and global_step >= args.max_steps:
-                    break
-
-        # epoch 结束后的操作
-        current_epoch = epoch + 1
-        if not args.max_steps or global_step < args.max_steps:
-            # 保存 checkpoint
-            if args.save_every > 0 and current_epoch % args.save_every == 0:
-                save_path = output_dir / f"{args.output_name}_epoch{current_epoch}.safetensors"
-                injector.save(save_path)
-                emit(f"Saved LoRA: {save_path}")
-
-            # 采样（轮换提示词）
-            if args.sample_every > 0 and current_epoch % args.sample_every == 0:
-                prompt = get_next_sample_prompt()
-                prompt_short = prompt[:50] + "..." if len(prompt) > 50 else prompt
-                emit(f"采样中 (epoch {current_epoch}): {prompt_short}")
-                model.eval()
-                s_w = int(getattr(args, "sample_width", 0) or 0) or int(args.resolution)
-                s_h = int(getattr(args, "sample_height", 0) or 0) or int(args.resolution)
-                s_cfg = float(getattr(args, "sample_cfg_scale", 4.0) or 4.0)
-                s_neg = str(getattr(args, "sample_negative_prompt", "") or "")
-                s_steps = int(getattr(args, "sample_infer_steps", 25) or 25)
-                s_sampler = str(getattr(args, "sample_sampler_name", "er_sde") or "er_sde")
-                s_sched = str(getattr(args, "sample_scheduler", "simple") or "simple")
-                img = sample_image(
-                    model, vae, qwen_model, qwen_tok, t5_tok,
-                    prompt, height=s_h, width=s_w, steps=s_steps, cfg_scale=s_cfg,
-                    negative_prompt=(s_neg or None),
-                    sampler_name=s_sampler,
-                    scheduler=s_sched,
-                    device=device, dtype=dtype
-                )
-                sample_path = sample_dir / f"epoch_{current_epoch}.png"
-                img.save(sample_path)
-                emit(f"采样保存: epoch_{current_epoch}.png")
-                if wandb_monitor.log_samples:
-                    wandb_monitor.log_image(
-                        "samples/epoch",
-                        sample_path,
-                        caption=f"epoch {current_epoch}: {prompt}",
-                        step=global_step,
-                    )
-                model.train()
-                
-                # 更新监控面板
-                if monitor_server:
-                    try:
-                        update_monitor(sample_path=sample_path)
-                    except Exception:
-                        pass
 
         # 检查 max_steps
         if args.max_steps and global_step >= args.max_steps:
@@ -2677,7 +2715,9 @@ def main():
 
     # 最终保存
     final_path = output_dir / f"{args.output_name}.safetensors"
-    injector.save(final_path)
+    # PPSF：最终输出走 averaged weights
+    with optimizer_eval_mode(optimizer):
+        injector.save(final_path)
 
     # 清理进度显示
     if live:
