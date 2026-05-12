@@ -1,4 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 interface Props {
   tags: string[]
@@ -22,6 +37,11 @@ export default function TagEditor({
   const [mode, setMode] = useState<Mode>(natural ? 'text' : 'chip')
   const [textBuf, setTextBuf] = useState(() => tagsJoined)
 
+  // PointerSensor + 6px 启动距离：拖拽手感不会跟「点 × 删除」/ 误触冲突。
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  )
+
   // Reset draft when image switches
   useEffect(() => { setDraft('') }, [tags])
 
@@ -38,12 +58,22 @@ export default function TagEditor({
     const t = raw.trim().replace(/^[,，]+|[,，]+$/g, '')
     if (!t) return
     if (tags.includes(t)) { setDraft(''); return }
-    onChange([t, ...tags])
+    // 加到末尾：跟 chip 拖拽重排的心智一致（新东西落在底部，用户拖到想要的位置）
+    onChange([...tags, t])
     setDraft('')
   }
 
   const removeTag = (t: string) => {
     onChange(tags.filter((x) => x !== t))
+  }
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = tags.indexOf(String(active.id))
+    const newIndex = tags.indexOf(String(over.id))
+    if (oldIndex < 0 || newIndex < 0) return
+    onChange(arrayMove(tags, oldIndex, newIndex))
   }
 
   const commitText = () => {
@@ -103,26 +133,22 @@ export default function TagEditor({
       {/* content area — both modes use flex:1 so no height jitter */}
       {mode === 'chip' ? (
         <>
-          <div className="flex flex-wrap gap-1 overflow-y-auto flex-1 min-h-0 content-start py-1">
-            {tags.length === 0 && (
-              <span className="text-xs text-fg-tertiary">还没有标签</span>
-            )}
-            {tags.map((t) => (
-              <span
-                key={t}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-overlay border border-subtle text-sm font-mono text-fg-primary"
-              >
-                {t}
-                <button
-                  onClick={() => removeTag(t)}
-                  aria-label={`删除 ${t}`}
-                  className="bg-transparent border-none text-fg-tertiary hover:text-err cursor-pointer p-0 text-sm leading-none"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={tags} strategy={rectSortingStrategy}>
+              <div className="flex flex-wrap gap-1 overflow-y-auto flex-1 min-h-0 content-start py-1">
+                {tags.length === 0 && (
+                  <span className="text-xs text-fg-tertiary">还没有标签</span>
+                )}
+                {tags.map((t) => (
+                  <SortableChip key={t} id={t} onRemove={() => removeTag(t)} />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
           <div className="flex items-center gap-1.5 shrink-0">
             <input
               value={draft}
@@ -190,5 +216,43 @@ function ModeBtn({ active, onClick, children }: {
     >
       {children}
     </button>
+  )
+}
+
+/** 单个可拖拽 chip。dnd-kit 用 useSortable 给我们 setNodeRef / 拖拽 listeners /
+ * transform / transition;CSS.Transform.toString 把 dnd-kit 算出的 (x,y,scale)
+ * 翻译成 CSS transform 字符串。
+ *
+ * × 删除按钮要 stopPropagation onPointerDown —— 否则 6px 移动阈值过后 × 也成了
+ * 拖拽起点,点 × 反而触发拖拽。
+ */
+function SortableChip({ id, onRemove }: { id: string; onRemove: () => void }) {
+  const {
+    attributes, listeners, setNodeRef, transform, transition, isDragging,
+  } = useSortable({ id })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 1 : undefined,
+  }
+  return (
+    <span
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-overlay border border-subtle text-sm font-mono text-fg-primary cursor-grab active:cursor-grabbing select-none touch-none"
+    >
+      {id}
+      <button
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={onRemove}
+        aria-label={`删除 ${id}`}
+        className="bg-transparent border-none text-fg-tertiary hover:text-err cursor-pointer p-0 text-sm leading-none"
+      >
+        ×
+      </button>
+    </span>
   )
 }
