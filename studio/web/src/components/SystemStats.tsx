@@ -20,13 +20,18 @@ interface PillProps {
 }
 
 /** 进度条胶囊 — 整个 pill 背景按占用百分比填色 (>=70% warn, >=90% err)，
- *  高度与 topbar 上其他元素 (搜索 icon 32px) 一致。 */
+ *  高度与 topbar 上其他元素 (搜索 icon 32px) 一致。
+ *
+ *  `min-w-[96px]` + `justify-between` 让 4 个 pill 视觉等宽：CPU/GPU 只占 3-4
+ *  字符（"CPU 13%"），MEM/VRAM 占 11 字符（"MEM 35.6/63G"），auto-width 下
+ *  宽度差近 1 倍。固定下界 96px (够 "VRAM 80.0/128G" 之类最长情况)，label 左
+ *  value 右两端对齐，bg 填充自然居于中间。 */
 function Pill({ label, value, pct, tooltip }: PillProps) {
   const tone = toneClasses(pct)
   const clamped = Math.min(100, Math.max(0, pct))
   return (
     <div
-      className="relative flex items-center gap-1.5 h-8 px-2 rounded-md border border-dim bg-surface overflow-hidden shrink-0"
+      className="relative flex items-center justify-between gap-1.5 h-8 min-w-[96px] px-2 rounded-md border border-dim bg-surface overflow-hidden shrink-0"
       title={tooltip}
     >
       <div
