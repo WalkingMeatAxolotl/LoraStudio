@@ -225,17 +225,6 @@ export default function Topbar() {
         {/* 实时系统监控 (CPU / RAM / GPU / VRAM)，每 ~2.5s 轮询；无 NVIDIA 时只显示 CPU/RAM。 */}
         <SystemStats />
 
-        {/* 搜索按钮 — 缩成 icon-only，⌘K 仍可弹出完整 palette (含跨图标签搜索)。 */}
-        <button
-          ref={searchBtnRef}
-          onClick={() => setPaletteOpen(true)}
-          title="搜索 (⌘K)"
-          aria-label="搜索"
-          className="flex items-center justify-center text-fg-tertiary bg-surface border border-dim rounded-md cursor-pointer w-8 h-8 hover:border-bold hover:text-fg-secondary transition-colors shrink-0"
-        >
-          {SearchIcon}
-        </button>
-
         {/* 运行中训练胶囊 */}
         {runningTask && (
           <button
@@ -260,6 +249,18 @@ export default function Topbar() {
             <span>{pendingCount} 排队中</span>
           </button>
         )}
+
+        {/* 搜索按钮 — icon-only,⌘K 仍可弹完整 palette。放最右,避免被
+            训练胶囊 / 队列胶囊推得忽前忽后跳动。 */}
+        <button
+          ref={searchBtnRef}
+          onClick={() => setPaletteOpen(true)}
+          title="搜索 (⌘K)"
+          aria-label="搜索"
+          className="flex items-center justify-center text-fg-tertiary bg-surface border border-dim rounded-md cursor-pointer w-8 h-8 hover:border-bold hover:text-fg-secondary transition-colors shrink-0"
+        >
+          {SearchIcon}
+        </button>
       </header>
 
       <CommandPalette
