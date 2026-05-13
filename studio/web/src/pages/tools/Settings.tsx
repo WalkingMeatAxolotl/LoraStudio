@@ -924,10 +924,25 @@ export default function SettingsPage() {
 
 // ── Section / Field ────────────────────────────────────────────────────────
 
-function SettingsSection({ id, title, children }: { id?: string; title: string; children: React.ReactNode }) {
+function SettingsSection({
+  id, title, headerExtras, children,
+}: {
+  id?: string
+  title: string
+  headerExtras?: React.ReactNode  // 可选 slot：渲染在 h2 右侧（紧贴），给 ⓘ tooltip 之类用
+  children: React.ReactNode
+}) {
+  const titleEl = <h2 className="text-sm font-semibold text-fg-primary">{title}</h2>
   return (
     <section id={id} className="rounded-md border border-subtle bg-surface p-4 flex flex-col gap-3 scroll-mt-24">
-      <h2 className="text-sm font-semibold text-fg-primary mb-0.5">{title}</h2>
+      {headerExtras ? (
+        <div className="flex items-center gap-2 mb-0.5">
+          {titleEl}
+          {headerExtras}
+        </div>
+      ) : (
+        <div className="mb-0.5">{titleEl}</div>
+      )}
       {children}
     </section>
   )
@@ -2633,10 +2648,45 @@ function VersionSection() {
   }, [displayedTag])
 
   return (
-    <SettingsSection id="version" title="版本">
-      <p className="text-xs text-fg-tertiary mb-3 leading-relaxed">
-        master = 稳定通道（自动每 24h 检查）；dev = 开发版，需要时手动启用。
-      </p>
+    <SettingsSection
+      id="version"
+      title="版本"
+      headerExtras={
+        <InfoButton>
+          <ul>
+            <li>自动检查每 24h，仅检查 master 通道；dev 必须主动触发，不进 Topbar 红点</li>
+            <li>
+              更新 / 切换 = <code>git reset --hard &lt;target&gt;</code> +
+              必要时 <code>pip install</code> / <code>npm install</code>
+            </li>
+            <li>有运行中任务 / 本地工作树脏 → 操作会被 pre-flight 拒绝</li>
+            <li>master 显示 release tag；dev 显示 commit 时间线，可点任意 commit 切换</li>
+          </ul>
+        </InfoButton>
+      }
+    >
+      {/* dev toggle 行：搬到 title 下面（独立一行），不再下方"附庸" */}
+      <div className={`vs-dev-toggle-row${devVisible ? ' open' : ''}${onDev ? ' locked' : ''}`}>
+        <div className="vs-lhs">
+          <div
+            className={`vs-sw${devVisible ? ' on' : ''}${onDev ? ' locked' : ''}`}
+            onClick={() => { if (!onDev) void handleToggleDevChannel(!devVisible) }}
+            role="switch"
+            aria-checked={devVisible}
+            aria-disabled={onDev}
+          />
+          <div>
+            <div className="vs-t" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span>查看 dev 通道（开发版）</span>
+              {onDev && (
+                <span className="vs-lock-pill">
+                  <VersionIcon name="lock" />当前在 dev · 不可关闭
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="vs-sec-card">
         <div className={`vs-channels${devVisible ? ' both' : ''}`}>
@@ -2689,54 +2739,6 @@ function VersionSection() {
         </div>
       </div>
 
-      {/* dev toggle 行 —— 下移到卡片之后，不是建议操作。当前在 dev 时
-          强制为开 + 锁定（切回稳定走 master 卡片"切到 master"按钮）。 */}
-      <div className={`vs-dev-toggle-row${devVisible ? ' open' : ''}${onDev ? ' locked' : ''}`}>
-        <div className="vs-lhs">
-          <div
-            className={`vs-sw${devVisible ? ' on' : ''}${onDev ? ' locked' : ''}`}
-            onClick={() => { if (!onDev) void handleToggleDevChannel(!devVisible) }}
-            role="switch"
-            aria-checked={devVisible}
-            aria-disabled={onDev}
-          />
-          <div>
-            <div className="vs-t" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span>查看 dev 通道（开发版）</span>
-              {onDev && (
-                <span className="vs-lock-pill">
-                  <VersionIcon name="lock" />当前在 dev · 不可关闭
-                </span>
-              )}
-            </div>
-            <div className="vs-d">
-              {onDev
-                ? '你正运行 dev 通道；切回稳定请用上方 master 卡片的"切到 master"。'
-                : '只在主动跟踪未发布功能时打开。Topbar 红点 + 自动检查永远只看 master。'}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="vs-meta-foot">
-        <span>autocheck · 每 24h · 仅 master</span>
-        <span className="vs-dot" />
-        <span>
-          更新 / 切换 = <span style={{ color: 'var(--fg-secondary)' }}>git reset --hard &lt;target&gt;</span>
-          {' '}+ 必要时 pip / npm install
-        </span>
-        <span className="vs-dot" />
-        <span className="vs-warn-line">有运行任务 · 工作树脏 → 操作会被拒绝</span>
-        {!!status?.status && (
-          <>
-            <span className="vs-dot" />
-            <button className="vs-lnk" onClick={() => void handleViewLog()}>
-              查看上次日志 ↗
-            </button>
-          </>
-        )}
-      </div>
-
       {logModal.open && (
         <UpdateLogModal
           loading={logModal.loading}
@@ -2768,6 +2770,44 @@ const VERSION_ICON_PATHS: Record<string, React.ReactNode> = {
   rollback: <><path d="M3 8h7a3 3 0 1 1 0 6h-1" /><path d="M5.5 5.5L3 8l2.5 2.5" /></>,
   note:     <><path d="M4 3.5h6l2 2v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z" /><path d="M5.5 7h5M5.5 9.5h5M5.5 12h3" /></>,
   lock:     <><rect x="3.5" y="7" width="9" height="6.5" rx="1" /><path d="M5.5 7v-2a2.5 2.5 0 0 1 5 0v2" /></>,
+}
+
+// click-toggle 弹层。原 meta-foot 一整行（autocheck 周期 / git reset 实现细节 /
+// 拒绝条件）对普通用户都是 noise，搬到这里隐式可见；外部 click 自动关闭。
+function InfoButton({ children, label = 'ⓘ' }: { children: React.ReactNode; label?: string }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  return (
+    <span ref={wrapRef} className="vs-info-wrap">
+      <button
+        type="button"
+        className="vs-info-trigger"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label="更多信息"
+      >
+        {label}
+      </button>
+      {open && (
+        <div className="vs-info-panel" role="dialog">
+          {children}
+        </div>
+      )}
+    </span>
+  )
 }
 
 function VersionIcon({ name }: { name: keyof typeof VERSION_ICON_PATHS | string }) {
@@ -3106,16 +3146,16 @@ function MasterCard(p: MasterCardProps) {
             ) : currentTag}
           </div>
           <div className="vs-ver-meta">
-            {releasedAt && <>
-              <span>发布于 <b>{releasedAt}</b></span>
-              <span className="vs-sep">·</span>
-            </>}
-            {p.hasUpdate
-              ? <span>↑ {p.check?.commits_ahead ?? 0} commits</span>
-              : <span>{p.version?.commit_short ?? ''}</span>}
+            {releasedAt && <span>发布于 <b>{releasedAt}</b></span>}
+            {p.hasUpdate && (
+              <>
+                {releasedAt && <span className="vs-sep">·</span>}
+                <span>↑ {p.check?.commits_ahead ?? 0} commits</span>
+              </>
+            )}
             {p.version?.is_dirty && (
               <>
-                <span className="vs-sep">·</span>
+                {(releasedAt || p.hasUpdate) && <span className="vs-sep">·</span>}
                 <span style={{ color: 'var(--warn)' }}>本地有改动</span>
               </>
             )}
@@ -3137,13 +3177,9 @@ function MasterCard(p: MasterCardProps) {
 
       <div className="vs-chan-foot">
         <div className="vs-info">
-          {p.check?.error ? (
-            <><span style={{ color: 'var(--err)' }}>●</span> {p.check.error}</>
-          ) : p.hasUpdate ? (
-            <><span className="vs-attn">●</span> {p.check?.commits_ahead ?? 0} commits behind · 上次检查 {checkedAt}</>
-          ) : (
-            <><span className="vs-ok">●</span> up to date · 上次检查 {checkedAt}</>
-          )}
+          {p.check?.error
+            ? <span style={{ color: 'var(--err)' }}>{p.check.error}</span>
+            : <span>上次检查 {checkedAt}</span>}
         </div>
         <div className="vs-actions">
           <button onClick={p.onCheck} disabled={p.checking || p.busy} className="btn btn-sm">
@@ -3384,7 +3420,9 @@ function DevCard(p: DevCardProps) {
       ) : (
         <div className="vs-chan-foot">
           <div className="vs-info">
-            <span style={{ color: 'var(--warn)' }}>●</span> 开发版 · 未发布
+            {p.check?.checked_at
+              ? <span>上次抓取 {new Date(p.check.checked_at * 1000).toLocaleString()}</span>
+              : <span style={{ color: 'var(--fg-tertiary)' }}>未抓取</span>}
           </div>
           <div className="vs-actions">
             <button onClick={p.onCheck} disabled={p.checking || p.busy} className="btn btn-sm">

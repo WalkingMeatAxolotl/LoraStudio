@@ -296,13 +296,13 @@
   font-size: 10.5px;
 }
 
-/* ==================== dev toggle 行（卡片下方，demoted） ==================== */
+/* ==================== dev toggle 行（title 下方独立一行） ==================== */
+/* 之前下方双卡之后用 dashed border 表达 "opt-in"；现在搬到 title 下方
+   主流位置，更紧凑、无边框，背景由 .open / .locked 状态决定 */
 .vs-dev-toggle-row {
-  margin-top: 14px;
-  padding: 11px 14px;
+  padding: 8px 12px;
   background: transparent;
-  border: 1px dashed var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -311,12 +311,9 @@
 }
 .vs-dev-toggle-row.open {
   background: var(--bg-sunken);
-  border-style: solid;
 }
 .vs-dev-toggle-row.locked {
   background: var(--bg-sunken);
-  border-style: solid;
-  border-color: var(--border-subtle);
 }
 .vs-dev-toggle-row .vs-lhs {
   display: flex;
@@ -381,6 +378,71 @@
 .vs-sw.locked {
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+/* ==================== InfoButton（title 旁 ⓘ click 开关 tooltip） ==================== */
+/* 之前的 meta-foot 一整行（autocheck 周期 / git reset 实现细节 / 拒绝
+   条件 / 上次日志链接）对普通用户都是 noise；移进此 click-toggle 弹层 */
+.vs-info-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.vs-info-trigger {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--fg-tertiary);
+  font-size: 14px;
+  padding: 2px 4px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.vs-info-trigger:hover { color: var(--fg-primary); background: var(--bg-overlay); }
+.vs-info-trigger[aria-expanded="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.vs-info-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  box-shadow: var(--sh-md);
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--fg-secondary);
+  line-height: 1.6;
+}
+.vs-info-panel ul {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vs-info-panel li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.vs-info-panel li::before {
+  content: '·';
+  color: var(--fg-disabled);
+  flex-shrink: 0;
+  margin-top: -1px;
+}
+.vs-info-panel code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--bg-sunken);
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 
 /* ==================== meta foot 行 ==================== */
