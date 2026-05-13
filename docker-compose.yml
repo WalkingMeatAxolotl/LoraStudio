@@ -1,0 +1,22 @@
+services:
+  studio:
+    # 从 GitHub Container Registry 拉取预构建镜像。
+    # 本地构建时注释掉 image 行，取消注释 build 块：
+    #   build:
+    #     context: .
+    #     dockerfile: .ide/Dockerfile
+    image: ghcr.io/${GITHUB_REPOSITORY:-animalorastudio/animalorastudio}:latest
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - .:/workspace
+    ports:
+      - "8765:8765"
+    working_dir: /workspace
+    command: bash -c "bash .ide/setup.sh && bash studio.sh"
+    restart: unless-stopped
