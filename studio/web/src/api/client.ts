@@ -1671,6 +1671,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ target }),
     }),
+
+  // 回滚到 .last_version 记录的上一版本（PR-C）。
+  // 422 = running task / dirty；409 = 没有 .last_version 或 commit 已 GC。
+  rollbackSystem: () =>
+    req<{ ok: boolean; message: string; target: string }>('/api/system/rollback', {
+      method: 'POST',
+    }),
+
+  // 最近一次 update 的结构化结果（PR-C）。status: null = 从未 update 过。
+  getSystemUpdateStatus: () => req<SystemUpdateStatus>('/api/system/update_status'),
+
+  // 完整 .update_log 文本（PR-C，失败时 UI 弹 modal 用）。
+  getSystemUpdateLog: () => req<{ content: string }>('/api/system/update_log'),
 }
 
 export interface SystemVersion {
@@ -1692,6 +1705,25 @@ export interface SystemUpdateCheck {
   latest_tag: string | null
   checked_at: number
   error: string | null
+}
+
+/** PR-C — 最近一次 update 的结构化结果。
+ *  - status=null：从未 update 过，UI 不展示 banner
+ *  - status='ok'：可选展示"已更新到 X"
+ *  - status='aborted' / 'failed' / 'partial'：红色 banner + reason + "查看日志"
+ *  - rollback_target：.last_version 内容（commit sha），UI 用它判断是否显示回滚按钮
+ */
+export interface SystemUpdateStatus {
+  status: 'ok' | 'aborted' | 'failed' | 'partial' | null
+  reason?: string
+  target?: string
+  from_commit?: string
+  to_commit?: string
+  started_at?: number
+  finished_at?: number
+  deps_changed?: boolean
+  log_excerpt?: string
+  rollback_target?: string | null
 }
 
 export interface BrowseEntry {

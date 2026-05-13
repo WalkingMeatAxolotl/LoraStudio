@@ -11,6 +11,7 @@ import {
   type Secrets,
   type SecretsPatch,
   type SystemUpdateCheck,
+  type SystemUpdateStatus,
   type SystemVersion,
   type TorchCuTag,
   type TorchStatus,
@@ -2350,20 +2351,25 @@ async function pollHealthThenReload(
 // ── 版本 Section ────────────────────────────────────────────────────────
 //
 // 加载时自动 fetch /api/system/version + /api/system/update_check（master 通道，
-// 走 cache）。"检查更新"按钮 force=true 强制重 fetch。"立即更新"按钮仅在
-// has_update=true 时显示，点击走 POST /api/system/update 流程（precondition
-// 422 时拿 e.detail 区分提示）。
+// 走 cache）+ /api/system/update_status（PR-C：上次 update 结果）。
+// 操作按钮：检查更新 / 立即更新 / 切换到上一版本（rollback，仅在 .last_version
+// 存在时显示）/ 查看上次日志（仅在失败时主动暴露）。
 function VersionSection() {
   const { toast } = useToast()
   const dialog = useDialog()
   const [version, setVersion] = useState<SystemVersion | null>(null)
   const [check, setCheck] = useState<SystemUpdateCheck | null>(null)
+  const [status, setStatus] = useState<SystemUpdateStatus | null>(null)
   const [checking, setChecking] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [logModal, setLogModal] = useState<{ open: boolean; content: string; loading: boolean }>(
+    { open: false, content: '', loading: false },
+  )
 
   useEffect(() => {
     void api.getSystemVersion().then(setVersion).catch(() => { /* silent */ })
     void api.checkSystemUpdate('master').then(setCheck).catch(() => { /* silent */ })
+    void api.getSystemUpdateStatus().then(setStatus).catch(() => { /* silent */ })
   }, [])
 
   const handleCheck = async () => {
@@ -2385,6 +2391,22 @@ function VersionSection() {
     }
   }
 
+  // 公用的 422 / 其它错误分流（update 和 rollback 都用）
+  const _formatActionError = (e: unknown, action: string): string => {
+    const err = e as Error & { status?: number; detail?: { error?: string; tasks?: { name: string; id?: number }[] } }
+    if (err.status === 422 && err.detail?.error === 'running_tasks_present') {
+      const names = (err.detail.tasks ?? []).map((t) => t.name || `task#${t.id ?? '?'}`).join(', ')
+      return `有任务在跑，请先取消：${names}`
+    }
+    if (err.status === 422 && err.detail?.error === 'dirty_working_tree') {
+      return '本地有未提交修改，请先 commit 或 stash'
+    }
+    if (err.status === 409 && err.detail?.error === 'no_rollback_target') {
+      return '没有可回滚的版本（首次启动 / .last_version 已被清理）'
+    }
+    return `触发${action}失败: ${err.message ?? e}`
+  }
+
   const handleUpdate = async () => {
     if (!check?.has_update) return
     const targetLabel = check.latest_tag ?? check.latest_commit.slice(0, 8)
@@ -2401,15 +2423,7 @@ function VersionSection() {
     try {
       await api.performSystemUpdate('origin/master')
     } catch (e) {
-      const err = e as Error & { status?: number; detail?: { error?: string; tasks?: { name: string }[] } }
-      if (err.status === 422 && err.detail?.error === 'running_tasks_present') {
-        const names = (err.detail.tasks ?? []).map((t) => t.name || `task#${(t as { id?: number }).id ?? '?'}`).join(', ')
-        toast(`有任务在跑，请先取消：${names}`, 'error')
-      } else if (err.status === 422 && err.detail?.error === 'dirty_working_tree') {
-        toast('本地有未提交修改，请先 commit 或 stash 后再更新', 'error')
-      } else {
-        toast(`触发更新失败: ${err.message ?? e}`, 'error')
-      }
+      toast(_formatActionError(e, '更新'), 'error')
       setBusy(false)
       return
     }
@@ -2417,12 +2431,72 @@ function VersionSection() {
     void pollHealthThenReload(toast, 10 * 60_000, '更新', () => setBusy(false))
   }
 
+  const handleRollback = async () => {
+    if (!status?.rollback_target) return
+    const target = status.rollback_target
+    const ok = await dialog.confirm(
+      `将切换到上一版本（commit ${target.slice(0, 8)}）。\n\n` +
+      '走与正向 update 同样的流程：关闭 server，git reset --hard <commit>，按需补依赖，重启。\n' +
+      '切换成功后 .last_version 会变成"切换前的版本"，再点同样的按钮即可回到此处。\n\n' +
+      '若有训练 / 打标任务正在运行将被拒绝；本地有未提交修改也会被拒绝。',
+      { tone: 'warn', okText: '切换' },
+    )
+    if (!ok) return
+
+    setBusy(true)
+    try {
+      await api.rollbackSystem()
+    } catch (e) {
+      toast(_formatActionError(e, '回滚'), 'error')
+      setBusy(false)
+      return
+    }
+
+    void pollHealthThenReload(toast, 10 * 60_000, '回滚', () => setBusy(false))
+  }
+
+  const handleViewLog = async () => {
+    setLogModal({ open: true, content: '', loading: true })
+    try {
+      const r = await api.getSystemUpdateLog()
+      setLogModal({ open: true, content: r.content || '(空)', loading: false })
+    } catch (e) {
+      setLogModal({ open: true, content: `加载失败: ${e}`, loading: false })
+    }
+  }
+
   const headDescr = version
     ? `${version.tag ?? `v${version.version}`} · ${version.commit_short} · ${version.branch}${version.is_dirty ? ' · 本地有改动' : ''}`
     : '加载中...'
 
+  // 上次 update 失败 banner（aborted / failed / partial 时显示红色提示）
+  const statusBadFailed = status && (status.status === 'failed' || status.status === 'aborted' || status.status === 'partial')
+
   return (
     <SettingsSection id="version" title="版本">
+      {statusBadFailed && (
+        <div className="flex flex-col gap-1.5 rounded-md border border-err bg-err-soft p-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-err">
+            <span>上次更新{status?.status === 'aborted' ? '中止' : status?.status === 'partial' ? '部分成功' : '失败'}</span>
+            {status?.finished_at && (
+              <span className="text-2xs text-fg-dim font-normal font-mono">
+                {new Date(status.finished_at * 1000).toLocaleString()}
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-fg-secondary">
+            {status?.reason || '原因未知'}
+            {status?.target && <span className="text-fg-dim"> · target = {status.target}</span>}
+          </div>
+          <button
+            onClick={() => void handleViewLog()}
+            className="btn btn-secondary btn-xs self-start"
+          >
+            查看完整日志
+          </button>
+        </div>
+      )}
+
       <SettingsField label="当前">
         <div className="flex flex-col gap-0.5 text-fg-primary text-sm font-mono">
           <span>{headDescr}</span>
@@ -2472,10 +2546,29 @@ function VersionSection() {
                 {busy ? '更新中...' : `立即更新 → ${check.latest_tag ?? check.latest_commit.slice(0, 8)}`}
               </button>
             )}
+            {status?.rollback_target && (
+              <button
+                onClick={() => void handleRollback()}
+                disabled={busy || checking}
+                className="btn btn-secondary btn-sm"
+                title={`切换到 ${status.rollback_target}`}
+              >
+                {busy ? '切换中...' : `切换到 ${status.rollback_target.slice(0, 8)}`}
+              </button>
+            )}
+            {status?.status && (
+              <button
+                onClick={() => void handleViewLog()}
+                disabled={busy}
+                className="btn btn-ghost btn-sm"
+              >
+                查看上次日志
+              </button>
+            )}
           </div>
           <p className="text-2xs text-fg-dim leading-snug">
             自动检查每 24 小时一次（master 通道，关闭 webui 不影响）。
-            更新会执行 <code>git reset --hard origin/master</code> + 必要时 pip / npm install。
+            更新 / 回滚都执行 <code>git reset --hard &lt;target&gt;</code> + 必要时 pip / npm install。
             <br />
             <span className="text-warn">
               当前有训练 / 打标任务运行时不允许更新；本地未提交的改动也会被拒绝。
@@ -2483,7 +2576,56 @@ function VersionSection() {
           </p>
         </div>
       </SettingsField>
+
+      {logModal.open && (
+        <UpdateLogModal
+          loading={logModal.loading}
+          content={logModal.content}
+          onClose={() => setLogModal({ open: false, content: '', loading: false })}
+        />
+      )}
     </SettingsSection>
+  )
+}
+
+// 简易的 modal：点遮罩 / 按 ESC 关闭，pre + 等宽字体显示日志。
+// 没用 useDialog 是因为它返回的是命令式 confirm/prompt 接口，不适合长文本展示。
+function UpdateLogModal({
+  loading, content, onClose,
+}: { loading: boolean; content: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface border border-subtle rounded-md shadow-lg max-w-4xl w-[92vw] max-h-[80vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-subtle px-4 py-2.5">
+          <h3 className="text-sm font-semibold text-fg-primary">上次更新日志</h3>
+          <button
+            onClick={onClose}
+            className="text-fg-dim hover:text-fg-primary text-lg leading-none"
+            aria-label="关闭"
+          >×</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <span className="text-fg-dim text-sm">加载中...</span>
+          ) : (
+            <pre className="text-2xs font-mono text-fg-primary whitespace-pre-wrap break-words">
+              {content}
+            </pre>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 

@@ -33,6 +33,7 @@ def _isolate_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(updater, "UPDATE_CACHE", tmp_path / ".update_cache")
     monkeypatch.setattr(updater, "LAST_VERSION", tmp_path / ".last_version")
     monkeypatch.setattr(updater, "UPDATE_LOG", tmp_path / ".update_log")
+    monkeypatch.setattr(updater, "UPDATE_STATUS", tmp_path / ".update_status")
     return tmp_path
 
 
@@ -267,3 +268,113 @@ def test_requirements_marker_stale_match(
     marker.write_text(hashlib.sha256(content).hexdigest(), encoding="utf-8")
     monkeypatch.setattr(updater, "REPO_ROOT", tmp_path)
     assert updater._requirements_marker_stale() is False
+
+
+# ---------------------------------------------------------------------------
+# PR-C：update status / rollback
+# ---------------------------------------------------------------------------
+
+def test_apply_pending_writes_aborted_status(
+    _isolate_flags: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """dirty tree abort 时 .update_status 应当被写入 status='aborted'。"""
+    fake = updater.VersionInfo(
+        version="0.0.0", commit="abc", commit_short="abc",
+        commit_time_iso="", branch="master", tag=None, is_dirty=True,
+    )
+    monkeypatch.setattr(updater, "current_version", lambda: fake)
+    monkeypatch.setattr(updater, "_git", lambda *a, **k: (0, "", ""))
+
+    updater.request_update("origin/master")
+    updater.apply_pending(emit=lambda _: None)
+
+    st = updater.last_status()
+    assert st is not None
+    assert st.status == "aborted"
+    assert "dirty" in st.reason.lower()
+    assert st.from_commit == "abc"
+
+
+def test_apply_pending_writes_failed_status_on_fetch_error(
+    _isolate_flags: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """git fetch 失败应当写 status='failed' + reason 含 stderr 摘要。"""
+    fake = updater.VersionInfo(
+        version="0.0.0", commit="abc", commit_short="abc",
+        commit_time_iso="", branch="master", tag=None, is_dirty=False,
+    )
+    monkeypatch.setattr(updater, "current_version", lambda: fake)
+    def _fake_git(*args, **kwargs):
+        if args[:2] == ("fetch", "origin"):
+            return 128, "", "fatal: Could not resolve host"
+        return 0, "", ""
+    monkeypatch.setattr(updater, "_git", _fake_git)
+
+    updater.request_update("origin/master")
+    updater.apply_pending(emit=lambda _: None)
+
+    st = updater.last_status()
+    assert st is not None
+    assert st.status == "failed"
+    assert "Could not resolve host" in st.reason or "git fetch" in st.reason
+
+
+def test_last_status_returns_none_when_missing(_isolate_flags: Path) -> None:
+    assert updater.last_status() is None
+
+
+def test_rollback_target_no_file(_isolate_flags: Path) -> None:
+    """没 .last_version 时返回 None。"""
+    assert updater.rollback_target() is None
+
+
+def test_rollback_target_validates_commit_exists(
+    _isolate_flags: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """.last_version 存在但 commit 已 GC 时返回 None。"""
+    updater.LAST_VERSION.write_text("deadbeef" * 5, encoding="utf-8")
+    def _fake_git(*args, **kwargs):
+        if args[:2] == ("cat-file", "-e"):
+            return 1, "", "fatal: not a valid object name"
+        return 0, "", ""
+    monkeypatch.setattr(updater, "_git", _fake_git)
+    assert updater.rollback_target() is None
+
+
+def test_rollback_target_valid(
+    _isolate_flags: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """.last_version + commit 存在 → 返回 sha。"""
+    updater.LAST_VERSION.write_text("cafebabe" * 5, encoding="utf-8")
+    monkeypatch.setattr(updater, "_git", lambda *a, **k: (0, "", ""))
+    assert updater.rollback_target() == "cafebabe" * 5
+
+
+def test_request_rollback_writes_pending(
+    _isolate_flags: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """rollback 应当走 request_update 路径，target 是 .last_version 的 sha。"""
+    updater.LAST_VERSION.write_text("c0ffeec0ffee" + "0" * 28, encoding="utf-8")
+    monkeypatch.setattr(updater, "_git", lambda *a, **k: (0, "", ""))
+
+    target = updater.request_rollback()
+    assert target is not None
+    assert updater.has_pending()
+    assert updater.UPDATE_PENDING.read_text(encoding="utf-8") == target
+
+
+def test_request_rollback_returns_none_without_target(_isolate_flags: Path) -> None:
+    """没 .last_version 时 request_rollback 返回 None 且不写 pending。"""
+    assert updater.request_rollback() is None
+    assert not updater.has_pending()
+
+
+def test_read_update_log(_isolate_flags: Path) -> None:
+    """read_update_log 应当返回完整文件内容。"""
+    updater.UPDATE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    updater.UPDATE_LOG.write_text("line 1\nline 2\n", encoding="utf-8")
+    assert updater.read_update_log() == "line 1\nline 2\n"
+
+
+def test_read_update_log_missing(_isolate_flags: Path) -> None:
+    assert updater.read_update_log() == ""

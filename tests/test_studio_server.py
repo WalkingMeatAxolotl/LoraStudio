@@ -674,3 +674,137 @@ def test_system_restart_rejects_when_running_task(
     resp = client.post("/api/system/restart")
     assert resp.status_code == 422
     assert resp.json()["detail"]["error"] == "running_tasks_present"
+
+
+# ---------------------------------------------------------------------------
+# /api/system/rollback + update_status + update_log (ADR 0002 / PR-C)
+# ---------------------------------------------------------------------------
+
+def test_system_update_status_null_when_no_history(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """没有 update 历史时返 {status: null}。"""
+    from studio.services import updater
+    monkeypatch.setattr(updater, "UPDATE_STATUS", tmp_path / ".update_status")
+    monkeypatch.setattr(updater, "LAST_VERSION", tmp_path / ".last_version")
+    resp = client.get("/api/system/update_status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] is None
+
+
+def test_system_update_status_returns_recorded(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """update_status 把 last_status() + rollback_target() 合并返回。"""
+    from studio.services import updater
+    fake = updater.UpdateStatus(
+        status="failed", reason="git fetch: timeout", target="origin/master",
+        from_commit="abc", to_commit="abc", started_at=1000.0, finished_at=1010.0,
+        deps_changed=False, log_excerpt="[git fetch] FAILED",
+    )
+    monkeypatch.setattr(updater, "last_status", lambda: fake)
+    monkeypatch.setattr(updater, "rollback_target", lambda: "deadbeef" * 5)
+
+    resp = client.get("/api/system/update_status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "failed"
+    assert body["reason"] == "git fetch: timeout"
+    assert body["rollback_target"] == "deadbeef" * 5
+
+
+def test_system_update_log_empty(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from studio.services import updater
+    monkeypatch.setattr(updater, "read_update_log", lambda: "")
+    resp = client.get("/api/system/update_log")
+    assert resp.status_code == 200
+    assert resp.json() == {"content": ""}
+
+
+def test_system_update_log_with_content(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from studio.services import updater
+    monkeypatch.setattr(updater, "read_update_log", lambda: "=== run ===\n[ok]\n")
+    resp = client.get("/api/system/update_log")
+    assert resp.json()["content"].startswith("=== run ===")
+
+
+def test_system_rollback_409_when_no_target(
+    client: TestClient,
+    isolated_paths: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """没 .last_version 或 commit 不在仓库时返 409。"""
+    from studio.services import updater
+    monkeypatch.setattr(updater, "current_version", lambda: updater.VersionInfo(
+        version="0.0.0", commit="abc", commit_short="abc", commit_time_iso="",
+        branch="master", tag=None, is_dirty=False,
+    ))
+    monkeypatch.setattr(updater, "request_rollback", lambda: None)
+
+    resp = client.post("/api/system/rollback")
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["error"] == "no_rollback_target"
+
+
+def test_system_rollback_rejects_dirty(
+    client: TestClient,
+    isolated_paths: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """rollback 共用 update 的 dirty precondition。"""
+    from studio.services import updater
+    monkeypatch.setattr(updater, "current_version", lambda: updater.VersionInfo(
+        version="0.0.0", commit="abc", commit_short="abc", commit_time_iso="",
+        branch="master", tag=None, is_dirty=True,
+    ))
+
+    resp = client.post("/api/system/rollback")
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "dirty_working_tree"
+
+
+def test_system_rollback_rejects_running_task(
+    client: TestClient,
+    isolated_paths: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """rollback 共用 update 的 running task precondition。"""
+    from studio import db
+    with db.connection_for(isolated_paths["db"]) as conn:
+        tid = db.create_task(conn, name="炼丹", config_name="train", priority=0)
+        db.update_task(conn, tid, status="running", task_type="train")
+
+    resp = client.post("/api/system/rollback")
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "running_tasks_present"
+
+
+def test_system_rollback_success_writes_flag(
+    client: TestClient,
+    isolated_paths: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正常路径：reads .last_version → request_update(target=<sha>) → 200。"""
+    from studio.services import updater
+    monkeypatch.setattr(updater, "current_version", lambda: updater.VersionInfo(
+        version="0.0.0", commit="abc", commit_short="abc", commit_time_iso="",
+        branch="master", tag=None, is_dirty=False,
+    ))
+    captured: dict = {}
+    def _fake_rollback() -> str:
+        captured["called"] = True
+        return "feedbeef" * 5
+    monkeypatch.setattr(updater, "request_rollback", _fake_rollback)
+    monkeypatch.setattr(server, "_raise_sigint_after_response", lambda: None)
+
+    resp = client.post("/api/system/rollback")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["target"] == "feedbeef" * 5
+    assert captured["called"]

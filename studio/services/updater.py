@@ -42,6 +42,7 @@ UPDATE_PENDING = STUDIO_DATA / ".update_pending"
 UPDATE_CACHE = STUDIO_DATA / ".update_cache"
 LAST_VERSION = STUDIO_DATA / ".last_version"
 UPDATE_LOG = STUDIO_DATA / ".update_log"
+UPDATE_STATUS = STUDIO_DATA / ".update_status"   # PR-C：结构化最近一次 update 结果
 
 UPDATE_CACHE_TTL_SECONDS = 24 * 3600
 GIT_FETCH_TIMEOUT = 30.0
@@ -72,6 +73,21 @@ class UpdateCheckResult:
     latest_tag: Optional[str]  # remote 最新 tag（仅 master 通道有）
     checked_at: float          # epoch
     error: Optional[str] = None  # fetch 失败时填
+
+
+@dataclass
+class UpdateStatus:
+    """最近一次 update 的结构化结果（PR-C）。apply_pending 完成时写到磁盘，
+    UI 用来判断"上次更新成功 / 失败 / 中止"，失败时展示原因。"""
+    status: str                # ok / aborted / failed / partial
+    reason: str                # 失败 / 中止时的简短原因；成功时空串
+    target: str                # 用户请求的 ref (origin/master / commit hash)
+    from_commit: str           # 走 git reset 之前的 commit
+    to_commit: str             # 走 git reset 之后的 commit (失败时 = from_commit)
+    started_at: float
+    finished_at: float
+    deps_changed: bool         # 走了 pip install 或 npm install
+    log_excerpt: str           # 末尾几行 .update_log 内容
 
 
 # ----- Git 调用 helper ----------------------------------------------------
@@ -198,16 +214,22 @@ def apply_pending(emit: Callable[[str], None] = print) -> bool:
 
     流程：
     1. 读 .update_pending 拿 target ref
-    2. 写 .last_version（rollback 用，PR-C 启用）
+    2. 写 .last_version（rollback 用）
     3. precondition：working tree 必须干净（理论上 server 已查过，这里再保一层）
     4. `git fetch origin` + `git reset --hard {target}`（避免 merge 冲突）
     5. requirements.txt sha256 marker 比对 → 改了就 `pip install -r`
     6. studio/web/package.json mtime > node_modules/.package-lock.json → `npm install`
     7. 清 cache（让下次 check_update 重 fetch）+ 清 .update_pending
+    8. 写结构化 .update_status（PR-C，UI 展示"上次更新结果"用）
 
-    失败的每一步都写 .update_log（PR-C UI 展示），但不抛异常 — 让 cli.py
-    继续走后面的 bootstrap，server 至少能起来（可能起来后用户看到的是
-    "上次 update 失败"提示）。
+    失败的每一步都写 .update_log 和 .update_status，但不抛异常 — 让 cli.py
+    继续走后面的 bootstrap，server 至少能起来（UI 端会看到失败 banner）。
+
+    状态枚举：
+    - ok：git 切换成功，无 deps 失败
+    - aborted：precondition 失败（dirty tree）
+    - failed：git fetch / reset 失败
+    - partial：git 切换成功但 pip / npm 失败（功能可能不完整）
     """
     if not has_pending():
         return False
@@ -215,25 +237,47 @@ def apply_pending(emit: Callable[[str], None] = print) -> bool:
     target = UPDATE_PENDING.read_text(encoding="utf-8").strip() or "origin/master"
     emit(f"[updater] applying pending update → {target}")
 
+    started_at = time.time()
     cur = current_version()
     log_lines: list[str] = [
         f"=== {time.strftime('%Y-%m-%d %H:%M:%S')} update {cur.commit_short} → {target} ===",
         f"branch={cur.branch} tag={cur.tag or '-'} dirty={cur.is_dirty}",
     ]
 
-    # 保存上一版本（PR-C rollback 用）
+    # 保存上一版本（rollback 用）
     try:
         LAST_VERSION.parent.mkdir(parents=True, exist_ok=True)
         LAST_VERSION.write_text(cur.commit, encoding="utf-8")
     except OSError as e:
         log_lines.append(f"[warn] failed to write .last_version: {e}")
 
+    def _done(status: str, reason: str, to_commit: str, deps_changed: bool) -> bool:
+        """收尾：写 .update_status + .update_log + 清 .update_pending + 清 cache。"""
+        finished_at = time.time()
+        _write_status(UpdateStatus(
+            status=status,
+            reason=reason,
+            target=target,
+            from_commit=cur.commit,
+            to_commit=to_commit,
+            started_at=started_at,
+            finished_at=finished_at,
+            deps_changed=deps_changed,
+            log_excerpt="\n".join(log_lines[-20:]),
+        ))
+        _finalize(log_lines)
+        try:
+            if UPDATE_CACHE.exists():
+                UPDATE_CACHE.unlink()
+        except OSError:
+            pass
+        return True
+
     # 1. precondition：working tree 干净
     if cur.is_dirty:
         log_lines.append("[abort] working tree dirty")
         emit("[updater] working tree dirty, aborting update")
-        _finalize(log_lines)
-        return True
+        return _done("aborted", "working tree dirty", cur.commit, False)
 
     # 2. git fetch
     log_lines.append("[git] fetch origin")
@@ -241,8 +285,7 @@ def apply_pending(emit: Callable[[str], None] = print) -> bool:
     if rc != 0:
         log_lines.append(f"[git fetch] FAILED rc={rc} stderr={stderr}")
         emit(f"[updater] git fetch failed: {stderr[:200]}")
-        _finalize(log_lines)
-        return True
+        return _done("failed", f"git fetch: {stderr[:120]}", cur.commit, False)
 
     # 3. git reset --hard target（避免 merge conflict；working tree 干净已验过）
     log_lines.append(f"[git] reset --hard {target}")
@@ -250,15 +293,18 @@ def apply_pending(emit: Callable[[str], None] = print) -> bool:
     if rc != 0:
         log_lines.append(f"[git reset] FAILED rc={rc} stderr={stderr}")
         emit(f"[updater] git reset failed: {stderr[:200]}")
-        _finalize(log_lines)
-        return True
+        return _done("failed", f"git reset: {stderr[:120]}", cur.commit, False)
 
     new = current_version()
     log_lines.append(f"[ok] now at {new.commit_short} ({new.tag or new.branch})")
     emit(f"[updater] git updated → {new.commit_short}")
 
+    deps_changed = False
+    deps_failed_reason = ""
+
     # 4. requirements.txt 改了 → 增量 pip install（不 --upgrade，仅补缺）
     if _requirements_marker_stale():
+        deps_changed = True
         log_lines.append("[pip] requirements.txt changed; pip install -r")
         emit("[updater] requirements.txt changed, pip install (may take a few minutes)...")
         rc = subprocess.call(
@@ -266,7 +312,6 @@ def apply_pending(emit: Callable[[str], None] = print) -> bool:
         )
         log_lines.append(f"[pip] exit code {rc}")
         if rc == 0:
-            # 更新 sha256 marker
             marker = REPO_ROOT / "venv" / ".studio-requirements.sha256"
             tool = REPO_ROOT / "tools" / "check_requirements_changed.py"
             if tool.exists():
@@ -274,29 +319,86 @@ def apply_pending(emit: Callable[[str], None] = print) -> bool:
                     sys.executable, str(tool),
                     "--marker", str(marker), "--update-marker",
                 ])
+        else:
+            deps_failed_reason = f"pip exit {rc}"
 
     # 5. package.json 改了 → npm install
     if _package_json_changed():
+        deps_changed = True
         log_lines.append("[npm] package.json changed; npm install")
         emit("[updater] studio/web/package.json changed, npm install...")
         npm = shutil.which("npm") or shutil.which("npm.cmd")
         if npm:
             rc = subprocess.call([npm, "install"], cwd=str(REPO_ROOT / "studio" / "web"))
             log_lines.append(f"[npm] exit code {rc}")
+            if rc != 0:
+                deps_failed_reason = (
+                    f"{deps_failed_reason + '; ' if deps_failed_reason else ''}npm exit {rc}"
+                )
         else:
             log_lines.append("[npm] not found on PATH, skipping (cli.py bootstrap will retry)")
 
+    if deps_failed_reason:
+        log_lines.append(f"[partial] git ok 但 deps 失败: {deps_failed_reason}")
+        return _done("partial", deps_failed_reason, new.commit, deps_changed)
+
     log_lines.append("[done]")
-    _finalize(log_lines)
+    return _done("ok", "", new.commit, deps_changed)
 
-    # 清 update cache，让下次 check_update 重 fetch（不依赖 24h TTL）
+
+def last_status() -> Optional[UpdateStatus]:
+    """读 .update_status；不存在 / 损坏 → None。"""
+    if not UPDATE_STATUS.exists():
+        return None
     try:
-        if UPDATE_CACHE.exists():
-            UPDATE_CACHE.unlink()
-    except OSError:
-        pass
+        data = json.loads(UPDATE_STATUS.read_text(encoding="utf-8"))
+        return UpdateStatus(**data)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
 
-    return True
+
+def read_update_log() -> str:
+    """完整 .update_log 内容；不存在返回空串。"""
+    if not UPDATE_LOG.exists():
+        return ""
+    try:
+        return UPDATE_LOG.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def rollback_target() -> Optional[str]:
+    """读 .last_version。返回 commit sha 或 None（首次未更新过 / 文件缺失）。
+
+    校验 commit 在仓库里存在 — 防止仓库被强制 GC 掉 .last_version 指向的孤儿
+    commit。验不过返 None，UI 隐藏回滚按钮。
+    """
+    if not LAST_VERSION.exists():
+        return None
+    try:
+        sha = LAST_VERSION.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not sha:
+        return None
+    rc, _, _ = _git("cat-file", "-e", sha)
+    return sha if rc == 0 else None
+
+
+def request_rollback() -> Optional[str]:
+    """读 .last_version 内容，调 request_update(target=<sha>)。
+
+    没有 .last_version 或 commit 不存在 → 返回 None（调用方应当返 409 / 422）。
+    成功调度 → 返回 target sha。
+
+    回滚流程与正向 update 完全一样（同一个 apply_pending 处理），所以下次
+    UI 上 .last_version 会自动被更新成"现在的版本"，支持来回切。
+    """
+    sha = rollback_target()
+    if sha is None:
+        return None
+    request_update(sha)
+    return sha
 
 
 # ----- 内部 helpers ------------------------------------------------------
@@ -336,6 +438,17 @@ def _finalize(log_lines: list[str]) -> None:
             UPDATE_PENDING.unlink()
     except OSError:
         pass
+
+
+def _write_status(status: UpdateStatus) -> None:
+    """原子写 .update_status（PR-C）。"""
+    try:
+        UPDATE_STATUS.parent.mkdir(parents=True, exist_ok=True)
+        tmp = UPDATE_STATUS.with_suffix(UPDATE_STATUS.suffix + ".tmp")
+        tmp.write_text(json.dumps(asdict(status), indent=2), encoding="utf-8")
+        tmp.replace(UPDATE_STATUS)
+    except OSError as e:
+        logger.warning("failed to write .update_status: %s", e)
 
 
 def _requirements_marker_stale() -> bool:

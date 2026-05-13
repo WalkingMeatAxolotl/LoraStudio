@@ -3154,6 +3154,68 @@ def system_update(body: UpdateRequest, background: BackgroundTasks) -> dict[str,
     return {"ok": True, "message": f"update scheduled → {body.target}"}
 
 
+@app.post("/api/system/rollback")
+def system_rollback(background: BackgroundTasks) -> dict[str, Any]:
+    """回滚到 .last_version 记录的上一版本（PR-C）。
+
+    走与正向 update 完全一致的路径（写 .update_pending=<sha> + tmp/restart
+    → cli.py 启动期 apply_pending 实际 reset），所以 dirty / running task
+    precondition 一样适用，回滚成功后 .last_version 会被写成"回滚前的版本"
+    （即正向)，支持来回切。
+    """
+    _check_no_running_tasks()
+
+    cur = updater.current_version()
+    if cur.is_dirty:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "dirty_working_tree",
+                "message": "本地有未提交的修改，请先 commit / stash",
+            },
+        )
+
+    target = updater.request_rollback()
+    if target is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "no_rollback_target",
+                "message": ".last_version 不存在或 commit 已不在仓库里（被 GC？）",
+            },
+        )
+
+    background.add_task(_raise_sigint_after_response)
+    return {"ok": True, "message": f"rollback scheduled → {target[:8]}", "target": target}
+
+
+@app.get("/api/system/update_status")
+def system_update_status() -> dict[str, Any]:
+    """最近一次 update 的结构化结果（PR-C）。
+
+    UI 上：
+    - 文件不存在 / null：没有 update 历史，不展示 banner
+    - status='ok'：可选展示"已更新到 X，X 秒前"
+    - status='aborted' / 'failed' / 'partial'：红色 banner + 原因 + 跳到日志
+    """
+    from dataclasses import asdict
+    st = updater.last_status()
+    if st is None:
+        return {"status": None}
+    rollback_to = updater.rollback_target()
+    return {
+        **asdict(st),
+        # 顺带把 rollback target 也带回去，UI 用这个判断"是否显示回滚按钮"
+        "rollback_target": rollback_to,
+    }
+
+
+@app.get("/api/system/update_log")
+def system_update_log() -> dict[str, Any]:
+    """完整 .update_log 文本内容（PR-C 失败时 UI 弹 modal 用）。"""
+    return {"content": updater.read_update_log()}
+
+
 @app.get("/", response_model=None)
 def root() -> RedirectResponse | JSONResponse:
     """根路径 302 跳转到 React 应用 `/studio/`。
