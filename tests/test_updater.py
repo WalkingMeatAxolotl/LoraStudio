@@ -378,3 +378,32 @@ def test_read_update_log(_isolate_flags: Path) -> None:
 
 def test_read_update_log_missing(_isolate_flags: Path) -> None:
     assert updater.read_update_log() == ""
+
+
+def test_last_status_tolerates_utf8_bom(_isolate_flags: Path) -> None:
+    """Windows PowerShell 5.1 写文件默认带 UTF-8 BOM；read_text(utf-8) 不剥 BOM
+    导致 json.loads 抛 JSONDecodeError，UI 看到 status=null 什么都不显示。
+    用 utf-8-sig 读应当透明剥 BOM 并正常 parse。"""
+    BOM = "﻿"
+    json_str = '{"status": "failed", "reason": "test", "target": "origin/master", ' \
+               '"from_commit": "abc", "to_commit": "abc", "started_at": 1.0, ' \
+               '"finished_at": 2.0, "deps_changed": false, "log_excerpt": ""}'
+    updater.UPDATE_STATUS.parent.mkdir(parents=True, exist_ok=True)
+    updater.UPDATE_STATUS.write_text(BOM + json_str, encoding="utf-8")
+
+    st = updater.last_status()
+    assert st is not None, "带 BOM 的 .update_status 应当被正常 parse"
+    assert st.status == "failed"
+    assert st.reason == "test"
+
+
+def test_rollback_target_tolerates_utf8_bom(
+    _isolate_flags: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同上，针对 .last_version 文本。"""
+    BOM = "﻿"
+    sha = "deadbeef" * 5
+    updater.LAST_VERSION.parent.mkdir(parents=True, exist_ok=True)
+    updater.LAST_VERSION.write_text(BOM + sha, encoding="utf-8")
+    monkeypatch.setattr(updater, "_git", lambda *a, **k: (0, "", ""))
+    assert updater.rollback_target() == sha

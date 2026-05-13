@@ -236,7 +236,7 @@ def apply_pending(emit: Callable[[str], None] = print) -> bool:
     if not has_pending():
         return False
 
-    target = UPDATE_PENDING.read_text(encoding="utf-8").strip() or "origin/master"
+    target = UPDATE_PENDING.read_text(encoding="utf-8-sig").strip() or "origin/master"
     emit(f"[updater] applying pending update → {target}")
 
     started_at = time.time()
@@ -353,7 +353,7 @@ def last_status() -> Optional[UpdateStatus]:
     if not UPDATE_STATUS.exists():
         return None
     try:
-        data = json.loads(UPDATE_STATUS.read_text(encoding="utf-8"))
+        data = json.loads(UPDATE_STATUS.read_text(encoding="utf-8-sig"))
         return UpdateStatus(**data)
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
@@ -364,7 +364,7 @@ def read_update_log() -> str:
     if not UPDATE_LOG.exists():
         return ""
     try:
-        return UPDATE_LOG.read_text(encoding="utf-8")
+        return UPDATE_LOG.read_text(encoding="utf-8-sig")
     except OSError:
         return ""
 
@@ -378,7 +378,7 @@ def rollback_target() -> Optional[str]:
     if not LAST_VERSION.exists():
         return None
     try:
-        sha = LAST_VERSION.read_text(encoding="utf-8").strip()
+        sha = LAST_VERSION.read_text(encoding="utf-8-sig").strip()
     except OSError:
         return None
     if not sha:
@@ -408,7 +408,7 @@ def _read_cache() -> Optional[UpdateCheckResult]:
     if not UPDATE_CACHE.exists():
         return None
     try:
-        data = json.loads(UPDATE_CACHE.read_text(encoding="utf-8"))
+        data = json.loads(UPDATE_CACHE.read_text(encoding="utf-8-sig"))
         age = time.time() - float(data.get("checked_at", 0))
         if age > UPDATE_CACHE_TTL_SECONDS or age < 0:
             return None
@@ -466,7 +466,7 @@ def _requirements_marker_stale() -> bool:
     if not marker.exists():
         return True  # 没 marker：可能从未装过，安全起见按 stale
     try:
-        return marker.read_text(encoding="utf-8").strip() != digest
+        return marker.read_text(encoding="utf-8-sig").strip() != digest
     except OSError:
         return True
 
