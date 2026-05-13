@@ -334,6 +334,12 @@ export interface GenerateSecretsConfig {
   attention_backend: AttentionBackend
 }
 
+/** 系统级偏好（ADR 0002 / PR-D）。show_dev_channel 开启后 Settings 暴露 dev
+ *  通道按钮（手动检查 / 更新到 dev）；自动检查 + Topbar badge 仍然只看 master。 */
+export interface SystemPrefsConfig {
+  show_dev_channel: boolean
+}
+
 export interface Secrets {
   gelbooru: GelbooruConfig
   danbooru: DanbooruConfig
@@ -351,6 +357,7 @@ export interface Secrets {
   models: ModelsConfig
   queue: QueueConfig
   generate: GenerateSecretsConfig
+  system: SystemPrefsConfig
 }
 
 /** PUT /api/secrets 的 body：嵌套的 partial dict；MASK ("***") 表示「保持不变」。 */
@@ -940,6 +947,17 @@ export interface ImportResult {
   renamed: Record<string, string>
 }
 
+/**
+ * API 错误：除了 `message`（用于直接 toast 的字符串），额外保留 `status` 和
+ * `detail`（FastAPI 端 raise HTTPException(status, detail=dict(...)) 时
+ * detail 是结构化对象，调用方可以 `e.detail.error` 区分类型）。
+ *
+ * 用 Error 而非自定义 class 是因为不少现有 callsite 是 `catch (e) { toast(String(e)) }`
+ * 这种通用写法；保留 `Error.prototype.toString()` 行为不破坏它们。需要结构化
+ * 处理的新 callsite 强制 cast：`(e as ApiError).detail`。
+ */
+export type ApiError = Error & { status?: number; detail?: unknown }
+
 async function req<T>(
   path: string,
   init?: RequestInit
@@ -953,13 +971,23 @@ async function req<T>(
   })
   if (!resp.ok) {
     let detail = `${resp.status} ${resp.statusText}`
+    let rawDetail: unknown = null
     try {
       const body = await resp.json()
-      if (body?.detail) detail = body.detail
+      if (typeof body?.detail === 'string') {
+        detail = body.detail
+      } else if (body?.detail && typeof body.detail === 'object') {
+        rawDetail = body.detail
+        // 结构化 detail：取 .message 作为可读字符串；callsite 想拿完整结构走 e.detail
+        detail = (body.detail as { message?: string }).message ?? JSON.stringify(body.detail)
+      }
     } catch {
-      // ignore
+      // body 不是 JSON / 解析失败：保持 statusText 默认
     }
-    throw new Error(detail)
+    const err = new Error(detail) as ApiError
+    err.status = resp.status
+    err.detail = rawDetail
+    throw err
   }
   if (resp.status === 204) return undefined as T
   return (await resp.json()) as T
@@ -1623,6 +1651,86 @@ export const api = {
     const qs = path ? `?path=${encodeURIComponent(path)}` : ''
     return req<BrowseResult>(`/api/browse${qs}`)
   },
+
+  // System lifecycle (ADR 0002) ----------------------------------------
+  // 重启 server。后端写 tmp/restart + 给自己发 SIGINT 触发 uvicorn graceful
+  // shutdown；cli.py 的 loop 拾起并重启。前端调完后应进入"重启中"等待状态，
+  // 轮询 /api/health 直到服务回来。
+  restartServer: () =>
+    req<{ ok: boolean; message: string }>('/api/system/restart', {
+      method: 'POST',
+    }),
+
+  // 当前仓库 git 状态：__version__ / commit / tag / branch / dirty
+  getSystemVersion: () => req<SystemVersion>('/api/system/version'),
+
+  // git fetch + 比对。master 通道 24h cache；force=true 强制重 fetch。
+  // dev 通道（PR-D）每次都 fetch，不缓存。
+  checkSystemUpdate: (channel: 'master' | 'dev' = 'master', force = false) => {
+    const qs = new URLSearchParams({ channel, force: String(force) })
+    return req<SystemUpdateCheck>(`/api/system/update_check?${qs.toString()}`)
+  },
+
+  // 请求 update：写 .update_pending + 触发 SIGINT 重启。
+  // 422 = running task 或 dirty working tree。
+  performSystemUpdate: (target: string = 'origin/master') =>
+    req<{ ok: boolean; message: string }>('/api/system/update', {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    }),
+
+  // 回滚到 .last_version 记录的上一版本（PR-C）。
+  // 422 = running task / dirty；409 = 没有 .last_version 或 commit 已 GC。
+  rollbackSystem: () =>
+    req<{ ok: boolean; message: string; target: string }>('/api/system/rollback', {
+      method: 'POST',
+    }),
+
+  // 最近一次 update 的结构化结果（PR-C）。status: null = 从未 update 过。
+  getSystemUpdateStatus: () => req<SystemUpdateStatus>('/api/system/update_status'),
+
+  // 完整 .update_log 文本（PR-C，失败时 UI 弹 modal 用）。
+  getSystemUpdateLog: () => req<{ content: string }>('/api/system/update_log'),
+}
+
+export interface SystemVersion {
+  version: string
+  commit: string
+  commit_short: string
+  commit_time_iso: string
+  branch: string
+  tag: string | null
+  is_dirty: boolean
+}
+
+export interface SystemUpdateCheck {
+  channel: 'master' | 'dev'
+  current_commit: string
+  latest_commit: string
+  commits_ahead: number
+  has_update: boolean
+  latest_tag: string | null
+  checked_at: number
+  error: string | null
+}
+
+/** PR-C — 最近一次 update 的结构化结果。
+ *  - status=null：从未 update 过，UI 不展示 banner
+ *  - status='ok'：可选展示"已更新到 X"
+ *  - status='aborted' / 'failed' / 'partial'：红色 banner + reason + "查看日志"
+ *  - rollback_target：.last_version 内容（commit sha），UI 用它判断是否显示回滚按钮
+ */
+export interface SystemUpdateStatus {
+  status: 'ok' | 'aborted' | 'failed' | 'partial' | null
+  reason?: string
+  target?: string
+  from_commit?: string
+  to_commit?: string
+  started_at?: number
+  finished_at?: number
+  deps_changed?: boolean
+  log_excerpt?: string
+  rollback_target?: string | null
 }
 
 export interface BrowseEntry {

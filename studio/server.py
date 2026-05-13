@@ -69,6 +69,7 @@ from .services import (
     system_stats,
     tagedit,
     train_io,
+    updater,
     uploads as uploads_svc,
     version_config,
     xformers_setup,
@@ -3027,6 +3028,196 @@ if WEB_DIST.exists():
         SPAStaticFiles(directory=str(WEB_DIST), html=True),
         name="studio",
     )
+
+
+# ---------------------------------------------------------------------------
+# /api/system — 进程生命周期（重启 / 更新 / 回滚）
+# ---------------------------------------------------------------------------
+#
+# 重启协议（参见 docs/adr/0002-webui-self-update.md）：
+#   1. server 写 REPO_ROOT/tmp/restart 标志
+#   2. server 通过 BackgroundTask 在响应发出后给自己发 SIGINT
+#   3. uvicorn 捕获 SIGINT 走 graceful shutdown（lifespan teardown + 在飞请求收尾）
+#   4. 进程退出 → cli.py 的 subprocess.call 返回
+#   5. cli.py 检测到 tmp/restart 存在 → 删除标志 → loop 回去重新 bootstrap + 起 server
+#
+# 跨平台 SIGINT：用 signal.raise_signal(SIGINT)（Python 3.8+），它在 Windows /
+# POSIX 都把当前进程置为收到 SIGINT，uvicorn 的内置 handler 会按 graceful
+# 路径处理。os.kill(getpid, SIGINT) 在 Windows 上不工作。
+#
+# PR-A 仅实现 /restart（不带 git pull / 不检查 running task）。PR-B / PR-C
+# 在此基础上叠加 update / rollback / 任务保护。
+
+
+_RESTART_FLAG = REPO_ROOT / "tmp" / "restart"
+
+
+def _raise_sigint_after_response() -> None:
+    """在响应已经发完后给自己发 SIGINT，触发 uvicorn graceful shutdown。
+
+    BackgroundTask 在 starlette 路径上是 response 完成后调度的；这里再 sleep
+    一点点保险（防止某些代理 / keep-alive 情况下还有数据没冲走）。
+    """
+    import signal
+    time.sleep(0.3)
+    try:
+        signal.raise_signal(signal.SIGINT)
+    except Exception:
+        # 兜底：硬退（不应该走到）
+        os._exit(0)
+
+
+def _check_no_running_tasks() -> None:
+    """重启 / 更新前置：所有 task 必须 done / failed / canceled / pending。
+
+    有 running 直接 422 + task 列表，让前端给用户友好的提示（"先暂停以下任务"）。
+    """
+    with db.connection_for() as conn:
+        running = db.list_tasks(conn, status="running")
+    if running:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "running_tasks_present",
+                "message": "有任务正在运行，请先取消 / 等待完成",
+                "tasks": [
+                    {
+                        "id": t["id"],
+                        "name": t.get("name", ""),
+                        "task_type": t.get("task_type", "train"),
+                    }
+                    for t in running
+                ],
+            },
+        )
+
+
+@app.post("/api/system/restart")
+def system_restart(background: BackgroundTasks) -> dict[str, Any]:
+    """重启 server（不 pull 代码）。
+
+    流程：写 tmp/restart 标志 → 响应 200 → BackgroundTask 发 SIGINT 触发
+    uvicorn graceful shutdown → cli.py loop 拾起 → 重新起新 server。
+
+    PR-B 起加 running task 强制约束。
+    """
+    _check_no_running_tasks()
+    _RESTART_FLAG.parent.mkdir(parents=True, exist_ok=True)
+    _RESTART_FLAG.touch()
+    background.add_task(_raise_sigint_after_response)
+    return {"ok": True, "message": "restart scheduled"}
+
+
+@app.get("/api/system/version")
+def system_version() -> dict[str, Any]:
+    """当前仓库状态：__version__ / commit / tag / branch / dirty。"""
+    from dataclasses import asdict
+    return asdict(updater.current_version())
+
+
+@app.get("/api/system/update_check")
+def system_update_check(channel: str = "master", force: bool = False) -> dict[str, Any]:
+    """git fetch + 比对。master 通道用 24h cache（force=true 强制重 fetch）；
+    dev 通道每次都 fetch，不缓存（开发者主动触发，避免污染 master 信号）。
+    """
+    from dataclasses import asdict
+    if channel not in ("master", "dev"):
+        raise HTTPException(400, f"invalid channel: {channel}")
+    return asdict(updater.check_update(channel=channel, use_cache=not force))
+
+
+class UpdateRequest(BaseModel):
+    target: str = "origin/master"  # ref / commit sha / origin/branch
+
+
+@app.post("/api/system/update")
+def system_update(body: UpdateRequest, background: BackgroundTasks) -> dict[str, Any]:
+    """请求 update：precondition 校验 + 写 .update_pending + 触发重启。
+
+    实际 git pull 在 cli.py 启动期 updater.apply_pending() 完成（避免在 server
+    进程里跑 git pull，规避 native module 已锁的问题）。
+    """
+    _check_no_running_tasks()
+
+    cur = updater.current_version()
+    if cur.is_dirty:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "dirty_working_tree",
+                "message": "本地有未提交的修改，请先 commit / stash",
+            },
+        )
+
+    updater.request_update(body.target)
+    background.add_task(_raise_sigint_after_response)
+    return {"ok": True, "message": f"update scheduled → {body.target}"}
+
+
+@app.post("/api/system/rollback")
+def system_rollback(background: BackgroundTasks) -> dict[str, Any]:
+    """回滚到 .last_version 记录的上一版本（PR-C）。
+
+    走与正向 update 完全一致的路径（写 .update_pending=<sha> + tmp/restart
+    → cli.py 启动期 apply_pending 实际 reset），所以 dirty / running task
+    precondition 一样适用，回滚成功后 .last_version 会被写成"回滚前的版本"
+    （即正向)，支持来回切。
+    """
+    _check_no_running_tasks()
+
+    cur = updater.current_version()
+    if cur.is_dirty:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "dirty_working_tree",
+                "message": "本地有未提交的修改，请先 commit / stash",
+            },
+        )
+
+    target = updater.request_rollback()
+    if target is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "no_rollback_target",
+                "message": ".last_version 不存在或 commit 已不在仓库里（被 GC？）",
+            },
+        )
+
+    background.add_task(_raise_sigint_after_response)
+    return {"ok": True, "message": f"rollback scheduled → {target[:8]}", "target": target}
+
+
+@app.get("/api/system/update_status")
+def system_update_status() -> dict[str, Any]:
+    """最近一次 update 的结构化结果 + rollback target（PR-C）。
+
+    rollback_target 与 status 解耦：即使从未走过 update（.update_status 不存在），
+    只要 .last_version 指向的 commit 还在仓库里，回滚按钮就应当能用（user 手动
+    git reset 后想"还原到上一版"也是合法场景）。
+
+    UI 上：
+    - status=null：没有 update 历史，不展示 banner / 不展示"查看上次日志"按钮
+    - status='ok'：可选展示"已更新到 X，X 秒前"
+    - status='aborted' / 'failed' / 'partial'：红色 banner + reason + 跳日志
+    - rollback_target 非 null（不依赖 status）：显示"切换到 sha"按钮
+    """
+    from dataclasses import asdict
+    rollback_to = updater.rollback_target()
+    st = updater.last_status()
+    if st is None:
+        return {"status": None, "rollback_target": rollback_to}
+    return {
+        **asdict(st),
+        "rollback_target": rollback_to,
+    }
+
+
+@app.get("/api/system/update_log")
+def system_update_log() -> dict[str, Any]:
+    """完整 .update_log 文本内容（PR-C 失败时 UI 弹 modal 用）。"""
+    return {"content": updater.read_update_log()}
 
 
 @app.get("/", response_model=None)

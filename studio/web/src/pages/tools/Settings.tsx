@@ -10,6 +10,10 @@ import {
   type ModelsCatalog,
   type Secrets,
   type SecretsPatch,
+  type SystemPrefsConfig,
+  type SystemUpdateCheck,
+  type SystemUpdateStatus,
+  type SystemVersion,
   type TorchCuTag,
   type TorchStatus,
   type WandBConfig,
@@ -38,7 +42,7 @@ type Section =
   | 'queue'
   | 'generate'
 
-type Tab = 'dataset' | 'tagging' | 'training' | 'monitor' | 'testing' | 'appearance'
+type Tab = 'dataset' | 'tagging' | 'training' | 'monitor' | 'testing' | 'appearance' | 'system'
 
 const TAB_LIST: { id: Tab; label: string }[] = [
   { id: 'dataset', label: '数据集' },
@@ -47,6 +51,7 @@ const TAB_LIST: { id: Tab; label: string }[] = [
   { id: 'monitor', label: '监控' },
   { id: 'testing', label: '测试' },
   { id: 'appearance', label: '页面' },
+  { id: 'system', label: '系统' },
 ]
 
 // 每个 tab 的 section index — 用于右侧 sticky 导航。id 与各 section 的 DOM id
@@ -79,6 +84,10 @@ const TAB_SECTIONS: Record<Tab, { id: string; label: string }[]> = {
   ],
   appearance: [
     { id: 'display', label: '显示' },
+  ],
+  system: [
+    { id: 'version', label: '版本' },
+    { id: 'service', label: '服务' },
   ],
 }
 
@@ -131,6 +140,7 @@ function getStoredTab(): Tab {
     if (
       v === 'dataset' || v === 'tagging' || v === 'training'
       || v === 'monitor' || v === 'testing' || v === 'appearance'
+      || v === 'system'
     ) return v
   } catch {
     /* ignore localStorage errors */
@@ -195,6 +205,7 @@ const EMPTY: Secrets = {
   models: { root: null, selected_anima: 'preview3-base' },
   queue: { allow_gpu_during_train: false },
   generate: { preview_every_n_steps: 3, attention_backend: 'auto' },
+  system: { show_dev_channel: false },
 }
 
 const textInputClass = 'w-full px-2 py-1 outline-none rounded-sm bg-sunken border border-subtle text-sm text-fg-primary focus:border-accent'
@@ -893,6 +904,10 @@ export default function SettingsPage() {
 
       {tab === 'appearance' && (
         <DisplaySection />
+      )}
+
+      {tab === 'system' && (
+        <SystemSection />
       )}
     </div>
 
@@ -2278,6 +2293,610 @@ function DisplaySection() {
           </div>
           <p className="text-xs text-fg-tertiary m-0">
             {densityDesc(density)}
+          </p>
+        </div>
+      </SettingsField>
+    </SettingsSection>
+  )
+}
+
+// ── System Section（系统 tab）─────────────────────────────────────────────
+//
+// PR-B 起拆成两个 sub-section：
+//   - VersionSection：当前版本 / 检查更新 / 立即更新（master 通道）
+//   - ServiceSection：重启 server
+//
+// 共用流程"触发后端退出 → 轮询 /api/health 等回来 → 刷新页面"由
+// `pollHealthThenReload` 抽出。restart 超时 5 分钟，update 超时 10 分钟
+// （要多跑 git pull + 可能 pip install / npm install 的时间）。
+function SystemSection() {
+  return (
+    <>
+      <VersionSection />
+      <ServiceSection />
+    </>
+  )
+}
+
+// ── 公共：触发后端退出后轮询 health 并刷新 ─────────────────────────────
+//
+// 调用者负责在 await 之前已经成功触发了 server 退出（POST /restart 或 /update
+// 已经 200 回来）。这里只管"等服务回来 + 刷页面 + 失败提示"。
+type ToastFn = (msg: string, kind?: 'info' | 'success' | 'error') => void
+
+async function pollHealthThenReload(
+  toast: ToastFn,
+  timeoutMs: number,
+  label: string,
+  onTimeout: () => void,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  const pollInterval = 500
+  // 间隔后开始轮询：给 server 时间真正退出，避免命中还没死的旧进程
+  await new Promise((r) => setTimeout(r, 1500))
+  while (Date.now() < deadline) {
+    try {
+      await api.health()
+      toast(`${label}完成，正在刷新页面...`, 'success')
+      setTimeout(() => window.location.reload(), 800)
+      return
+    } catch {
+      // server 还没回来，继续轮询
+    }
+    await new Promise((r) => setTimeout(r, pollInterval))
+  }
+  const mins = Math.round(timeoutMs / 60_000)
+  toast(`${label}超时（${mins} 分钟），请检查终端输出后手动刷新页面`, 'error')
+  onTimeout()
+}
+
+// ── 版本 Section ────────────────────────────────────────────────────────
+//
+// 加载时自动 fetch /api/system/version + /api/system/update_check（master 通道，
+// 走 cache）+ /api/system/update_status（PR-C：上次 update 结果）+ /api/secrets
+// （读 system.show_dev_channel，PR-D：dev 通道 toggle）。
+// 操作按钮：检查更新 / 立即更新 / 切换到上一版本（rollback，仅在 .last_version
+// 存在时显示）/ 查看上次日志（仅在失败时主动暴露）。
+// 高级折叠：显示开发版更新 toggle；开启后暴露 dev 通道按钮（手动检查 / 更新到 dev）。
+//          自动检查仍只 fetch master，Topbar badge 也仅 master 触发（设计文档明确）。
+function VersionSection() {
+  const { toast } = useToast()
+  const dialog = useDialog()
+  const [version, setVersion] = useState<SystemVersion | null>(null)
+  const [check, setCheck] = useState<SystemUpdateCheck | null>(null)
+  const [status, setStatus] = useState<SystemUpdateStatus | null>(null)
+  const [prefs, setPrefs] = useState<SystemPrefsConfig | null>(null)
+  const [devCheck, setDevCheck] = useState<SystemUpdateCheck | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [checkingDev, setCheckingDev] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [logModal, setLogModal] = useState<{ open: boolean; content: string; loading: boolean }>(
+    { open: false, content: '', loading: false },
+  )
+
+  useEffect(() => {
+    void api.getSystemVersion().then(setVersion).catch(() => { /* silent */ })
+    void api.checkSystemUpdate('master').then(setCheck).catch(() => { /* silent */ })
+    void api.getSystemUpdateStatus().then(setStatus).catch(() => { /* silent */ })
+    void api.getSecrets().then((s) => setPrefs(s.system)).catch(() => { /* silent */ })
+  }, [])
+
+  const handleCheck = async () => {
+    setChecking(true)
+    try {
+      const r = await api.checkSystemUpdate('master', true)
+      setCheck(r)
+      if (r.error) {
+        toast(`检查失败: ${r.error}`, 'error')
+      } else if (r.has_update) {
+        toast(`有新版本：${r.latest_tag ?? r.latest_commit.slice(0, 8)}（${r.commits_ahead} commits）`, 'info')
+      } else {
+        toast('已是最新版本', 'success')
+      }
+    } catch (e) {
+      toast(`检查更新失败: ${e}`, 'error')
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  // 公用的 422 / 其它错误分流（update 和 rollback 都用）
+  const _formatActionError = (e: unknown, action: string): string => {
+    const err = e as Error & { status?: number; detail?: { error?: string; tasks?: { name: string; id?: number }[] } }
+    if (err.status === 422 && err.detail?.error === 'running_tasks_present') {
+      const names = (err.detail.tasks ?? []).map((t) => t.name || `task#${t.id ?? '?'}`).join(', ')
+      return `有任务在跑，请先取消：${names}`
+    }
+    if (err.status === 422 && err.detail?.error === 'dirty_working_tree') {
+      return '本地有未提交修改，请先 commit 或 stash'
+    }
+    if (err.status === 409 && err.detail?.error === 'no_rollback_target') {
+      return '没有可回滚的版本（首次启动 / .last_version 已被清理）'
+    }
+    return `触发${action}失败: ${err.message ?? e}`
+  }
+
+  const handleUpdate = async () => {
+    if (!check?.has_update) return
+    const targetLabel = check.latest_tag ?? check.latest_commit.slice(0, 8)
+    const ok = await dialog.confirm(
+      `将更新到 ${targetLabel}（${check.commits_ahead} commits）。\n\n` +
+      'Studio 会关闭后台 server，pull 新代码，按需 pip / npm install，再重启。\n' +
+      '预计 1-5 分钟（首次或依赖大改时更久），期间 webui 无法访问，页面会自动等待并刷新。\n\n' +
+      '若有训练 / 打标任务正在运行将被拒绝；本地有未提交修改也会被拒绝。',
+      { tone: 'warn', okText: '更新' },
+    )
+    if (!ok) return
+
+    setBusy(true)
+    try {
+      await api.performSystemUpdate('origin/master')
+    } catch (e) {
+      toast(_formatActionError(e, '更新'), 'error')
+      setBusy(false)
+      return
+    }
+
+    void pollHealthThenReload(toast, 10 * 60_000, '更新', () => setBusy(false))
+  }
+
+  // PR-D — 当用户已经在 dev 通道时，"立即更新"按钮文案歧义（听起来像"前进"
+  // 实际是"切回 master"）。单独走这个 handler，dialog 文案明确告知方向，
+  // 不依赖 has_update（dev 上 master 即使一致也允许显式切回 stable）。
+  const handleSwitchToMaster = async () => {
+    const targetLabel = check?.latest_tag ?? check?.latest_commit?.slice(0, 8) ?? 'master HEAD'
+    const ok = await dialog.confirm(
+      `将切回稳定通道 master（${targetLabel}）。\n\n` +
+      '你当前在 dev 通道。切回会 git reset --hard origin/master —— ' +
+      'dev 独有但未合并进 master 的 commit 会从本地工作树消失（git reflog 仍可找回）。\n' +
+      '其余流程与 update 一致：关闭 server，按需补依赖，重启。\n\n' +
+      '若有训练 / 打标任务在跑将被拒绝；本地未提交修改也会被拒绝。',
+      { tone: 'warn', okText: '切回稳定' },
+    )
+    if (!ok) return
+
+    setBusy(true)
+    try {
+      await api.performSystemUpdate('origin/master')
+    } catch (e) {
+      toast(_formatActionError(e, '切回稳定'), 'error')
+      setBusy(false)
+      return
+    }
+
+    void pollHealthThenReload(toast, 10 * 60_000, '切回稳定', () => setBusy(false))
+  }
+
+  const handleRollback = async () => {
+    if (!status?.rollback_target) return
+    const target = status.rollback_target
+    const ok = await dialog.confirm(
+      `将切换到上一版本（commit ${target.slice(0, 8)}）。\n\n` +
+      '走与正向 update 同样的流程：关闭 server，git reset --hard <commit>，按需补依赖，重启。\n' +
+      '切换成功后 .last_version 会变成"切换前的版本"，再点同样的按钮即可回到此处。\n\n' +
+      '若有训练 / 打标任务正在运行将被拒绝；本地有未提交修改也会被拒绝。',
+      { tone: 'warn', okText: '切换' },
+    )
+    if (!ok) return
+
+    setBusy(true)
+    try {
+      await api.rollbackSystem()
+    } catch (e) {
+      toast(_formatActionError(e, '回滚'), 'error')
+      setBusy(false)
+      return
+    }
+
+    void pollHealthThenReload(toast, 10 * 60_000, '回滚', () => setBusy(false))
+  }
+
+  const handleViewLog = async () => {
+    setLogModal({ open: true, content: '', loading: true })
+    try {
+      const r = await api.getSystemUpdateLog()
+      setLogModal({ open: true, content: r.content || '(空)', loading: false })
+    } catch (e) {
+      setLogModal({ open: true, content: `加载失败: ${e}`, loading: false })
+    }
+  }
+
+  // PR-D — dev 通道 toggle 持久化到 secrets.json。乐观更新 + 失败回滚。
+  const handleToggleDevChannel = async (next: boolean) => {
+    const prev = prefs
+    setPrefs((p) => p ? { ...p, show_dev_channel: next } : { show_dev_channel: next })
+    if (!next) setDevCheck(null)        // 关掉时清掉缓存的 dev 检查结果
+    try {
+      const updated = await api.updateSecrets({ system: { show_dev_channel: next } })
+      setPrefs(updated.system)
+    } catch (e) {
+      setPrefs(prev)                    // 失败回滚 UI
+      toast(`保存失败: ${(e as Error).message ?? e}`, 'error')
+    }
+  }
+
+  const handleCheckDev = async () => {
+    setCheckingDev(true)
+    try {
+      const r = await api.checkSystemUpdate('dev', true)
+      setDevCheck(r)
+      if (r.error) {
+        toast(`dev 检查失败: ${r.error}`, 'error')
+      } else if (r.has_update) {
+        toast(`dev 通道有 ${r.commits_ahead} commits 新提交`, 'info')
+      } else {
+        toast('dev 通道与当前一致', 'success')
+      }
+    } catch (e) {
+      toast(`dev 检查失败: ${e}`, 'error')
+    } finally {
+      setCheckingDev(false)
+    }
+  }
+
+  const handleUpdateDev = async () => {
+    if (!devCheck?.has_update) return
+    const targetLabel = devCheck.latest_commit.slice(0, 8)
+    const ok = await dialog.confirm(
+      `切换到 dev 通道（commit ${targetLabel}，${devCheck.commits_ahead} commits）。\n\n` +
+      'dev 通道是开发版，未经发布验证，可能引入崩溃 / 训练异常。\n\n' +
+      '其余流程与正向 update 一致：关闭 server，git reset --hard origin/dev，按需补依赖，重启。\n' +
+      '完成后回滚按钮会显示当前 commit 让你能切回此处。\n\n' +
+      '若有训练 / 打标任务在跑将被拒绝；本地未提交修改也会被拒绝。',
+      { tone: 'danger', okText: '更新到 dev' },
+    )
+    if (!ok) return
+
+    setBusy(true)
+    try {
+      await api.performSystemUpdate('origin/dev')
+    } catch (e) {
+      toast(_formatActionError(e, '更新到 dev'), 'error')
+      setBusy(false)
+      return
+    }
+
+    void pollHealthThenReload(toast, 10 * 60_000, '更新', () => setBusy(false))
+  }
+
+  // 不再把 branch 塞 headDescr —— 单独显示成 channel pill 让用户一眼看出
+  // 自己在哪个通道（master = 稳定 / dev = 开发版 / 其它 = 自定义分支）。
+  const headDescr = version
+    ? `${version.tag ?? `v${version.version}`} · ${version.commit_short}${version.is_dirty ? ' · 本地有改动' : ''}`
+    : '加载中...'
+
+  // 上次 update 失败 banner（aborted / failed / partial 时显示红色提示）
+  const statusBadFailed = status && (status.status === 'failed' || status.status === 'aborted' || status.status === 'partial')
+
+  // PR-D — 通道判定。on dev + toggle 开启时把主按钮从"立即更新 master"
+  // 改成"切回稳定 master"（文案 + dialog 明确方向）；同时主按钮独立于
+  // has_update（dev 上想随时切回 stable 是合法操作）。
+  const onDev = version?.branch === 'dev'
+  const showSwitchToStable = onDev && !!prefs?.show_dev_channel
+
+  return (
+    <SettingsSection id="version" title="版本">
+      {statusBadFailed && (
+        <div className="flex flex-col gap-1.5 rounded-md border border-err bg-err-soft p-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-err">
+            <span>上次更新{status?.status === 'aborted' ? '中止' : status?.status === 'partial' ? '部分成功' : '失败'}</span>
+            {status?.finished_at && (
+              <span className="text-2xs text-fg-dim font-normal font-mono">
+                {new Date(status.finished_at * 1000).toLocaleString()}
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-fg-secondary">
+            {status?.reason || '原因未知'}
+            {status?.target && <span className="text-fg-dim"> · target = {status.target}</span>}
+          </div>
+          <button
+            onClick={() => void handleViewLog()}
+            className="btn btn-secondary btn-xs self-start"
+          >
+            查看完整日志
+          </button>
+        </div>
+      )}
+
+      <SettingsField label="当前">
+        <div className="flex flex-col gap-0.5 text-fg-primary text-sm font-mono">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span>{headDescr}</span>
+            {version && <ChannelPill branch={version.branch} />}
+          </div>
+          {version?.commit_time_iso && (
+            <span className="text-2xs text-fg-dim">
+              {new Date(version.commit_time_iso).toLocaleString()}
+            </span>
+          )}
+        </div>
+      </SettingsField>
+
+      {check && (
+        <SettingsField label="远端 (master)">
+          {check.error ? (
+            <span className="text-err text-sm">{check.error}</span>
+          ) : check.has_update ? (
+            <div className="flex flex-col gap-0.5 text-fg-primary text-sm font-mono">
+              <span>
+                {check.latest_tag ?? check.latest_commit.slice(0, 8)} · ↑ {check.commits_ahead} commits
+              </span>
+              <span className="text-2xs text-fg-dim">
+                上次检查 {new Date(check.checked_at * 1000).toLocaleString()}
+              </span>
+            </div>
+          ) : onDev ? (
+            // dev 用户看到 has_update=false 说明 dev 已含 master 所有 commit；
+            // 此时给个 master HEAD 提示而不是误导的"已是最新版本"。
+            <div className="flex flex-col gap-0.5 text-fg-primary text-sm font-mono">
+              <span className="text-fg-dim">
+                master HEAD: {check.latest_commit.slice(0, 8)}（你领先 / 持平）
+              </span>
+              <span className="text-2xs text-fg-dim">
+                上次检查 {new Date(check.checked_at * 1000).toLocaleString()}
+              </span>
+            </div>
+          ) : (
+            <span className="text-fg-dim text-sm">已是最新版本</span>
+          )}
+        </SettingsField>
+      )}
+
+      <SettingsField label="操作">
+        <div className="flex flex-col gap-1.5">
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => void handleCheck()}
+              disabled={checking || busy}
+              className="btn btn-secondary btn-sm"
+            >
+              {checking ? '检查中...' : '检查更新'}
+            </button>
+            {showSwitchToStable ? (
+              // dev 上的用户：主按钮永远显示"切回稳定"（不依赖 has_update）。
+              // 跟踪 dev 新提交走高级折叠里的 [更新到 dev]；主区是 stable 出口。
+              <button
+                onClick={() => void handleSwitchToMaster()}
+                disabled={busy || checking}
+                className="btn btn-primary btn-sm"
+              >
+                {busy ? '切回稳定中...' : '切回稳定通道 → master'}
+              </button>
+            ) : check?.has_update && (
+              <button
+                onClick={() => void handleUpdate()}
+                disabled={busy || checking}
+                className="btn btn-primary btn-sm"
+              >
+                {busy
+                  ? '更新中...'
+                  : `立即更新 → ${check.latest_tag ?? check.latest_commit.slice(0, 8)}`
+                    + (prefs?.show_dev_channel ? '（稳定）' : '')}
+              </button>
+            )}
+            {status?.rollback_target && (
+              <button
+                onClick={() => void handleRollback()}
+                disabled={busy || checking}
+                className="btn btn-secondary btn-sm"
+                title={`切换到 ${status.rollback_target}`}
+              >
+                {busy ? '切换中...' : `切换到 ${status.rollback_target.slice(0, 8)}`}
+              </button>
+            )}
+            {status?.status && (
+              <button
+                onClick={() => void handleViewLog()}
+                disabled={busy}
+                className="btn btn-ghost btn-sm"
+              >
+                查看上次日志
+              </button>
+            )}
+          </div>
+          <p className="text-2xs text-fg-dim leading-snug">
+            自动检查每 24 小时一次（master 通道，关闭 webui 不影响）。
+            更新 / 回滚都执行 <code>git reset --hard &lt;target&gt;</code> + 必要时 pip / npm install。
+            <br />
+            <span className="text-warn">
+              当前有训练 / 打标任务运行时不允许更新；本地未提交的改动也会被拒绝。
+            </span>
+          </p>
+        </div>
+      </SettingsField>
+
+      {/* PR-D — 高级设置：dev 通道 toggle + 手动操作。默认折叠；勾选 toggle
+          会持久化到 secrets.json (system.show_dev_channel)。Topbar badge /
+          自动检查仍然只看 master —— dev 必须显式手动触发，避免开发者被
+          dev commit 持续骚扰（设计文档明确）。 */}
+      <details className="border-t border-subtle pt-2 mt-1 group">
+        <summary className="cursor-pointer text-sm text-fg-secondary hover:text-fg-primary select-none list-none flex items-center gap-1.5 py-1">
+          <span className="inline-block transition-transform group-open:rotate-90">▸</span>
+          <span>高级设置</span>
+        </summary>
+        <div className="pt-2 pl-4 flex flex-col gap-3">
+          <SettingsField label="显示开发版更新">
+            <div className="flex items-center gap-2">
+              <Bool
+                value={!!prefs?.show_dev_channel}
+                onChange={(v) => void handleToggleDevChannel(v)}
+              />
+              <span className="text-2xs text-fg-dim leading-snug">
+                开启后下方暴露 dev 通道操作（手动检查 / 更新到 dev）。
+                自动检查 + Topbar 红点仍然只看 master。
+              </span>
+            </div>
+          </SettingsField>
+
+          {prefs?.show_dev_channel && (
+            <div className="rounded-md border border-subtle bg-surface-alt p-3 flex flex-col gap-2">
+              <div className="text-xs font-semibold text-fg-primary">
+                dev 通道（开发版）
+              </div>
+              {devCheck && (
+                devCheck.error ? (
+                  <span className="text-err text-xs">{devCheck.error}</span>
+                ) : devCheck.has_update ? (
+                  <div className="text-xs text-fg-primary font-mono flex flex-col gap-0.5">
+                    <span>
+                      {devCheck.latest_commit.slice(0, 8)} · ↑ {devCheck.commits_ahead} commits
+                    </span>
+                    <span className="text-2xs text-fg-dim">
+                      检查于 {new Date(devCheck.checked_at * 1000).toLocaleString()}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-fg-dim text-xs">dev 通道与当前一致</span>
+                )
+              )}
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => void handleCheckDev()}
+                  disabled={checkingDev || busy}
+                  className="btn btn-secondary btn-sm"
+                >
+                  {checkingDev ? '检查中...' : '手动检查 dev'}
+                </button>
+                {devCheck?.has_update && (
+                  <button
+                    onClick={() => void handleUpdateDev()}
+                    disabled={busy || checkingDev}
+                    className="btn btn-danger btn-sm"
+                  >
+                    {busy ? '更新中...' : `更新到 dev (${devCheck.latest_commit.slice(0, 8)})`}
+                  </button>
+                )}
+              </div>
+              <p className="text-2xs text-warn leading-snug">
+                ⚠ dev 通道未经发布验证，可能引入崩溃 / 训练异常 / schema 不兼容。
+                更新后用主区"切换到 ..."按钮可回到当前 commit。
+              </p>
+            </div>
+          )}
+        </div>
+      </details>
+
+      {logModal.open && (
+        <UpdateLogModal
+          loading={logModal.loading}
+          content={logModal.content}
+          onClose={() => setLogModal({ open: false, content: '', loading: false })}
+        />
+      )}
+    </SettingsSection>
+  )
+}
+
+// PR-D — 通道指示徽章。master = 稳定（绿）/ dev = 开发版（橙）/ 其它 = 自定义
+// 分支（灰）。用现有 .badge-ok / .badge-warn / .badge-info 复用站内统一色板。
+function ChannelPill({ branch }: { branch: string }) {
+  const meta = branch === 'master'
+    ? { cls: 'badge-ok', label: '稳定' }
+    : branch === 'dev'
+      ? { cls: 'badge-warn', label: '开发版' }
+      : branch === 'detached'
+        ? { cls: 'badge-info', label: '游离 HEAD' }
+        : { cls: 'badge-info', label: '自定义分支' }
+  return (
+    <span
+      className={`${meta.cls} inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-2xs font-sans font-medium`}
+      title={`当前分支：${branch}`}
+    >
+      <span>{meta.label}</span>
+      <span className="font-mono opacity-70">{branch}</span>
+    </span>
+  )
+}
+
+// 简易的 modal：点遮罩 / 按 ESC 关闭，pre + 等宽字体显示日志。
+// 没用 useDialog 是因为它返回的是命令式 confirm/prompt 接口，不适合长文本展示。
+function UpdateLogModal({
+  loading, content, onClose,
+}: { loading: boolean; content: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface border border-subtle rounded-md shadow-lg max-w-4xl w-[92vw] max-h-[80vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-subtle px-4 py-2.5">
+          <h3 className="text-sm font-semibold text-fg-primary">上次更新日志</h3>
+          <button
+            onClick={onClose}
+            className="text-fg-dim hover:text-fg-primary text-lg leading-none"
+            aria-label="关闭"
+          >×</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <span className="text-fg-dim text-sm">加载中...</span>
+          ) : (
+            <pre className="text-2xs font-mono text-fg-primary whitespace-pre-wrap break-words">
+              {content}
+            </pre>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── 服务 Section（重启 server）─────────────────────────────────────────
+function ServiceSection() {
+  const { toast } = useToast()
+  const dialog = useDialog()
+  const [busy, setBusy] = useState(false)
+
+  const handleRestart = async () => {
+    const ok = await dialog.confirm(
+      '将关闭并重新启动 Studio 后端服务。\n\n' +
+      '通常 30 秒到 1 分钟，期间 webui 无法访问（页面会自动等待并刷新）。\n\n' +
+      '若有训练 / 打标任务在跑会被拒绝（PR-B 起加保护）。',
+      { tone: 'warn', okText: '重启' },
+    )
+    if (!ok) return
+
+    setBusy(true)
+    try {
+      await api.restartServer()
+    } catch (e) {
+      const err = e as Error & { status?: number; detail?: { error?: string; tasks?: { name: string; id?: number }[] } }
+      if (err.status === 422 && err.detail?.error === 'running_tasks_present') {
+        const names = (err.detail.tasks ?? []).map((t) => t.name || `task#${t.id ?? '?'}`).join(', ')
+        toast(`有任务在跑，请先取消：${names}`, 'error')
+      } else {
+        toast(`触发重启失败: ${err.message ?? e}`, 'error')
+      }
+      setBusy(false)
+      return
+    }
+
+    void pollHealthThenReload(toast, 5 * 60_000, '重启', () => setBusy(false))
+  }
+
+  return (
+    <SettingsSection id="service" title="服务">
+      <SettingsField label="重启 Studio">
+        <div className="flex flex-col gap-1.5">
+          <button
+            onClick={() => void handleRestart()}
+            disabled={busy}
+            className="btn btn-secondary btn-sm self-start"
+          >
+            {busy ? '重启中...' : '重启 server'}
+          </button>
+          <p className="text-2xs text-fg-dim leading-snug">
+            关闭并重新启动后端进程。常用场景：修改 secrets.json 后强制刷新、
+            装完新 onnxruntime / PyTorch 让 EP 生效。
           </p>
         </div>
       </SettingsField>

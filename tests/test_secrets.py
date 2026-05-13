@@ -360,3 +360,41 @@ def test_has_gelbooru_credentials(secrets_file: Path) -> None:
     assert secrets.has_gelbooru_credentials() is False
     secrets.update({"gelbooru": {"user_id": "u", "api_key": "k"}})
     assert secrets.has_gelbooru_credentials() is True
+
+
+# ---------------------------------------------------------------------------
+# PR-D — system.show_dev_channel（dev 通道 toggle 持久化）
+# ---------------------------------------------------------------------------
+
+
+def test_system_defaults_show_dev_channel_false(secrets_file: Path) -> None:
+    """新装默认 toggle 关 —— 绝大多数用户看简化 UI，不暴露 dev 入口。"""
+    s = secrets.load()
+    assert s.system.show_dev_channel is False
+
+
+def test_system_show_dev_channel_round_trip(secrets_file: Path) -> None:
+    """update + load 持久化（webui 勾选 toggle 后刷页应保留）。"""
+    secrets.update({"system": {"show_dev_channel": True}})
+    assert secrets.load().system.show_dev_channel is True
+    # 关掉也持久化
+    secrets.update({"system": {"show_dev_channel": False}})
+    assert secrets.load().system.show_dev_channel is False
+
+
+def test_system_legacy_file_without_system_field(secrets_file: Path) -> None:
+    """老 secrets.json 没有 system 字段时，加载用默认值（show_dev_channel=False）。"""
+    secrets_file.write_text(
+        json.dumps({"gelbooru": {"user_id": "alice"}}),
+        encoding="utf-8",
+    )
+    s = secrets.load()
+    assert s.system.show_dev_channel is False
+    assert s.gelbooru.user_id == "alice"  # 其它字段不受影响
+
+
+def test_system_show_dev_channel_in_masked_dict(secrets_file: Path) -> None:
+    """show_dev_channel 不是敏感字段，掩码后应保留原值。"""
+    secrets.update({"system": {"show_dev_channel": True}})
+    masked = secrets.to_masked_dict(secrets.load())
+    assert masked["system"]["show_dev_channel"] is True
