@@ -2654,11 +2654,8 @@ function VersionSection() {
       headerExtras={
         <InfoButton>
           <ul>
-            <li>自动检查每 24h，仅检查 master 通道；dev 必须主动触发，不进 Topbar 红点</li>
-            <li>
-              更新 / 切换 = <code>git reset --hard &lt;target&gt;</code> +
-              必要时 <code>pip install</code> / <code>npm install</code>
-            </li>
+            <li>自动检查每 24 小时，仅看 master 通道；dev 必须主动触发，不进 Topbar 红点</li>
+            <li>更新 / 切换底层走 git reset --hard，需要时跑 pip / npm install</li>
             <li>有运行中任务 / 本地工作树脏 → 操作会被 pre-flight 拒绝</li>
             <li>master 显示 release tag；dev 显示 commit 时间线，可点任意 commit 切换</li>
           </ul>
