@@ -206,6 +206,10 @@ select option:checked {
 .btn-secondary:hover { background: var(--bg-overlay); border-color: var(--border-strong); }
 .btn-ghost { background: transparent; color: var(--fg-secondary); }
 .btn-ghost:hover { background: var(--bg-overlay); color: var(--fg-primary); }
+.btn-danger { background: var(--err); color: white; border-color: var(--err); }
+.btn-danger:hover { filter: brightness(1.08); }
+.btn-warn { background: var(--warn); color: white; border-color: var(--warn); }
+.btn-warn:hover { filter: brightness(1.08); }
 .btn-sm { padding: 4px 10px; font-size: var(--t-sm); }
 
 .card {
