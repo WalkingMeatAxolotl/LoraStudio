@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -215,6 +216,74 @@ def check_update(channel: str = "master", use_cache: bool = True) -> UpdateCheck
         _write_cache(result)
 
     return result
+
+
+def resolve_ref(ref: str) -> Optional[str]:
+    """`git rev-parse <ref>` → 完整 sha；ref 不存在 → None。"""
+    rc, out, _ = _git("rev-parse", ref)
+    return out if rc == 0 else None
+
+
+_REQ_NAME_RE = re.compile(r"^([A-Za-z0-9_\-\.\[\]]+)")
+
+
+def _parse_requirements(text: str) -> dict[str, str]:
+    """`requirements.txt` 内容 → {pkg_name_lowercased: full_spec_line}。
+
+    跳过注释 / 空行 / `-r ...` / `-e ...` 引用。识别包名 = 行首字母数字下划线
+    点连字符 + 可选 extras `[...]`；不解析 marker / hash —— 这里只用来粗略
+    diff 提示用户"有变化"，准确版本控制走 pip 自己的解析。
+    """
+    out: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        m = _REQ_NAME_RE.match(line)
+        if not m:
+            continue
+        out[m.group(1).lower()] = line
+    return out
+
+
+@dataclass
+class RequirementsDiff:
+    added: list[str] = field(default_factory=list)    # 新增的包名（target 有，current 没）
+    removed: list[str] = field(default_factory=list)  # 移除的包名（current 有，target 没）
+    changed: list[dict[str, str]] = field(default_factory=list)
+    # changed item: {"name": "...", "from": "pkg==1.0", "to": "pkg==2.0"}
+
+
+def requirements_diff(target_ref: str) -> RequirementsDiff:
+    """Diff `requirements.txt` 在 HEAD 与 target_ref 之间。
+
+    git show 失败（target ref 不解析 / 文件在 target 上不存在）→ 空 diff，
+    UI 当作"无变化"处理。current requirements.txt 缺失同样空 diff。
+    """
+    target_resolved = resolve_ref(target_ref)
+    if target_resolved is None:
+        return RequirementsDiff()
+    rc, target_text, _ = _git("show", f"{target_resolved}:requirements.txt")
+    if rc != 0:
+        return RequirementsDiff()
+
+    cur_path = REPO_ROOT / "requirements.txt"
+    if not cur_path.exists():
+        return RequirementsDiff()
+    try:
+        cur_text = cur_path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return RequirementsDiff()
+
+    cur = _parse_requirements(cur_text)
+    tgt = _parse_requirements(target_text)
+    added = sorted(set(tgt.keys()) - set(cur.keys()))
+    removed = sorted(set(cur.keys()) - set(tgt.keys()))
+    changed: list[dict[str, str]] = []
+    for name in sorted(set(tgt.keys()) & set(cur.keys())):
+        if cur[name] != tgt[name]:
+            changed.append({"name": name, "from": cur[name], "to": tgt[name]})
+    return RequirementsDiff(added=added, removed=removed, changed=changed)
 
 
 def dev_commits(limit: int = 10) -> DevCommitsResult:

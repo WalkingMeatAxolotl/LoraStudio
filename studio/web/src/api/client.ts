@@ -1701,6 +1701,12 @@ export const api = {
   // （DevCard 时间线 + 任意 commit 切换用）。limit 默认 10，clamp 1-50。
   getDevCommits: (limit = 10) =>
     req<DevCommitsResult>(`/api/system/dev_commits?limit=${limit}`),
+
+  // chunk 4 — 更新前置检查。VersionSection preview 状态展开时拉取，渲染
+  // pre-flight 行；任一 level=err → blocking=true 禁用确认按钮。
+  // target 接受任意 git ref（tag / branch / commit sha）。
+  getPreflight: (target: string) =>
+    req<PreflightResult>(`/api/system/preflight?target=${encodeURIComponent(target)}`),
 }
 
 export interface SystemVersion {
@@ -1768,6 +1774,25 @@ export interface DevCommitsResult {
   commits: DevCommit[]
   fetched: boolean
   error: string | null
+}
+
+/** chunk 4 — 更新前置检查。任一 level=err → blocking=true 禁用确认按钮。 */
+export interface PreflightCheck {
+  key: 'dirty' | 'running_tasks' | 'requirements_diff' | 'last_version'
+  level: 'ok' | 'warn' | 'err'
+  label: string
+}
+export interface PreflightRequirementsDiff {
+  added: string[]
+  removed: string[]
+  changed: { name: string; from: string; to: string }[]
+}
+export interface PreflightResult {
+  target: string
+  target_resolved: string | null
+  checks: PreflightCheck[]
+  blocking: boolean
+  requirements_diff: PreflightRequirementsDiff
 }
 
 export interface BrowseEntry {

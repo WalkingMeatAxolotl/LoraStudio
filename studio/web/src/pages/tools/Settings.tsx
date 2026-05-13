@@ -12,6 +12,7 @@ import {
   type SecretsPatch,
   type DevCommit,
   type DevCommitsResult,
+  type PreflightResult,
   type ReleaseNotes,
   type SystemPrefsConfig,
   type SystemUpdateCheck,
@@ -2369,7 +2370,7 @@ async function pollHealthThenReload(
 // 列表留给 chunk 3。
 function VersionSection() {
   const { toast } = useToast()
-  const dialog = useDialog()
+  // chunk 4：dialog 模态被 inline preview 面板取代，VersionSection 不再用 dialog
   const [version, setVersion] = useState<SystemVersion | null>(null)
   const [check, setCheck] = useState<SystemUpdateCheck | null>(null)
   const [status, setStatus] = useState<SystemUpdateStatus | null>(null)
@@ -2380,6 +2381,13 @@ function VersionSection() {
   // chunk 3 — dev 通道最近 commit 列表 + 选中状态（用户点 commit 准备切换）
   const [devCommits, setDevCommits] = useState<DevCommitsResult | null>(null)
   const [selectedSha, setSelectedSha] = useState<string | null>(null)
+  // chunk 4 — 状态机 + preview / progress 数据。CardState / PendingTarget 类型
+  // 在模块底部声明（同时给 MasterCardProps / DevCardProps 用，避免重复定义）。
+  const [masterState, setMasterState] = useState<CardState>('idle')
+  const [devState, setDevState] = useState<CardState>('idle')
+  const [pendingTarget, setPendingTarget] = useState<PendingTarget | null>(null)
+  const [preflight, setPreflight] = useState<PreflightResult | null>(null)
+  const [preflightLoading, setPreflightLoading] = useState(false)
   const [checking, setChecking] = useState(false)
   const [checkingDev, setCheckingDev] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -2442,79 +2450,77 @@ function VersionSection() {
     return `触发${action}失败: ${err.message ?? e}`
   }
 
-  const handleUpdate = async () => {
+  // chunk 4 — inline preview/progress/failed 状态机：所有 "更新 / 切换 / 回滚"
+  // 动作不再走 dialog 模态，而是把卡 body 替换成 preview 面板（含 release
+  // notes / commit info + pre-flight 检查 + 取消/确认 按钮）。确认后切到
+  // progress 状态显示 spinner，pollHealthThenReload 触发页面刷新。
+  const enterPreview = (target: PendingTarget) => {
+    setPendingTarget(target)
+    setSelectedSha(null)
+    setPreflight(null)
+    setPreflightLoading(true)
+    if (target.kind === 'master') setMasterState('preview')
+    else setDevState('preview')
+    void api.getPreflight(target.ref)
+      .then((r) => setPreflight(r))
+      .catch(() => setPreflight(null))
+      .finally(() => setPreflightLoading(false))
+  }
+
+  const cancelPreview = () => {
+    setMasterState('idle')
+    setDevState('idle')
+    setPendingTarget(null)
+    setPreflight(null)
+    setPreflightLoading(false)
+  }
+
+  const confirmPreview = async () => {
+    if (!pendingTarget) return
+    const t = pendingTarget
+    if (t.kind === 'master') setMasterState('progress')
+    else setDevState('progress')
+    setBusy(true)
+    try {
+      await api.performSystemUpdate(t.ref)
+    } catch (e) {
+      toast(_formatActionError(e, t.kind === 'master' ? '更新' : '切换'), 'error')
+      setBusy(false)
+      if (t.kind === 'master') setMasterState('idle')
+      else setDevState('idle')
+      return
+    }
+    void pollHealthThenReload(
+      toast,
+      10 * 60_000,
+      t.kind === 'master' ? '更新' : '切换',
+      () => {
+        setBusy(false)
+        if (t.kind === 'master') setMasterState('idle')
+        else setDevState('idle')
+      },
+    )
+  }
+
+  // 各 action 入口：构造 PendingTarget 后委托给 enterPreview。
+  const handleUpdate = () => {
     if (!check?.has_update) return
-    const targetLabel = check.latest_tag ?? check.latest_commit.slice(0, 8)
-    const ok = await dialog.confirm(
-      `将更新到 ${targetLabel}（${check.commits_ahead} commits）。\n\n` +
-      'Studio 会关闭后台 server，pull 新代码，按需 pip / npm install，再重启。\n' +
-      '预计 1-5 分钟（首次或依赖大改时更久），期间 webui 无法访问，页面会自动等待并刷新。\n\n' +
-      '若有训练 / 打标任务正在运行将被拒绝；本地有未提交修改也会被拒绝。',
-      { tone: 'warn', okText: '更新' },
-    )
-    if (!ok) return
-
-    setBusy(true)
-    try {
-      await api.performSystemUpdate('origin/master')
-    } catch (e) {
-      toast(_formatActionError(e, '更新'), 'error')
-      setBusy(false)
-      return
-    }
-
-    void pollHealthThenReload(toast, 10 * 60_000, '更新', () => setBusy(false))
+    const label = check.latest_tag ?? check.latest_commit.slice(0, 8)
+    enterPreview({ kind: 'master', ref: 'origin/master', label })
   }
 
-  // PR-D — 当用户已经在 dev 通道时，"立即更新"按钮文案歧义（听起来像"前进"
-  // 实际是"切回 master"）。单独走这个 handler，dialog 文案明确告知方向，
-  // 不依赖 has_update（dev 上 master 即使一致也允许显式切回 stable）。
-  const handleSwitchToMaster = async () => {
-    const targetLabel = check?.latest_tag ?? check?.latest_commit?.slice(0, 8) ?? 'master HEAD'
-    const ok = await dialog.confirm(
-      `将切回稳定通道 master（${targetLabel}）。\n\n` +
-      '你当前在 dev 通道。切回会 git reset --hard origin/master —— ' +
-      'dev 独有但未合并进 master 的 commit 会从本地工作树消失（git reflog 仍可找回）。\n' +
-      '其余流程与 update 一致：关闭 server，按需补依赖，重启。\n\n' +
-      '若有训练 / 打标任务在跑将被拒绝；本地未提交修改也会被拒绝。',
-      { tone: 'warn', okText: '切回稳定' },
-    )
-    if (!ok) return
-
-    setBusy(true)
-    try {
-      await api.performSystemUpdate('origin/master')
-    } catch (e) {
-      toast(_formatActionError(e, '切回稳定'), 'error')
-      setBusy(false)
-      return
-    }
-
-    void pollHealthThenReload(toast, 10 * 60_000, '切回稳定', () => setBusy(false))
+  const handleSwitchToMaster = () => {
+    const label = check?.latest_tag ?? check?.latest_commit?.slice(0, 8) ?? 'master'
+    enterPreview({ kind: 'master', ref: 'origin/master', label })
   }
 
-  const handleRollback = async () => {
+  const handleRollback = () => {
     if (!status?.rollback_target) return
-    const target = status.rollback_target
-    const ok = await dialog.confirm(
-      `将切换到上一版本（commit ${target.slice(0, 8)}）。\n\n` +
-      '走与正向 update 同样的流程：关闭 server，git reset --hard <commit>，按需补依赖，重启。\n' +
-      '切换成功后 .last_version 会变成"切换前的版本"，再点同样的按钮即可回到此处。\n\n' +
-      '若有训练 / 打标任务正在运行将被拒绝；本地有未提交修改也会被拒绝。',
-      { tone: 'warn', okText: '切换' },
-    )
-    if (!ok) return
-
-    setBusy(true)
-    try {
-      await api.rollbackSystem()
-    } catch (e) {
-      toast(_formatActionError(e, '回滚'), 'error')
-      setBusy(false)
-      return
-    }
-
-    void pollHealthThenReload(toast, 10 * 60_000, '回滚', () => setBusy(false))
+    enterPreview({
+      kind: 'master',
+      ref: status.rollback_target,
+      label: status.rollback_target.slice(0, 8),
+    })
   }
 
   const handleViewLog = async () => {
@@ -2567,55 +2573,32 @@ function VersionSection() {
     }
   }
 
-  // chunk 3 — 点击任意 commit 后确认切换（与 handleUpdateDev 同 backend 路径，
-  // target=commit sha 而不是 'origin/dev'）。dialog 明确告知会进入"游离 HEAD"。
-  const handleSwitchToCommit = async (commit: DevCommit) => {
-    const ok = await dialog.confirm(
-      `将切到 commit ${commit.short_sha}\n\n` +
-      `${commit.msg}\n— ${commit.author}\n\n` +
-      `git reset --hard ${commit.sha}\n` +
-      '保存当前 commit 到 .last_version 便于一键切回；按需补 pip / npm install；重启。\n\n' +
-      '⚠ 切到非 HEAD commit 会跳出 dev 跟踪 → "游离 HEAD" 状态；下一次 [抓取 dev] 仍能看到 dev 时间线。\n\n' +
-      '有运行任务 / 工作树脏 → 操作会被拒绝。',
-      { tone: 'warn', okText: `切到 ${commit.short_sha}` },
-    )
-    if (!ok) return
-
-    setBusy(true)
-    try {
-      await api.performSystemUpdate(commit.sha)
-    } catch (e) {
-      toast(_formatActionError(e, '切换'), 'error')
-      setBusy(false)
-      return
-    }
-    setSelectedSha(null)
-    void pollHealthThenReload(toast, 10 * 60_000, '切换', () => setBusy(false))
+  // chunk 3 + chunk 4：选中 commit 后进 preview 面板（dev 卡）。
+  const handleSwitchToCommit = (commit: DevCommit) => {
+    enterPreview({
+      kind: 'dev',
+      ref: commit.sha,
+      label: commit.short_sha,
+      msg: commit.msg,
+      author: commit.author,
+    })
   }
 
-  const handleUpdateDev = async () => {
-    if (!devCheck?.has_update) return
-    const targetLabel = devCheck.latest_commit.slice(0, 8)
-    const ok = await dialog.confirm(
-      `切换到 dev 通道（commit ${targetLabel}，${devCheck.commits_ahead} commits）。\n\n` +
-      'dev 通道是开发版，未经发布验证，可能引入崩溃 / 训练异常。\n\n' +
-      '其余流程与正向 update 一致：关闭 server，git reset --hard origin/dev，按需补依赖，重启。\n' +
-      '完成后回滚按钮会显示当前 commit 让你能切回此处。\n\n' +
-      '若有训练 / 打标任务在跑将被拒绝；本地未提交修改也会被拒绝。',
-      { tone: 'danger', okText: '更新到 dev' },
-    )
-    if (!ok) return
-
-    setBusy(true)
-    try {
-      await api.performSystemUpdate('origin/dev')
-    } catch (e) {
-      toast(_formatActionError(e, '更新到 dev'), 'error')
-      setBusy(false)
+  // "切到 dev (HEAD)" 当 master 用户初次切到 dev：进 preview 面板。
+  const handleUpdateDev = () => {
+    const headCommit = devCommits?.commits?.[0]
+    if (!headCommit) {
+      // 还没抓取过 dev，先 fetch 再 retry（避免空 ref）
+      void handleCheckDev()
       return
     }
-
-    void pollHealthThenReload(toast, 10 * 60_000, '更新', () => setBusy(false))
+    enterPreview({
+      kind: 'dev',
+      ref: 'origin/dev',
+      label: headCommit.short_sha,
+      msg: headCommit.msg,
+      author: headCommit.author,
+    })
   }
 
   // 通道判定 + 派生状态
@@ -2667,6 +2650,12 @@ function VersionSection() {
             releaseNotes={releaseNotes}
             checking={checking}
             busy={busy}
+            cardState={masterState}
+            pendingTarget={pendingTarget}
+            preflight={preflight}
+            preflightLoading={preflightLoading}
+            onCancelPreview={cancelPreview}
+            onConfirmPreview={confirmPreview}
             onCheck={handleCheck}
             onUpdate={handleUpdate}
             onSwitchToMaster={handleSwitchToMaster}
@@ -2683,6 +2672,12 @@ function VersionSection() {
               setSelectedSha={setSelectedSha}
               checking={checkingDev}
               busy={busy}
+              cardState={devState}
+              pendingTarget={pendingTarget}
+              preflight={preflight}
+              preflightLoading={preflightLoading}
+              onCancelPreview={cancelPreview}
+              onConfirmPreview={confirmPreview}
               onCheck={handleCheckDev}
               onSwitchToDev={handleUpdateDev}
               onSwitchToCommit={handleSwitchToCommit}
@@ -2776,6 +2771,15 @@ function VersionIcon({ name }: { name: keyof typeof VERSION_ICON_PATHS | string 
   )
 }
 
+type CardState = 'idle' | 'preview' | 'progress'
+type PendingTarget = {
+  kind: 'master' | 'dev'
+  ref: string
+  label: string
+  msg?: string
+  author?: string
+}
+
 type MasterCardProps = {
   on: boolean
   solo: boolean
@@ -2788,6 +2792,12 @@ type MasterCardProps = {
   releaseNotes: ReleaseNotes | null
   checking: boolean
   busy: boolean
+  cardState: CardState
+  pendingTarget: PendingTarget | null
+  preflight: PreflightResult | null
+  preflightLoading: boolean
+  onCancelPreview: () => void
+  onConfirmPreview: () => void
   onCheck: () => void
   onUpdate: () => void
   onSwitchToMaster: () => void
@@ -2804,6 +2814,104 @@ function flattenReleaseNotes(rn: ReleaseNotes | null): { items: { section: strin
   if (!rn?.found) return { items: [], total: 0 }
   const flat = rn.sections.flatMap((s) => s.items.map((text) => ({ section: s.title, text })))
   return { items: flat, total: flat.length }
+}
+
+// chunk 4 — preview / progress 通用面板。channel 决定主按钮配色（master=primary
+// orange / dev=warn yellow）。details 部分由 caller 决定渲染什么（master 用
+// release notes，dev 用 commit msg / author）。
+type PreviewPaneProps = {
+  channel: 'master' | 'dev'
+  fromLabel: string
+  toLabel: string
+  badge?: string
+  details: React.ReactNode
+  preflight: PreflightResult | null
+  loading: boolean
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}
+
+function PreviewPane(p: PreviewPaneProps) {
+  const confirmDisabled = !p.preflight || p.preflight.blocking || p.busy
+  return (
+    <div className="vs-preview-pane">
+      <div className="vs-preview-head">
+        <span className="vs-from">{p.fromLabel}</span>
+        <span className="vs-arr">→</span>
+        <span className="vs-to">{p.toLabel}</span>
+        {p.badge && <span className="vs-badge">{p.badge}</span>}
+      </div>
+
+      {p.details}
+
+      <div className="vs-preflight">
+        <div className="vs-h">Pre-flight 检查</div>
+        {p.loading ? (
+          <div className="vs-row">
+            <span className="vs-glyph">·</span>
+            <span>检查中…</span>
+          </div>
+        ) : p.preflight ? (
+          p.preflight.checks.map((c, i) => (
+            <div key={i} className={`vs-row ${c.level}`}>
+              <span className="vs-glyph">
+                {c.level === 'ok' ? '✓' : c.level === 'warn' ? '!' : '✗'}
+              </span>
+              <span>{c.label}</span>
+            </div>
+          ))
+        ) : (
+          <div className="vs-row err">
+            <span className="vs-glyph">✗</span>
+            <span>预检失败 — 请重试</span>
+          </div>
+        )}
+      </div>
+
+      <div className="vs-chan-foot" style={{ borderTop: 0, paddingTop: 0 }}>
+        <div className="vs-info">
+          git reset --hard · 关闭 server · 按需 pip/npm install · 重启 · 预计 1-3 分钟
+        </div>
+        <div className="vs-actions">
+          <button onClick={p.onCancel} disabled={p.busy} className="btn btn-sm">
+            取消
+          </button>
+          <button
+            onClick={p.onConfirm}
+            disabled={confirmDisabled}
+            className={`btn btn-sm ${p.channel === 'master' ? 'btn-primary' : 'btn-warn'}`}
+          >
+            {p.busy ? '处理中…' : `确认${p.channel === 'master' ? '更新' : '切换'} → ${p.toLabel}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProgressPane({ fromLabel, toLabel }: { fromLabel: string; toLabel: string }) {
+  return (
+    <div className="vs-progress-pane">
+      <div className="vs-preview-head">
+        <span className="vs-from">{fromLabel}</span>
+        <span className="vs-arr">→</span>
+        <span className="vs-to">{toLabel}</span>
+      </div>
+      <div className="vs-progress-bar">
+        <div className="vs-progress-fill" style={{ width: '100%' }} />
+      </div>
+      <div className="vs-progress-step">
+        <span>已发起更新 · server 正在重启…</span>
+        <span>页面会自动等待并刷新</span>
+      </div>
+      <p style={{ color: 'var(--fg-tertiary)', fontSize: 11, lineHeight: 1.5, margin: 0 }}>
+        当前进程已发完 SIGINT 退出；cli.py 在做 git reset / pip / npm / 重启。
+        无法获取实时进度（server 已死）。重启后前端 reconnect 自动刷新；失败
+        时会进 master 卡片的红色 banner。
+      </p>
+    </div>
+  )
 }
 
 function MasterReleaseNotes({ notes }: { notes: ReleaseNotes | null }) {
@@ -2850,6 +2958,52 @@ function MasterReleaseNotes({ notes }: { notes: ReleaseNotes | null }) {
 function MasterCard(p: MasterCardProps) {
   const currentTag = p.version?.tag ?? (p.version ? `v${p.version.version}` : '加载中…')
   const targetTag = p.check?.latest_tag ?? p.check?.latest_commit?.slice(0, 8) ?? ''
+  // chunk 4 — preview / progress 状态优先渲染（替代 chan-body + chan-foot）
+  if (p.cardState === 'preview' && p.pendingTarget && p.pendingTarget.kind === 'master') {
+    return (
+      <div className={`vs-chan${p.on ? ' here' : ''}`}>
+        <div className="vs-chan-head">
+          <div className="vs-lhs">
+            <span className="vs-name">master · 确认更新</span>
+            <span className="vs-pill vs-pill-stable"><span className="vs-dot" />稳定</span>
+          </div>
+          <button className="btn btn-sm btn-ghost" onClick={p.onCancelPreview} disabled={p.busy}>
+            ← 返回
+          </button>
+        </div>
+        <PreviewPane
+          channel="master"
+          fromLabel={currentTag}
+          toLabel={p.pendingTarget.label}
+          badge={p.check?.has_update ? `+${p.check.commits_ahead} commits` : undefined}
+          details={
+            <div className="vs-change-block">
+              <div className="vs-h">{p.pendingTarget.label} · 更新内容</div>
+              <MasterReleaseNotes notes={p.releaseNotes} />
+            </div>
+          }
+          preflight={p.preflight}
+          loading={p.preflightLoading}
+          busy={p.busy}
+          onCancel={p.onCancelPreview}
+          onConfirm={p.onConfirmPreview}
+        />
+      </div>
+    )
+  }
+  if (p.cardState === 'progress' && p.pendingTarget && p.pendingTarget.kind === 'master') {
+    return (
+      <div className={`vs-chan${p.on ? ' here' : ''}`}>
+        <div className="vs-chan-head">
+          <div className="vs-lhs">
+            <span className="vs-name">master · 更新中</span>
+            <span className="vs-pill vs-pill-stable"><span className="vs-dot" />稳定</span>
+          </div>
+        </div>
+        <ProgressPane fromLabel={currentTag} toLabel={p.pendingTarget.label} />
+      </div>
+    )
+  }
   const checkedAt = p.check?.checked_at
     ? new Date(p.check.checked_at * 1000).toLocaleString()
     : '未检查'
@@ -2996,6 +3150,12 @@ type DevCardProps = {
   setSelectedSha: (sha: string | null) => void
   checking: boolean
   busy: boolean
+  cardState: CardState
+  pendingTarget: PendingTarget | null
+  preflight: PreflightResult | null
+  preflightLoading: boolean
+  onCancelPreview: () => void
+  onConfirmPreview: () => void
   onCheck: () => void
   onSwitchToDev: () => void
   onSwitchToCommit: (commit: DevCommit) => void
@@ -3007,6 +3167,68 @@ function DevCard(p: DevCardProps) {
   const ahead = p.check?.commits_ahead ?? 0
   const selectedCommit = p.selectedSha ? commits.find((c) => c.sha === p.selectedSha) ?? null : null
   const fetchError = p.commits?.error ?? p.check?.error
+  const currentShortSha = p.currentSha ? p.currentSha.slice(0, 8) : '当前'
+  // chunk 4 — preview / progress 状态优先渲染
+  if (p.cardState === 'preview' && p.pendingTarget && p.pendingTarget.kind === 'dev') {
+    const t = p.pendingTarget
+    return (
+      <div className={`vs-chan${p.on ? ' here' : ''}`}>
+        <div className="vs-chan-head">
+          <div className="vs-lhs">
+            <span className="vs-name">dev · 确认切换</span>
+            <span className="vs-pill vs-pill-dev"><span className="vs-dot" />开发版</span>
+          </div>
+          <button className="btn btn-sm btn-ghost" onClick={p.onCancelPreview} disabled={p.busy}>
+            ← 返回
+          </button>
+        </div>
+        <PreviewPane
+          channel="dev"
+          fromLabel={currentShortSha}
+          toLabel={t.label}
+          details={
+            <div className="vs-change-block">
+              <div className="vs-h">{t.label} · 此 commit</div>
+              {t.msg ? (
+                <>
+                  <div style={{ fontSize: 13, color: 'var(--fg-primary)', marginTop: 4, lineHeight: 1.5 }}>
+                    {t.msg}
+                  </div>
+                  {t.author && (
+                    <div className="vs-ver-meta" style={{ marginTop: 6 }}>
+                      <span>author <b>{t.author}</b></span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{ fontSize: 13, color: 'var(--fg-tertiary)', marginTop: 4 }}>
+                  切到 dev HEAD（git reset --hard origin/dev）
+                </div>
+              )}
+            </div>
+          }
+          preflight={p.preflight}
+          loading={p.preflightLoading}
+          busy={p.busy}
+          onCancel={p.onCancelPreview}
+          onConfirm={p.onConfirmPreview}
+        />
+      </div>
+    )
+  }
+  if (p.cardState === 'progress' && p.pendingTarget && p.pendingTarget.kind === 'dev') {
+    return (
+      <div className={`vs-chan${p.on ? ' here' : ''}`}>
+        <div className="vs-chan-head">
+          <div className="vs-lhs">
+            <span className="vs-name">dev · 切换中</span>
+            <span className="vs-pill vs-pill-dev"><span className="vs-dot" />开发版</span>
+          </div>
+        </div>
+        <ProgressPane fromLabel={currentShortSha} toLabel={p.pendingTarget.label} />
+      </div>
+    )
+  }
 
   return (
     <div className={`vs-chan${p.on ? ' here' : ''}`}>

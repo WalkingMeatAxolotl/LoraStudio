@@ -3235,6 +3235,73 @@ def system_update_log() -> dict[str, Any]:
     return {"content": updater.read_update_log()}
 
 
+@app.get("/api/system/preflight")
+def system_preflight(target: str = "origin/master") -> dict[str, Any]:
+    """更新前置检查（chunk 4）— VersionSection preview 状态展开时拉取。
+
+    返回 4 项结构化检查 + target_resolved sha + requirements.txt diff 摘要。
+    每项含 level (ok / warn / err)；任一 err → blocking=true，前端禁用
+    确认按钮。target 接受任意 git ref（tag / branch / commit sha）。
+    """
+    cur = updater.current_version()
+
+    with db.connection_for() as conn:
+        running = db.list_tasks(conn, status="running")
+
+    target_resolved = updater.resolve_ref(target)
+    req_diff = updater.requirements_diff(target) if target_resolved else updater.RequirementsDiff()
+    req_total = len(req_diff.added) + len(req_diff.removed) + len(req_diff.changed)
+
+    checks: list[dict[str, str]] = []
+
+    if cur.is_dirty:
+        checks.append({"key": "dirty", "level": "err",
+                       "label": "工作树有未提交修改 — 操作会被拒绝"})
+    else:
+        checks.append({"key": "dirty", "level": "ok",
+                       "label": "工作树干净 · 无未提交改动"})
+
+    if running:
+        names = ", ".join((t.get("name") or f"#{t['id']}") for t in running[:3])
+        more = f" + 还有 {len(running) - 3}" if len(running) > 3 else ""
+        checks.append({"key": "running_tasks", "level": "err",
+                       "label": f"{len(running)} 个任务正在运行：{names}{more}"})
+    else:
+        checks.append({"key": "running_tasks", "level": "ok",
+                       "label": "当前 0 个训练 / 打标任务运行中"})
+
+    if not target_resolved:
+        checks.append({"key": "requirements_diff", "level": "err",
+                       "label": f"target ref 解析失败：{target}"})
+    elif req_total > 0:
+        parts = []
+        if req_diff.added:    parts.append(f"+{len(req_diff.added)}")
+        if req_diff.removed:  parts.append(f"-{len(req_diff.removed)}")
+        if req_diff.changed:  parts.append(f"~{len(req_diff.changed)}")
+        checks.append({"key": "requirements_diff", "level": "warn",
+                       "label": f"requirements.txt 变化 · {' / '.join(parts)} 包 · 预计 pip install 1-2 分钟"})
+    else:
+        checks.append({"key": "requirements_diff", "level": "ok",
+                       "label": "requirements.txt 未变化 · 跳过 pip install"})
+
+    checks.append({"key": "last_version", "level": "ok",
+                   "label": f"更新后 .last_version = {cur.commit_short}（可一键切回）"})
+
+    blocking = any(c["level"] == "err" for c in checks)
+
+    return {
+        "target": target,
+        "target_resolved": target_resolved,
+        "checks": checks,
+        "blocking": blocking,
+        "requirements_diff": {
+            "added": req_diff.added,
+            "removed": req_diff.removed,
+            "changed": req_diff.changed,
+        },
+    }
+
+
 @app.get("/api/system/dev_commits")
 def system_dev_commits(limit: int = 10) -> dict[str, Any]:
     """`git log origin/dev -N` 摘要（chunk 3）— VersionSection dev 卡时间线用。
