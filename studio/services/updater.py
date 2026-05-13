@@ -125,7 +125,9 @@ def current_version() -> VersionInfo:
     rc, tag, _ = _git("describe", "--tags", "--exact-match", "HEAD")
     exact_tag = tag if rc == 0 else None
 
-    rc, status, _ = _git("status", "--porcelain")
+    # --untracked-files=no：untracked 文件（pr18_review.md / 临时笔记 / 没进 gitignore
+    # 的草稿等）不影响 git reset --hard，它们会原地保留。dirty 仅指"修改了 tracked 文件"。
+    rc, status, _ = _git("status", "--porcelain", "--untracked-files=no")
     is_dirty = rc == 0 and bool(status)
 
     return VersionInfo(
