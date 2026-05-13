@@ -2300,11 +2300,16 @@ function DisplaySection() {
 // 立即更新 / 回滚 等。
 //
 // 重启流程：
-//   1. confirm 弹窗（强调 webui 会断开 ~5-10s）
+//   1. confirm 弹窗（说明断开时间）
 //   2. POST /api/system/restart → 后端写 tmp/restart + 发 SIGINT
 //   3. 进入"重启中"状态卡片：每 500ms 轮询 /api/health
 //   4. health 200 → toast "已重启" + reload 当前页面（前端重新挂载，SSE 重连）
-//   5. 30s 超时 → toast "重启超时，请检查终端" + 保留状态卡片让用户手动刷新
+//   5. 5 分钟超时 → toast "重启超时，请检查终端" + 保留状态卡片让用户手动刷新
+//
+// 实测耗时（单 GPU、本地 SSD）：~1 分钟。瓶颈在 cli.py 主循环每轮重跑的
+// bootstrap：前端 dist stale 检测 / torch / onnxruntime cold import / uvicorn
+// 起 lifespan。所以 timeout 设 5 分钟兜底慢盘 / 慢解释器 / pending_install
+// 真有 pip 装包要跑的场景。
 function SystemSection() {
   const { toast } = useToast()
   const dialog = useDialog()
@@ -2312,7 +2317,8 @@ function SystemSection() {
 
   const handleRestart = async () => {
     const ok = await dialog.confirm(
-      '将关闭并重新启动 Studio 后端服务。webui 会断开 5-10 秒，期间无法访问。\n\n' +
+      '将关闭并重新启动 Studio 后端服务。\n\n' +
+      '通常 30 秒到 1 分钟，期间 webui 无法访问（页面会自动等待并刷新）。\n\n' +
       '注意（PR-A 暂未做任务保护）：当前若有训练 / 打标任务在跑，将被强制取消，丢失未保存进度。',
       { tone: 'warn', okText: '重启' },
     )
@@ -2327,8 +2333,9 @@ function SystemSection() {
       return
     }
 
-    // 轮询 /api/health 等服务回来
-    const deadline = Date.now() + 30_000
+    // 轮询 /api/health 等服务回来。5 分钟超时兜底慢盘 / cold torch import。
+    const TIMEOUT_MS = 5 * 60_000
+    const deadline = Date.now() + TIMEOUT_MS
     const pollInterval = 500
     const poll = async () => {
       // 间隔后开始轮询：给 server 时间真正退出，避免命中还没死的旧进程
@@ -2345,7 +2352,7 @@ function SystemSection() {
         }
         await new Promise((r) => setTimeout(r, pollInterval))
       }
-      toast('重启超时（30s），请检查终端输出后手动刷新页面', 'error')
+      toast('重启超时（5 分钟），请检查终端输出后手动刷新页面', 'error')
       setBusy(false)
     }
     void poll()
