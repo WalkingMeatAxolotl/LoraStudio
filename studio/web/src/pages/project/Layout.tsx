@@ -149,7 +149,15 @@ export default function ProjectLayout() {
 
   return (
     <div className="flex flex-col h-full">
-      <Outlet context={{ project, activeVersion, reload }} />
+      {/* outlet context 透传 onCreateVersion + busy,Overview 的「新版本」按钮
+          复用同一个 NewVersionDialog,避免 Overview 单独维护 window.prompt 版本。 */}
+      <Outlet context={{
+        project,
+        activeVersion,
+        reload,
+        onCreateVersion: () => setCreating(true),
+        creatingVersionBusy: creatingBusy,
+      }} />
       {creating && (
         <NewVersionDialog
           existingLabels={project.versions.map((v) => v.label)}

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { api, type ProjectDetail, type Version } from '../../api/client'
 import PageHeader from '../../components/PageHeader'
@@ -9,6 +8,9 @@ interface Ctx {
   project: ProjectDetail
   activeVersion: Version | null
   reload: () => Promise<void>
+  /** Layout 透传:复用侧边栏 NewVersionDialog,避免 Overview 重复实现 window.prompt 版本。 */
+  onCreateVersion: () => void
+  creatingVersionBusy: boolean
 }
 
 // ── StatCard ────────────────────────────────────────────────────
@@ -173,35 +175,26 @@ function PipelineTimeline({ steps }: { steps: PipelineStep[] }) {
 // ── Overview ─────────────────────────────────────────────────────
 
 export default function ProjectOverview() {
-  const { project, activeVersion, reload } = useOutletContext<Ctx>()
+  const { project, activeVersion, reload, onCreateVersion, creatingVersionBusy } = useOutletContext<Ctx>()
   const navigate = useNavigate()
   const { toast } = useToast()
-  const [newVersionBusy, setNewVersionBusy] = useState(false)
 
   const handleActivate = async (v: Version) => {
     try {
       await api.activateVersion(project.id, v.id)
       await reload()
-      navigate(`/projects/${project.id}/v/${v.id}/curate`)
+      // 选版本 → 跳项目级 download(不是直接跳 curate)。download 是工作流真起点,
+      // 用户从这里决定要不要重新下,还是直接往下走 curate/tag/...。Sidebar 切
+      // 版本不 navigate(只 activate),两边语义分开:Overview 卡片点击 = 进入版本
+      // 工作流,Sidebar 版本切换 = 改上下文不离当前页。
+      navigate(`/projects/${project.id}/download`)
     } catch (e) {
       toast(String(e), 'error')
     }
   }
 
-  const handleNewVersion = async () => {
-    const label = prompt('版本标签', `v${project.versions.length + 1}`)
-    if (!label) return
-    setNewVersionBusy(true)
-    try {
-      await api.createVersion(project.id, { label })
-      await reload()
-      toast(`已创建版本 ${label}`, 'success')
-    } catch (e) {
-      toast(String(e), 'error')
-    } finally {
-      setNewVersionBusy(false)
-    }
-  }
+  // 「新版本」按钮调 onCreateVersion → Layout 弹 NewVersionDialog(label + 可选
+  // fork from + 自动 activate)。Overview 不再自己维护创建逻辑。
 
   const stats = [
     {
@@ -287,13 +280,13 @@ export default function ProjectOverview() {
             <h2 className="text-md font-semibold flex-1" style={{ margin: 0 }}>版本</h2>
             <button
               className="btn btn-ghost btn-sm border border-dashed border-dim"
-              onClick={handleNewVersion}
-              disabled={newVersionBusy}
+              onClick={onCreateVersion}
+              disabled={creatingVersionBusy}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                 <path d="M12 5v14M5 12h14" />
               </svg>
-              {newVersionBusy ? '创建中…' : '新版本'}
+              {creatingVersionBusy ? '创建中…' : '新版本'}
             </button>
           </div>
 
