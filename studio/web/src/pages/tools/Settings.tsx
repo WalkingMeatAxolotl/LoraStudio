@@ -15,6 +15,7 @@ import {
   type WandBConfig,
   type WD14Runtime,
 } from '../../api/client'
+import { useDialog } from '../../components/Dialog'
 import LLMTaggerWorkspace from '../../components/LLMTaggerWorkspace'
 import PageHeader from '../../components/PageHeader'
 import { useToast } from '../../components/Toast'
@@ -212,6 +213,7 @@ export default function SettingsPage() {
   const [llmModelsBusy, setLlmModelsBusy] = useState(false)
   const [llmTestBusy, setLlmTestBusy] = useState(false)
   const { toast } = useToast()
+  const { prompt } = useDialog()
   // 右侧 section index 用：sticky nav 的 IntersectionObserver root + 滚动平移容器
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
@@ -352,8 +354,12 @@ export default function SettingsPage() {
     // current_preset 不变；validator 会重建 preset
   }
 
-  const saveAsNewPreset = () => {
-    const label = window.prompt('新预设名称：', `${currentPreset.label} 副本`)
+  const saveAsNewPreset = async () => {
+    const label = await prompt('新预设名称', {
+      defaultValue: `${currentPreset.label} 副本`,
+      placeholder: 'my-preset',
+      validate: (v) => (v.trim() ? null : '不能为空'),
+    })
     if (!label) return
     const slug = label.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'preset'
     const used = new Set(draft.llm_tagger.presets.map((p) => p.id))
@@ -1550,6 +1556,7 @@ function DownloadButton({ exists, status, busy, onClick }: {
 // ── ONNX Runtime Section（WD14 + CLTagger 共用 onnxruntime 包管理） ─────────
 
 function ONNXRuntimeSection() {
+  const dialog = useDialog()
   const [rt, setRt] = useState<WD14Runtime | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<null | 'auto' | 'gpu' | 'cpu'>(null)
@@ -1572,7 +1579,11 @@ function ONNXRuntimeSection() {
     const detail = target === 'auto' ? '将按 nvidia-smi 检测自动选 GPU/CPU 包'
       : target === 'gpu' ? '将卸载现有 onnxruntime 并安装 onnxruntime-gpu'
       : '将卸载现有 onnxruntime-gpu 并安装 onnxruntime（CPU）'
-    if (!confirm(`${detail}。装包需要几分钟。\n\n注意：装完后必须重启 Studio 才能生效。继续？`)) return
+    const ok = await dialog.confirm(
+      `${detail}。装包需要几分钟。\n\n注意：装完后必须重启 Studio 才能生效。继续？`,
+      { tone: 'warn', okText: '开始装' },
+    )
+    if (!ok) return
     setBusy(target)
     try {
       const result = await api.installWD14Runtime(target)
@@ -1693,6 +1704,7 @@ function ONNXRuntimeSection() {
 // - is_cuda_build_unavailable=True     → 黄色驱动警告（pip 修不了，给文档链接）
 
 function PyTorchSection() {
+  const dialog = useDialog()
   const [status, setStatus] = useState<TorchStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1717,7 +1729,7 @@ function PyTorchSection() {
     // 当前 server 进程锁住，没法直接 replace；只能 defer 到 launcher。
     const msg = `将注册 torch 重装请求（${tag} 版）。\n` +
       `提交后请 Ctrl+C 关闭 Studio 重新运行 studio.bat —— 启动时会装 torch（~3 GB，5-30 分钟）。继续？`
-    if (!confirm(msg)) return
+    if (!(await dialog.confirm(msg, { tone: 'warn', okText: '注册请求' }))) return
     setBusy(true)
     try {
       const result = await api.reinstallTorch(target)
@@ -1874,6 +1886,7 @@ function PyTorchSection() {
 // - GitHub API 限流时 candidates=[] + fetch_error，给手动 URL 输入兜底
 
 function FlashAttentionSection() {
+  const dialog = useDialog()
   const [status, setStatus] = useState<FlashAttnStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1897,7 +1910,7 @@ function FlashAttentionSection() {
     const msg = url
       ? '将 pip install 该 wheel，装包需要几分钟。\n装完后必须重启 Studio 才能生效。继续？'
       : '将自动从 GitHub Releases 选择最匹配的 flash_attn wheel 并安装。\n装包需要几分钟，装完后必须重启 Studio。继续？'
-    if (!confirm(msg)) return
+    if (!(await dialog.confirm(msg, { tone: 'warn', okText: '开始装' }))) return
     setBusy(true)
     try {
       const result = await api.installFlashAttn(url)
@@ -2055,6 +2068,7 @@ function FlashAttentionSection() {
 // 不需要 flash_attn 那种 GitHub 候选 wheel 列表。失败时给 stderr 让用户排错。
 
 function XformersSection() {
+  const dialog = useDialog()
   const [status, setStatus] = useState<XformersStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -2073,10 +2087,13 @@ function XformersSection() {
   useEffect(() => { void refresh() }, [refresh])
 
   const install = async () => {
-    if (!confirm(
-      '将 pip install xformers，按当前 torch+cu 选 PyTorch index URL。\n' +
-      '装包几分钟到十几分钟，装完后必须重启 Studio。继续？'
-    )) return
+    if (
+      !(await dialog.confirm(
+        '将 pip install xformers，按当前 torch+cu 选 PyTorch index URL。\n' +
+        '装包几分钟到十几分钟，装完后必须重启 Studio。继续？',
+        { tone: 'warn', okText: '开始装' },
+      ))
+    ) return
     setBusy(true)
     try {
       const r = await api.installXformers()
