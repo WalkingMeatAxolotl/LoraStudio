@@ -1749,16 +1749,24 @@ export interface SystemUpdateStatus {
   rollback_target?: string | null
 }
 
-/** chunk 2 — CHANGELOG.md 解析结果。`found=false` 时 sections 为空（UI 退化到链接占位）。 */
-export interface ReleaseNotesSection {
-  title: string         // "新增" / "变更" / "修复" 等 H3
-  items: string[]       // 顶层 bullet 文本（**bold** 已脱掉，保留 PR 号）
+/** chunk 2 重做 — release_notes.yaml 派生的 release notes。
+ *  schema + 编写规范见 docs/release-notes-spec.md。`found=false` → UI 退化到 CHANGELOG 链接。 */
+export type ReleaseNotesKind =
+  | 'added' | 'changed' | 'improved' | 'fixed' | 'removed' | 'deprecated' | 'security'
+
+export interface ReleaseNotesEntry {
+  kind: ReleaseNotesKind
+  summary: string         // ≤ 80 chars, plain text, user-facing
+  pr_refs: number[]       // 关联 PR 号；空 list 表示无关联 PR
+  detail: string | null   // optional markdown 多行说明
 }
+
 export interface ReleaseNotes {
-  tag: string           // caller 传入的 tag（v 前缀保留）
+  tag: string             // caller 传入的 tag（v 前缀保留）
   found: boolean
-  date: string | null   // ISO YYYY-MM-DD
-  sections: ReleaseNotesSection[]
+  date: string | null     // ISO YYYY-MM-DD
+  summary: string | null  // 整版本一句话总览（block-level summary）
+  entries: ReleaseNotesEntry[]
 }
 
 /** chunk 3 — dev 通道最近 commit 摘要。fetched=false 时表示 git fetch 失败

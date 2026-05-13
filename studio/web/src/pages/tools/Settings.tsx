@@ -2805,15 +2805,25 @@ type MasterCardProps = {
   onViewLog: () => void
 }
 
-// chunk 2 — release notes 渲染上限。超过的话只展示前 RN_MAX 条，给条
-// "+ 还有 N 项" 引导用户去 CHANGELOG。设计稿 mockup 每版本 3-4 条；
-// 真实仓库 CHANGELOG.md 顶层 bullet 一次 8-12 条，不限制会撑爆卡片。
+// chunk 2 重做 — release_notes.yaml 派生 entries 渲染。每条 [kind 徽章] +
+// summary，kind 颜色复用 vs-pill 体系。detail 通过 title hover 透出。
+// 超 RN_MAX_ITEMS 折成 "+ 还有 N 项 · 详见 CHANGELOG.md"。
 const RN_MAX_ITEMS = 5
 
-function flattenReleaseNotes(rn: ReleaseNotes | null): { items: { section: string; text: string }[]; total: number } {
-  if (!rn?.found) return { items: [], total: 0 }
-  const flat = rn.sections.flatMap((s) => s.items.map((text) => ({ section: s.title, text })))
-  return { items: flat, total: flat.length }
+// kind → vs-pill class（复用 master/dev/here/info 四套色）+ 中文 label
+const KIND_PILL_CLASS: Record<string, string> = {
+  added:      'vs-pill-stable',   // 绿（新东西，正面）
+  improved:   'vs-pill-info',     // 蓝（优化）
+  changed:    'vs-pill-info',     // 蓝（中性）
+  fixed:      'vs-pill-dev',      // 橙（修 bug，提醒）
+  removed:    'vs-pill-here',     // accent（强调，需注意）
+  deprecated: 'vs-pill-here',     // accent
+  security:   'vs-pill-here',     // accent
+}
+
+const KIND_LABEL: Record<string, string> = {
+  added: '新增', changed: '变更', improved: '改进', fixed: '修复',
+  removed: '删除', deprecated: '弃用', security: '安全',
 }
 
 // chunk 4 — preview / progress 通用面板。channel 决定主按钮配色（master=primary
@@ -2915,7 +2925,8 @@ function ProgressPane({ fromLabel, toLabel }: { fromLabel: string; toLabel: stri
 }
 
 function MasterReleaseNotes({ notes }: { notes: ReleaseNotes | null }) {
-  const { items, total } = flattenReleaseNotes(notes)
+  const entries = notes?.found ? notes.entries : []
+  const total = entries.length
   if (total === 0) {
     return (
       <ul className="vs-change-list">
@@ -2923,24 +2934,27 @@ function MasterReleaseNotes({ notes }: { notes: ReleaseNotes | null }) {
           <span className="vs-glyph">▸</span>
           <span className="vs-txt">
             {notes && !notes.found
-              ? <>本 tag 在 <code>CHANGELOG.md</code> 没有条目</>
+              ? <>本 tag 在 <code>release_notes.yaml</code> 没有条目</>
               : <>完整变更见 <code>CHANGELOG.md</code></>}
           </span>
         </li>
       </ul>
     )
   }
-  const shown = items.slice(0, RN_MAX_ITEMS)
+  const shown = entries.slice(0, RN_MAX_ITEMS)
   const overflow = total - shown.length
   return (
     <ul className="vs-change-list">
-      {shown.map((it, i) => (
+      {shown.map((e, i) => (
         <li key={i}>
-          <span className="vs-glyph">▸</span>
-          <span className="vs-txt">
-            <span style={{ color: 'var(--fg-tertiary)', marginRight: 6 }}>{it.section}</span>
-            {it.text}
+          <span
+            className={`vs-pill ${KIND_PILL_CLASS[e.kind] || 'vs-pill-info'}`}
+            style={{ flexShrink: 0 }}
+            title={e.detail ?? ''}
+          >
+            {KIND_LABEL[e.kind] || e.kind}
           </span>
+          <span className="vs-txt">{e.summary}</span>
         </li>
       ))}
       {overflow > 0 && (

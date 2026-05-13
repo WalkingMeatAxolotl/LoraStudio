@@ -58,13 +58,13 @@ from . import (
 from .event_bus import bus
 from .services import (
     caption_snapshot,
-    changelog,
     downloader,
     presets as preset_flow,
     model_downloader,
     flash_attention_setup,
     onnxruntime_setup,
     pending_install,
+    release_notes as release_notes_svc,
     torch_setup,
     reg_builder,
     system_stats,
@@ -3320,18 +3320,19 @@ def system_dev_commits(limit: int = 10) -> dict[str, Any]:
 
 @app.get("/api/system/release_notes")
 def system_release_notes(tag: str) -> dict[str, Any]:
-    """解析 CHANGELOG.md，返回指定 tag 的 release notes（chunk 2）。
+    """读 release_notes.yaml，返回指定 tag 的结构化 release notes。
 
-    VersionSection master 卡片用此填进 change-block；CHANGELOG 缺该条目
-    时 found=false，UI 退化到链接占位。tag 接受 `v0.6.0` 或 `0.6.0` 两种。
+    数据模型见 docs/release-notes-spec.md。tag 接受 `v0.6.0` 或 `0.6.0`。
+    yaml 缺该 tag → found=false，UI 退化到 CHANGELOG.md 链接占位。
     """
     from dataclasses import asdict
-    result = changelog.parse(tag)
+    result = release_notes_svc.parse(tag)
     return {
         "tag": result.tag,
         "found": result.found,
         "date": result.date,
-        "sections": [asdict(s) for s in result.sections],
+        "summary": result.summary,
+        "entries": [asdict(e) for e in result.entries],
     }
 
 
