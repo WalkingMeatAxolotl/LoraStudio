@@ -60,6 +60,12 @@ function setup() {
   )
 }
 
+async function waitForInitialLorasLoad() {
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/projects')).toBe(true)
+  )
+}
+
 describe('GeneratePage 端到端 smoke', () => {
   it('mode=single：enqueue payload 含 xy_matrix=null + 完整字段', async () => {
     const user = userEvent.setup()
@@ -101,8 +107,9 @@ describe('GeneratePage 端到端 smoke', () => {
     expect(body.count).toBe(1)
   })
 
-  it('多 prompt 轮换功能已隐藏：只有一个 textarea，"添加 prompt"按钮不存在', () => {
+  it('多 prompt 轮换功能已隐藏：只有一个 textarea，"添加 prompt"按钮不存在', async () => {
     setup()
+    await waitForInitialLorasLoad()
     // 单 textarea
     const promptInputs = screen.getAllByPlaceholderText('输入正向提示词…')
     expect(promptInputs.length).toBe(1)

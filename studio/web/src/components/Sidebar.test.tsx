@@ -5,7 +5,10 @@ import Sidebar from './Sidebar'
 
 function renderAt(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter
+      initialEntries={[path]}
+      future={{ v7_relativeSplatPath: true, v7_startTransition: true }}
+    >
       <Sidebar />
     </MemoryRouter>
   )
