@@ -2440,6 +2440,33 @@ function VersionSection() {
     void pollHealthThenReload(toast, 10 * 60_000, '更新', () => setBusy(false))
   }
 
+  // PR-D — 当用户已经在 dev 通道时，"立即更新"按钮文案歧义（听起来像"前进"
+  // 实际是"切回 master"）。单独走这个 handler，dialog 文案明确告知方向，
+  // 不依赖 has_update（dev 上 master 即使一致也允许显式切回 stable）。
+  const handleSwitchToMaster = async () => {
+    const targetLabel = check?.latest_tag ?? check?.latest_commit?.slice(0, 8) ?? 'master HEAD'
+    const ok = await dialog.confirm(
+      `将切回稳定通道 master（${targetLabel}）。\n\n` +
+      '你当前在 dev 通道。切回会 git reset --hard origin/master —— ' +
+      'dev 独有但未合并进 master 的 commit 会从本地工作树消失（git reflog 仍可找回）。\n' +
+      '其余流程与 update 一致：关闭 server，按需补依赖，重启。\n\n' +
+      '若有训练 / 打标任务在跑将被拒绝；本地未提交修改也会被拒绝。',
+      { tone: 'warn', okText: '切回稳定' },
+    )
+    if (!ok) return
+
+    setBusy(true)
+    try {
+      await api.performSystemUpdate('origin/master')
+    } catch (e) {
+      toast(_formatActionError(e, '切回稳定'), 'error')
+      setBusy(false)
+      return
+    }
+
+    void pollHealthThenReload(toast, 10 * 60_000, '切回稳定', () => setBusy(false))
+  }
+
   const handleRollback = async () => {
     if (!status?.rollback_target) return
     const target = status.rollback_target
@@ -2532,12 +2559,20 @@ function VersionSection() {
     void pollHealthThenReload(toast, 10 * 60_000, '更新', () => setBusy(false))
   }
 
+  // 不再把 branch 塞 headDescr —— 单独显示成 channel pill 让用户一眼看出
+  // 自己在哪个通道（master = 稳定 / dev = 开发版 / 其它 = 自定义分支）。
   const headDescr = version
-    ? `${version.tag ?? `v${version.version}`} · ${version.commit_short} · ${version.branch}${version.is_dirty ? ' · 本地有改动' : ''}`
+    ? `${version.tag ?? `v${version.version}`} · ${version.commit_short}${version.is_dirty ? ' · 本地有改动' : ''}`
     : '加载中...'
 
   // 上次 update 失败 banner（aborted / failed / partial 时显示红色提示）
   const statusBadFailed = status && (status.status === 'failed' || status.status === 'aborted' || status.status === 'partial')
+
+  // PR-D — 通道判定。on dev + toggle 开启时把主按钮从"立即更新 master"
+  // 改成"切回稳定 master"（文案 + dialog 明确方向）；同时主按钮独立于
+  // has_update（dev 上想随时切回 stable 是合法操作）。
+  const onDev = version?.branch === 'dev'
+  const showSwitchToStable = onDev && !!prefs?.show_dev_channel
 
   return (
     <SettingsSection id="version" title="版本">
@@ -2566,7 +2601,10 @@ function VersionSection() {
 
       <SettingsField label="当前">
         <div className="flex flex-col gap-0.5 text-fg-primary text-sm font-mono">
-          <span>{headDescr}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span>{headDescr}</span>
+            {version && <ChannelPill branch={version.branch} />}
+          </div>
           {version?.commit_time_iso && (
             <span className="text-2xs text-fg-dim">
               {new Date(version.commit_time_iso).toLocaleString()}
@@ -2588,6 +2626,17 @@ function VersionSection() {
                 上次检查 {new Date(check.checked_at * 1000).toLocaleString()}
               </span>
             </div>
+          ) : onDev ? (
+            // dev 用户看到 has_update=false 说明 dev 已含 master 所有 commit；
+            // 此时给个 master HEAD 提示而不是误导的"已是最新版本"。
+            <div className="flex flex-col gap-0.5 text-fg-primary text-sm font-mono">
+              <span className="text-fg-dim">
+                master HEAD: {check.latest_commit.slice(0, 8)}（你领先 / 持平）
+              </span>
+              <span className="text-2xs text-fg-dim">
+                上次检查 {new Date(check.checked_at * 1000).toLocaleString()}
+              </span>
+            </div>
           ) : (
             <span className="text-fg-dim text-sm">已是最新版本</span>
           )}
@@ -2604,13 +2653,26 @@ function VersionSection() {
             >
               {checking ? '检查中...' : '检查更新'}
             </button>
-            {check?.has_update && (
+            {showSwitchToStable ? (
+              // dev 上的用户：主按钮永远显示"切回稳定"（不依赖 has_update）。
+              // 跟踪 dev 新提交走高级折叠里的 [更新到 dev]；主区是 stable 出口。
+              <button
+                onClick={() => void handleSwitchToMaster()}
+                disabled={busy || checking}
+                className="btn btn-primary btn-sm"
+              >
+                {busy ? '切回稳定中...' : '切回稳定通道 → master'}
+              </button>
+            ) : check?.has_update && (
               <button
                 onClick={() => void handleUpdate()}
                 disabled={busy || checking}
                 className="btn btn-primary btn-sm"
               >
-                {busy ? '更新中...' : `立即更新 → ${check.latest_tag ?? check.latest_commit.slice(0, 8)}`}
+                {busy
+                  ? '更新中...'
+                  : `立即更新 → ${check.latest_tag ?? check.latest_commit.slice(0, 8)}`
+                    + (prefs?.show_dev_channel ? '（稳定）' : '')}
               </button>
             )}
             {status?.rollback_target && (
@@ -2723,6 +2785,27 @@ function VersionSection() {
         />
       )}
     </SettingsSection>
+  )
+}
+
+// PR-D — 通道指示徽章。master = 稳定（绿）/ dev = 开发版（橙）/ 其它 = 自定义
+// 分支（灰）。用现有 .badge-ok / .badge-warn / .badge-info 复用站内统一色板。
+function ChannelPill({ branch }: { branch: string }) {
+  const meta = branch === 'master'
+    ? { cls: 'badge-ok', label: '稳定' }
+    : branch === 'dev'
+      ? { cls: 'badge-warn', label: '开发版' }
+      : branch === 'detached'
+        ? { cls: 'badge-info', label: '游离 HEAD' }
+        : { cls: 'badge-info', label: '自定义分支' }
+  return (
+    <span
+      className={`${meta.cls} inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-2xs font-sans font-medium`}
+      title={`当前分支：${branch}`}
+    >
+      <span>{meta.label}</span>
+      <span className="font-mono opacity-70">{branch}</span>
+    </span>
   )
 }
 
