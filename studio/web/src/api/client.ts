@@ -334,6 +334,12 @@ export interface GenerateSecretsConfig {
   attention_backend: AttentionBackend
 }
 
+/** 系统级偏好（ADR 0002 / PR-D）。show_dev_channel 开启后 Settings 暴露 dev
+ *  通道按钮（手动检查 / 更新到 dev）；自动检查 + Topbar badge 仍然只看 master。 */
+export interface SystemPrefsConfig {
+  show_dev_channel: boolean
+}
+
 export interface Secrets {
   gelbooru: GelbooruConfig
   danbooru: DanbooruConfig
@@ -351,6 +357,7 @@ export interface Secrets {
   models: ModelsConfig
   queue: QueueConfig
   generate: GenerateSecretsConfig
+  system: SystemPrefsConfig
 }
 
 /** PUT /api/secrets 的 body：嵌套的 partial dict；MASK ("***") 表示「保持不变」。 */

@@ -390,6 +390,17 @@ class GenerateConfig(BaseModel):
     attention_backend: str = "auto"
 
 
+class SystemConfig(BaseModel):
+    """系统级偏好（ADR 0002 / PR-D）。
+
+    - `show_dev_channel`：Settings 高级里勾选"显示开发版更新"后变 True。
+      开启时 UI 暴露"手动检查 dev"+"更新到 dev"按钮；自动检查仍只 fetch
+      master，Topbar badge 永不亮 dev（避免开发者被 dev commit 持续骚扰）。
+      默认 False —— 绝大多数用户看到的是只 master 的简化界面。
+    """
+    show_dev_channel: bool = False
+
+
 class Secrets(BaseModel):
     gelbooru: GelbooruConfig = Field(default_factory=GelbooruConfig)
     danbooru: DanbooruConfig = Field(default_factory=DanbooruConfig)
@@ -408,6 +419,7 @@ class Secrets(BaseModel):
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     queue: QueueConfig = Field(default_factory=QueueConfig)
     generate: GenerateConfig = Field(default_factory=GenerateConfig)
+    system: SystemConfig = Field(default_factory=SystemConfig)
 
 
 # ---------------------------------------------------------------------------

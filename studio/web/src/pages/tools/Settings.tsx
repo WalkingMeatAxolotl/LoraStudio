@@ -10,6 +10,7 @@ import {
   type ModelsCatalog,
   type Secrets,
   type SecretsPatch,
+  type SystemPrefsConfig,
   type SystemUpdateCheck,
   type SystemUpdateStatus,
   type SystemVersion,
@@ -204,6 +205,7 @@ const EMPTY: Secrets = {
   models: { root: null, selected_anima: 'preview3-base' },
   queue: { allow_gpu_during_train: false },
   generate: { preview_every_n_steps: 3, attention_backend: 'auto' },
+  system: { show_dev_channel: false },
 }
 
 const textInputClass = 'w-full px-2 py-1 outline-none rounded-sm bg-sunken border border-subtle text-sm text-fg-primary focus:border-accent'
@@ -2351,16 +2353,22 @@ async function pollHealthThenReload(
 // ── 版本 Section ────────────────────────────────────────────────────────
 //
 // 加载时自动 fetch /api/system/version + /api/system/update_check（master 通道，
-// 走 cache）+ /api/system/update_status（PR-C：上次 update 结果）。
+// 走 cache）+ /api/system/update_status（PR-C：上次 update 结果）+ /api/secrets
+// （读 system.show_dev_channel，PR-D：dev 通道 toggle）。
 // 操作按钮：检查更新 / 立即更新 / 切换到上一版本（rollback，仅在 .last_version
 // 存在时显示）/ 查看上次日志（仅在失败时主动暴露）。
+// 高级折叠：显示开发版更新 toggle；开启后暴露 dev 通道按钮（手动检查 / 更新到 dev）。
+//          自动检查仍只 fetch master，Topbar badge 也仅 master 触发（设计文档明确）。
 function VersionSection() {
   const { toast } = useToast()
   const dialog = useDialog()
   const [version, setVersion] = useState<SystemVersion | null>(null)
   const [check, setCheck] = useState<SystemUpdateCheck | null>(null)
   const [status, setStatus] = useState<SystemUpdateStatus | null>(null)
+  const [prefs, setPrefs] = useState<SystemPrefsConfig | null>(null)
+  const [devCheck, setDevCheck] = useState<SystemUpdateCheck | null>(null)
   const [checking, setChecking] = useState(false)
+  const [checkingDev, setCheckingDev] = useState(false)
   const [busy, setBusy] = useState(false)
   const [logModal, setLogModal] = useState<{ open: boolean; content: string; loading: boolean }>(
     { open: false, content: '', loading: false },
@@ -2370,6 +2378,7 @@ function VersionSection() {
     void api.getSystemVersion().then(setVersion).catch(() => { /* silent */ })
     void api.checkSystemUpdate('master').then(setCheck).catch(() => { /* silent */ })
     void api.getSystemUpdateStatus().then(setStatus).catch(() => { /* silent */ })
+    void api.getSecrets().then((s) => setPrefs(s.system)).catch(() => { /* silent */ })
   }, [])
 
   const handleCheck = async () => {
@@ -2463,6 +2472,64 @@ function VersionSection() {
     } catch (e) {
       setLogModal({ open: true, content: `加载失败: ${e}`, loading: false })
     }
+  }
+
+  // PR-D — dev 通道 toggle 持久化到 secrets.json。乐观更新 + 失败回滚。
+  const handleToggleDevChannel = async (next: boolean) => {
+    const prev = prefs
+    setPrefs((p) => p ? { ...p, show_dev_channel: next } : { show_dev_channel: next })
+    if (!next) setDevCheck(null)        // 关掉时清掉缓存的 dev 检查结果
+    try {
+      const updated = await api.updateSecrets({ system: { show_dev_channel: next } })
+      setPrefs(updated.system)
+    } catch (e) {
+      setPrefs(prev)                    // 失败回滚 UI
+      toast(`保存失败: ${(e as Error).message ?? e}`, 'error')
+    }
+  }
+
+  const handleCheckDev = async () => {
+    setCheckingDev(true)
+    try {
+      const r = await api.checkSystemUpdate('dev', true)
+      setDevCheck(r)
+      if (r.error) {
+        toast(`dev 检查失败: ${r.error}`, 'error')
+      } else if (r.has_update) {
+        toast(`dev 通道有 ${r.commits_ahead} commits 新提交`, 'info')
+      } else {
+        toast('dev 通道与当前一致', 'success')
+      }
+    } catch (e) {
+      toast(`dev 检查失败: ${e}`, 'error')
+    } finally {
+      setCheckingDev(false)
+    }
+  }
+
+  const handleUpdateDev = async () => {
+    if (!devCheck?.has_update) return
+    const targetLabel = devCheck.latest_commit.slice(0, 8)
+    const ok = await dialog.confirm(
+      `切换到 dev 通道（commit ${targetLabel}，${devCheck.commits_ahead} commits）。\n\n` +
+      'dev 通道是开发版，未经发布验证，可能引入崩溃 / 训练异常。\n\n' +
+      '其余流程与正向 update 一致：关闭 server，git reset --hard origin/dev，按需补依赖，重启。\n' +
+      '完成后回滚按钮会显示当前 commit 让你能切回此处。\n\n' +
+      '若有训练 / 打标任务在跑将被拒绝；本地未提交修改也会被拒绝。',
+      { tone: 'danger', okText: '更新到 dev' },
+    )
+    if (!ok) return
+
+    setBusy(true)
+    try {
+      await api.performSystemUpdate('origin/dev')
+    } catch (e) {
+      toast(_formatActionError(e, '更新到 dev'), 'error')
+      setBusy(false)
+      return
+    }
+
+    void pollHealthThenReload(toast, 10 * 60_000, '更新', () => setBusy(false))
   }
 
   const headDescr = version
@@ -2576,6 +2643,77 @@ function VersionSection() {
           </p>
         </div>
       </SettingsField>
+
+      {/* PR-D — 高级设置：dev 通道 toggle + 手动操作。默认折叠；勾选 toggle
+          会持久化到 secrets.json (system.show_dev_channel)。Topbar badge /
+          自动检查仍然只看 master —— dev 必须显式手动触发，避免开发者被
+          dev commit 持续骚扰（设计文档明确）。 */}
+      <details className="border-t border-subtle pt-2 mt-1 group">
+        <summary className="cursor-pointer text-sm text-fg-secondary hover:text-fg-primary select-none list-none flex items-center gap-1.5 py-1">
+          <span className="inline-block transition-transform group-open:rotate-90">▸</span>
+          <span>高级设置</span>
+        </summary>
+        <div className="pt-2 pl-4 flex flex-col gap-3">
+          <SettingsField label="显示开发版更新">
+            <div className="flex items-center gap-2">
+              <Bool
+                value={!!prefs?.show_dev_channel}
+                onChange={(v) => void handleToggleDevChannel(v)}
+              />
+              <span className="text-2xs text-fg-dim leading-snug">
+                开启后下方暴露 dev 通道操作（手动检查 / 更新到 dev）。
+                自动检查 + Topbar 红点仍然只看 master。
+              </span>
+            </div>
+          </SettingsField>
+
+          {prefs?.show_dev_channel && (
+            <div className="rounded-md border border-subtle bg-surface-alt p-3 flex flex-col gap-2">
+              <div className="text-xs font-semibold text-fg-primary">
+                dev 通道（开发版）
+              </div>
+              {devCheck && (
+                devCheck.error ? (
+                  <span className="text-err text-xs">{devCheck.error}</span>
+                ) : devCheck.has_update ? (
+                  <div className="text-xs text-fg-primary font-mono flex flex-col gap-0.5">
+                    <span>
+                      {devCheck.latest_commit.slice(0, 8)} · ↑ {devCheck.commits_ahead} commits
+                    </span>
+                    <span className="text-2xs text-fg-dim">
+                      检查于 {new Date(devCheck.checked_at * 1000).toLocaleString()}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-fg-dim text-xs">dev 通道与当前一致</span>
+                )
+              )}
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => void handleCheckDev()}
+                  disabled={checkingDev || busy}
+                  className="btn btn-secondary btn-sm"
+                >
+                  {checkingDev ? '检查中...' : '手动检查 dev'}
+                </button>
+                {devCheck?.has_update && (
+                  <button
+                    onClick={() => void handleUpdateDev()}
+                    disabled={busy || checkingDev}
+                    className="btn btn-danger btn-sm"
+                  >
+                    {busy ? '更新中...' : `更新到 dev (${devCheck.latest_commit.slice(0, 8)})`}
+                  </button>
+                )}
+              </div>
+              <p className="text-2xs text-warn leading-snug">
+                ⚠ dev 通道未经发布验证，可能引入崩溃 / 训练异常 / schema 不兼容。
+                更新后用主区"切换到 ..."按钮可回到当前 commit。
+              </p>
+            </div>
+          )}
+        </div>
+      </details>
 
       {logModal.open && (
         <UpdateLogModal
