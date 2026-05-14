@@ -1068,7 +1068,7 @@ function SettingsField({ label, desc, helpTooltip, children }: {
   return (
     <div className="grid grid-cols-[240px_1fr] gap-3 items-start">
       <div className="flex flex-col gap-0.5 pt-1.5">
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
           <label className="text-xs text-fg-secondary font-mono leading-none">{label}</label>
           {helpTooltip && <InfoButton>{helpTooltip}</InfoButton>}
         </div>
@@ -1591,7 +1591,7 @@ function ModelGroupCard({
 }) {
   return (
     <div className="rounded-sm border border-subtle bg-sunken p-2.5">
-      <h4 className="text-xs font-semibold text-fg-primary mb-1.5 flex items-center gap-1.5">
+      <h4 className="text-xs font-semibold text-fg-primary mb-1.5 flex items-center gap-2">
         <span>{title}</span>
         {helpTooltip && <InfoButton>{helpTooltip}</InfoButton>}
       </h4>
@@ -2277,7 +2277,6 @@ function TaeFluxSection({
   ) => void
 }) {
   const n = draft.generate.preview_every_n_steps
-  const enabled = n > 0
   return (
     <SettingsSection id="preview" title="中间步预览">
       <SettingsField
@@ -2287,20 +2286,15 @@ function TaeFluxSection({
           <p>TAEFlux 解码模型 server 启动时已后台下载，UI 不需要单独操作。</p>
         }
       >
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min={0}
-            max={50}
-            value={n}
-            onChange={(e) => update('generate', 'preview_every_n_steps', Number(e.target.value) || 0)}
-            className="input"
-            style={{ width: 80 }}
-          />
-          <span className="text-2xs text-fg-tertiary">
-            {enabled ? `每 ${n} 步推一张 256px JPEG（~10KB/步）` : '不推预览（0）'}
-          </span>
-        </div>
+        <input
+          type="number"
+          min={0}
+          max={50}
+          value={n}
+          onChange={(e) => update('generate', 'preview_every_n_steps', Number(e.target.value) || 0)}
+          className="input"
+          style={{ width: 80 }}
+        />
       </SettingsField>
     </SettingsSection>
   )

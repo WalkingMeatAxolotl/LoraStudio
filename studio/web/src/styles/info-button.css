@@ -13,10 +13,9 @@
 }
 
 .info-btn-trigger {
-  /* 固定 18x18 圆按钮，font 14px ⓘ 字符居中。固定尺寸方便在不同字号
-     容器（h2 / label / 副标题）里都视觉一致；inline-flex + align-items
-     center 让按钮对齐到相邻文字的中线（之前 inline 基线对齐有些字体
-     会偏低）。 */
+  /* 固定 18x18 圆按钮，里面装 12x12 SVG。固定尺寸 + flex 居中：跟相邻
+     文字的中线对齐稳定（不受字体 / 字号差异影响，之前 Unicode ⓘ 字符在
+     不同字体里垂直位置不齐）。 */
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -24,11 +23,9 @@
   border: 0;
   cursor: pointer;
   color: var(--fg-tertiary);
-  font-size: 14px;
   width: 18px;
   height: 18px;
   padding: 0;
-  line-height: 1;
   border-radius: 50%;
   font-family: inherit;
 }

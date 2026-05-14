@@ -1,26 +1,45 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 /**
- * ⓘ 风格的 click-toggle 弹层。给字段名 / section title / 卡片角加帮助说明，
- * 不在主流 UI 占空间，用户需要时才显示。
+ * click-toggle 弹层。给字段名 / section title / 卡片角加帮助说明，不在主流
+ * UI 占空间，用户需要时才显示。
  *
  * 行为：
  * - 点 trigger 切换；点外部 / Esc 关
  * - aria-expanded 给屏幕阅读器；trigger 自带 aria-label
- * - 默认 trigger 是 unicode ⓘ；可通过 label prop 换
+ * - trigger 是 SVG i-in-circle 图标（之前用 Unicode ⓘ 字符在不同字体里
+ *   垂直位置不一致跟相邻文字基线对不齐；SVG 用固定 viewBox 严格居中）
  *
  * 不做的事（YAGNI；将来真有别的 trigger 需求再扩）：
  * - 不支持 hover 触发（手机不友好）
  * - 不动态计算 placement（统一 bottom-left；视口溢出靠 max-width 收）
- * - 不接受 trigger 自定义 element（统一 ⓘ button，保持视觉一致性）
  */
 interface InfoButtonProps {
   children: ReactNode
-  label?: string
   ariaLabel?: string
 }
 
-export function InfoButton({ children, label = 'ⓘ', ariaLabel = '更多信息' }: InfoButtonProps) {
+function InfoIcon() {
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx={8} cy={8} r={6.5} />
+      <line x1={8} y1={7.5} x2={8} y2={11.5} />
+      <circle cx={8} cy={4.8} r={0.6} fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+export function InfoButton({ children, ariaLabel = '更多信息' }: InfoButtonProps) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLSpanElement>(null)
 
@@ -53,7 +72,7 @@ export function InfoButton({ children, label = 'ⓘ', ariaLabel = '更多信息'
         aria-expanded={open}
         aria-label={ariaLabel}
       >
-        {label}
+        <InfoIcon />
       </button>
       {open && (
         <div className="info-btn-panel" role="dialog">
