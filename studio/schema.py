@@ -335,47 +335,47 @@ class TrainingConfig(BaseModel):
     )
     kv_trim: bool = Field(
         False,
-        description="Cross-attention KV trim：按实际 token 数裁到最近 bucket（64/128/256/512），减少 padding 计算量",
+        description="【性能】Cross-attention KV trim：按实际 token 数裁到最近 bucket（64/128/256/512），减少 padding 计算量",
         json_schema_extra=_meta("training"),
     )
     noise_offset: float = Field(
         0.0, ge=0.0, le=0.2,
-        description="噪声低频偏移强度，缓解亮度均值偏差（0=禁用，推荐 0.05-0.1）",
+        description="【噪声增强】低频偏移强度，缓解亮度均值偏差（0=禁用，推荐 0.05-0.1）",
         json_schema_extra=_meta("training"),
     )
     pyramid_noise_iters: int = Field(
         0, ge=0, le=6,
-        description="多尺度噪声叠加层数（0=禁用；2-3 帮助全局光照构图学习）",
+        description="【噪声增强】多尺度噪声叠加层数（0=禁用；2-3 帮助全局光照构图学习）",
         json_schema_extra=_meta("training"),
     )
     pyramid_noise_discount: float = Field(
         0.35, ge=0.1, le=0.9,
-        description="每层噪声衰减系数（仅 pyramid_noise_iters > 0）",
+        description="【噪声增强】金字塔每层衰减系数（仅 pyramid_noise_iters > 0）",
         json_schema_extra=_meta("training", show_when="pyramid_noise_iters!=0"),
     )
     timestep_sampling: Literal["logit_normal", "uniform", "logit_normal_low", "mode"] = Field(
         "logit_normal",
-        description="时间步采样分布（logit_normal 为 SD3/Anima 默认）",
+        description="【时间步采样】分布（logit_normal 为 SD3/Anima 默认）",
         json_schema_extra=_meta("training"),
     )
     timestep_shift: float = Field(
         3.0, ge=0.1, le=10.0,
-        description="logit-normal / mode shift（>1 偏向高噪声端，<1 偏向细节端）",
+        description="【时间步采样】logit-normal / mode shift（>1 偏向高噪声端，<1 偏向细节端）",
         json_schema_extra=_meta("training", show_when="timestep_sampling!=uniform"),
     )
     loss_weighting: Literal["none", "min_snr", "detail_inv_t", "cosmap"] = Field(
         "none",
-        description="Loss 加权方案（min_snr 推荐；detail_inv_t 细节强化；cosmap SD3 风格）",
+        description="【损失加权】方案（min_snr 推荐；detail_inv_t 细节强化；cosmap SD3 风格）",
         json_schema_extra=_meta("training"),
     )
     min_snr_gamma: float = Field(
         5.0, ge=0.1, le=20.0,
-        description="Min-SNR gamma 值（仅 loss_weighting=min_snr）",
+        description="【损失加权】Min-SNR gamma 值（仅 loss_weighting=min_snr）",
         json_schema_extra=_meta("training", show_when="loss_weighting==min_snr"),
     )
     weight_cap_ratio: float = Field(
         0.0, ge=0.0, le=50.0,
-        description="Batch 内 loss 权重 max/min 比上限（0=禁用；小 batch+Prodigy 建议 5）",
+        description="【损失加权】Batch 内权重 max/min 比上限（0=禁用；小 batch+Prodigy 建议 5）",
         json_schema_extra=_meta("training", show_when="loss_weighting!=none"),
     )
     grad_clip_max_norm: float = Field(
