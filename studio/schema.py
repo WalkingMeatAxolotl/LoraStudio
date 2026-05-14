@@ -231,6 +231,11 @@ class TrainingConfig(BaseModel):
         description="批次大小",
         json_schema_extra=_meta("training"),
     )
+    grad_checkpoint: bool = Field(
+        True,
+        description="梯度检查点（省显存，约增加 1/3 计算量）",
+        json_schema_extra=_meta("training"),
+    )
     grad_accum: int = Field(
         4, ge=1,
         description="梯度累积步数（有效 batch = batch_size × grad_accum）",
@@ -434,11 +439,7 @@ class TrainingConfig(BaseModel):
         description="混合精度",
         json_schema_extra=_meta("system"),
     )
-    grad_checkpoint: bool = Field(
-        True,
-        description="梯度检查点（省显存）",
-        json_schema_extra=_meta("system"),
-    )
+
     attention_backend: AttentionBackend = Field(
         "flash_attn",
         description="Attention backend：none（PyTorch SDPA）/ xformers / Flash Attention（5090 推荐 flash_attn）",
