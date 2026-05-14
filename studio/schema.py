@@ -390,8 +390,8 @@ class TrainingConfig(BaseModel):
         json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true", advanced=True),
     )
     infonoise_N_warm: int = Field(
-        5000, ge=100,
-        description="【InfoNoise】热身步数（热身期用 baseline logit-normal）",
+        0, ge=0,
+        description="【InfoNoise】热身步数（0 = 自动，取总步数的 20%，最少 200 步）",
         json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true", advanced=True),
     )
     infonoise_M: int = Field(
