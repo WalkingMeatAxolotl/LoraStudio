@@ -165,7 +165,7 @@ class TrainingConfig(BaseModel):
     cache_latents: bool = Field(
         True,
         description="缓存 VAE latent 加速训练",
-        json_schema_extra=_meta("caption"),
+        json_schema_extra=_meta("system"),
     )
 
     # ------------------------------------------------------------------- LoRA
@@ -336,82 +336,82 @@ class TrainingConfig(BaseModel):
     kv_trim: bool = Field(
         False,
         description="【性能】Cross-attention KV trim：按实际 token 数裁到最近 bucket（64/128/256/512），减少 padding 计算量",
-        json_schema_extra=_meta("training"),
+        json_schema_extra=_meta("system"),
     )
     noise_offset: float = Field(
         0.0, ge=0.0, le=0.2,
         description="【噪声增强】低频偏移强度，缓解亮度均值偏差（0=禁用，推荐 0.05-0.1）",
-        json_schema_extra=_meta("training"),
+        json_schema_extra=_meta("noise_schedule"),
     )
     pyramid_noise_iters: int = Field(
         0, ge=0, le=6,
         description="【噪声增强】多尺度噪声叠加层数（0=禁用；2-3 帮助全局光照构图学习）",
-        json_schema_extra=_meta("training"),
+        json_schema_extra=_meta("noise_schedule"),
     )
     pyramid_noise_discount: float = Field(
         0.35, ge=0.1, le=0.9,
         description="【噪声增强】金字塔每层衰减系数（仅 pyramid_noise_iters > 0）",
-        json_schema_extra=_meta("training", show_when="pyramid_noise_iters!=0"),
+        json_schema_extra=_meta("noise_schedule", show_when="pyramid_noise_iters!=0"),
     )
     timestep_sampling: Literal["logit_normal", "uniform", "logit_normal_low", "mode"] = Field(
         "logit_normal",
         description="【时间步采样】分布（logit_normal 为 SD3/Anima 默认）",
-        json_schema_extra=_meta("training"),
+        json_schema_extra=_meta("noise_schedule"),
     )
     timestep_shift: float = Field(
         3.0, ge=0.1, le=10.0,
         description="【时间步采样】logit-normal / mode shift（>1 偏向高噪声端，<1 偏向细节端）",
-        json_schema_extra=_meta("training", show_when="timestep_sampling!=uniform"),
+        json_schema_extra=_meta("noise_schedule", show_when="timestep_sampling!=uniform"),
     )
     infonoise_enabled: bool = Field(
         False,
         description="【InfoNoise】启用自适应时间步采样（基于 I-MMSE 信息量，自动聚焦有效训练区间）",
-        json_schema_extra=_meta("training"),
+        json_schema_extra=_meta("noise_schedule"),
     )
     infonoise_K: int = Field(
         64, ge=16, le=256,
         description="【InfoNoise】log-σ bin 数量",
-        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+        json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true"),
     )
     infonoise_N_warm: int = Field(
         5000, ge=100,
         description="【InfoNoise】热身步数（热身期用 baseline logit-normal）",
-        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+        json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true"),
     )
     infonoise_M: int = Field(
         100, ge=10,
         description="【InfoNoise】schedule 刷新周期（每 M 步重算一次采样分布）",
-        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+        json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true"),
     )
     infonoise_B: int = Field(
         256, ge=32,
         description="【InfoNoise】每 bin 的 FIFO buffer 容量",
-        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+        json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true"),
     )
     infonoise_beta: float = Field(
         0.9, ge=0.1, le=0.999,
         description="【InfoNoise】EMA 平滑率",
-        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+        json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true"),
     )
     infonoise_N_min: int = Field(
         50, ge=1,
         description="【InfoNoise】触发刷新所需的每 bin 最小样本数",
-        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+        json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true"),
     )
     loss_weighting: Literal["none", "min_snr", "detail_inv_t", "cosmap"] = Field(
         "none",
         description="【损失加权】方案（min_snr 推荐；detail_inv_t 细节强化；cosmap SD3 风格）",
-        json_schema_extra=_meta("training"),
+        json_schema_extra=_meta("noise_schedule"),
     )
     min_snr_gamma: float = Field(
         5.0, ge=0.1, le=20.0,
         description="【损失加权】Min-SNR gamma 值（仅 loss_weighting=min_snr）",
-        json_schema_extra=_meta("training", show_when="loss_weighting==min_snr"),
+        json_schema_extra=_meta("noise_schedule", show_when="loss_weighting==min_snr"),
     )
     weight_cap_ratio: float = Field(
         0.0, ge=0.0, le=50.0,
         description="【损失加权】Batch 内权重 max/min 比上限（0=禁用；小 batch+Prodigy 建议 5）",
-        json_schema_extra=_meta("training", show_when="loss_weighting!=none"),
+        json_schema_extra=_meta("noise_schedule", show_when="loss_weighting!=none"),
     )
     grad_clip_max_norm: float = Field(
         0.0, ge=0.0,
@@ -421,22 +421,22 @@ class TrainingConfig(BaseModel):
     mixed_precision: Literal["bf16", "fp16", "no"] = Field(
         "bf16",
         description="混合精度",
-        json_schema_extra=_meta("training"),
+        json_schema_extra=_meta("system"),
     )
     grad_checkpoint: bool = Field(
         True,
         description="梯度检查点（省显存）",
-        json_schema_extra=_meta("training"),
+        json_schema_extra=_meta("system"),
     )
     attention_backend: AttentionBackend = Field(
         "flash_attn",
         description="Attention backend：none（PyTorch SDPA）/ xformers / Flash Attention（5090 推荐 flash_attn）",
-        json_schema_extra=_meta("training"),
+        json_schema_extra=_meta("system"),
     )
     num_workers: int = Field(
         0, ge=0,
         description="数据加载线程（Windows 必须 0）",
-        json_schema_extra=_meta("training"),
+        json_schema_extra=_meta("system"),
     )
 
     @model_validator(mode="before")
@@ -835,8 +835,10 @@ GROUP_ORDER: list[tuple[str, str, bool]] = [
     ("model", "模型路径", False),
     ("dataset", "数据集", False),
     ("caption", "Caption 处理", False),
-    ("lora", "LoRA / LoKr", False),
+    ("lora", "网络设置", False),
     ("training", "训练参数", False),
+    ("noise_schedule", "噪声与调度", False),
+    ("system", "系统与性能", False),
     ("output", "输出与保存", False),
     ("sample", "采样", False),
     ("monitor", "监控与进度", False),
