@@ -333,6 +333,11 @@ class TrainingConfig(BaseModel):
         description="权重衰减（0=禁用）",
         json_schema_extra=_meta("training"),
     )
+    kv_trim: bool = Field(
+        False,
+        description="Cross-attention KV trim：按实际 token 数裁到最近 bucket（64/128/256/512），减少 padding 计算量",
+        json_schema_extra=_meta("training"),
+    )
     noise_offset: float = Field(
         0.0, ge=0.0, le=0.2,
         description="噪声低频偏移强度，缓解亮度均值偏差（0=禁用，推荐 0.05-0.1）",

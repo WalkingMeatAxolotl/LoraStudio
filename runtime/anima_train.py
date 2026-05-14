@@ -2627,6 +2627,16 @@ def main():
                 cross = model.preprocess_text_embeds(qwen_emb, t5_ids)
                 if cross.shape[1] < 512:
                     cross = F.pad(cross, (0, 0, 0, 512 - cross.shape[1]))
+                # KV trim：把 padding 截到最近有效 token bucket（64/128/256/512）
+                # t5_attn=1 表示有效 token；取批次内最大实际长度再 round up
+                if getattr(args, "kv_trim", False):
+                    _actual = int(t5_attn.sum(dim=-1).max().item())
+                    _bucket = 512  # _actual > 512 时兜底（不裁，保持原行为）
+                    for _b in (64, 128, 256, 512):
+                        if _b >= _actual:
+                            _bucket = _b
+                            break
+                    cross = cross[:, :_bucket, :].contiguous()
 
             # Flow Matching
             t = sample_t(
