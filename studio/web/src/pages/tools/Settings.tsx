@@ -1068,7 +1068,7 @@ function SettingsField({ label, desc, helpTooltip, children }: {
   return (
     <div className="grid grid-cols-[240px_1fr] gap-3 items-start">
       <div className="flex flex-col gap-0.5 pt-1.5">
-        <div className="flex items-center gap-0.5 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0">
           <label className="text-xs text-fg-secondary font-mono leading-none">{label}</label>
           {helpTooltip && <InfoButton>{helpTooltip}</InfoButton>}
         </div>
@@ -1591,7 +1591,7 @@ function ModelGroupCard({
 }) {
   return (
     <div className="rounded-sm border border-subtle bg-sunken p-2.5">
-      <h4 className="text-xs font-semibold text-fg-primary mb-1.5 flex items-center gap-0.5">
+      <h4 className="text-xs font-semibold text-fg-primary mb-1.5 flex items-center gap-1.5">
         <span>{title}</span>
         {helpTooltip && <InfoButton>{helpTooltip}</InfoButton>}
       </h4>
@@ -2282,9 +2282,9 @@ function TaeFluxSection({
     <SettingsSection id="preview" title="中间步预览">
       <SettingsField
         label="节流（每 N 步推一次预览）"
-        desc="0 = 关闭中间步预览；推荐 3-5"
+        desc="0 = 关闭；推荐 3-5"
         helpTooltip={
-          <p>TAEFlux 解码模型 server 启动时已后台下载，UI 不需要单独操作。<code>0</code> 关闭中间步预览；推荐 <code>3-5</code>。</p>
+          <p>TAEFlux 解码模型 server 启动时已后台下载，UI 不需要单独操作。</p>
         }
       >
         <div className="flex items-center gap-2">
@@ -2331,12 +2331,6 @@ function DisplaySection() {
     return '默认'
   }
 
-  const densityDesc = (d: Density): string => {
-    if (d === 'tight') return '字号更小，间距更紧，适合小屏或高信息密度'
-    if (d === 'loose') return '字号更大，间距更宽，适合阅读舒适'
-    return '标准字号与间距'
-  }
-
   return (
     <SettingsSection id="display" title="显示">
       <SettingsField label="主题">
@@ -2353,22 +2347,26 @@ function DisplaySection() {
         </div>
       </SettingsField>
 
-      <SettingsField label="界面缩放">
-        <div className="flex flex-col gap-1.5">
-          <div className="flex gap-1">
-            {(['tight', 'default', 'loose'] as Density[]).map((d) => (
-              <button
-                key={d}
-                onClick={() => handleDensityChange(d)}
-                className={`btn btn-sm ${density === d ? 'btn-primary' : 'btn-secondary'}`}
-              >
-                {densityLabel(d)}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-fg-tertiary m-0">
-            {densityDesc(density)}
-          </p>
+      <SettingsField
+        label="界面缩放"
+        helpTooltip={
+          <>
+            <p><strong>紧凑</strong>：字号更小，间距更紧，适合小屏或高信息密度</p>
+            <p><strong>默认</strong>：标准字号与间距</p>
+            <p><strong>宽松</strong>：字号更大，间距更宽，适合阅读舒适</p>
+          </>
+        }
+      >
+        <div className="flex gap-1">
+          {(['tight', 'default', 'loose'] as Density[]).map((d) => (
+            <button
+              key={d}
+              onClick={() => handleDensityChange(d)}
+              className={`btn btn-sm ${density === d ? 'btn-primary' : 'btn-secondary'}`}
+            >
+              {densityLabel(d)}
+            </button>
+          ))}
         </div>
       </SettingsField>
     </SettingsSection>

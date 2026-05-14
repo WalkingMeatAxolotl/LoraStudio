@@ -8,17 +8,28 @@
 .info-btn-anchor {
   position: relative;
   display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
 }
 
 .info-btn-trigger {
+  /* 固定 18x18 圆按钮，font 14px ⓘ 字符居中。固定尺寸方便在不同字号
+     容器（h2 / label / 副标题）里都视觉一致；inline-flex + align-items
+     center 让按钮对齐到相邻文字的中线（之前 inline 基线对齐有些字体
+     会偏低）。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: 0;
   cursor: pointer;
   color: var(--fg-tertiary);
   font-size: 14px;
-  padding: 2px 4px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
   line-height: 1;
-  border-radius: 4px;
+  border-radius: 50%;
   font-family: inherit;
 }
 .info-btn-trigger:hover {
