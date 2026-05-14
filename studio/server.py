@@ -104,9 +104,41 @@ db.init_db()
 logger = logging.getLogger(__name__)
 
 
+def _install_proactor_disconnect_filter(loop: asyncio.AbstractEventLoop) -> None:
+    """吞 Windows + asyncio Proactor 的 cosmetic ConnectionResetError 噪声。
+
+    Python asyncio 在 Windows 上有 [bpo-44291](https://github.com/python/cpython/issues/87691) 类问题：
+    远端 TCP 强制断开（用户关 tab / 刷新 / SSE 重连，WinError 10054 / 10053）
+    时 `_ProactorBasePipeTransport._call_connection_lost` 走 `socket.shutdown()`
+    抛 `ConnectionResetError` / `ConnectionAbortedError`，但 callback 内部
+    没 catch 这两个 expected error，asyncio 默认 handler 打 traceback 到
+    stderr。server 完全没事，只是日志被刷一行无意义 stack。
+
+    精确过滤：只在 exception 是 ConnectionResetError / ConnectionAbortedError
+    且 handle repr 含 `_call_connection_lost` 时静默吞掉；其它 asyncio
+    异常仍交给 default handler。仅 Windows 装；其它平台用 SelectorEventLoop
+    没这个 bug。
+    """
+    if os.name != "nt":
+        return
+
+    def _filter(loop_: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        exc = context.get("exception")
+        if isinstance(exc, (ConnectionResetError, ConnectionAbortedError)):
+            handle = context.get("handle")
+            if handle and "_call_connection_lost" in repr(handle):
+                return
+        loop_.default_exception_handler(context)
+
+    loop.set_exception_handler(_filter)
+
+
 @asynccontextmanager
 async def _lifespan(app_: FastAPI) -> AsyncIterator[None]:
     """启动绑定 event bus 到当前 loop 并起 supervisor；关闭时停 supervisor。"""
+    # 装 Windows ProactorEventLoop 的 ConnectionResetError 过滤器（详见 helper docstring）
+    _install_proactor_disconnect_filter(asyncio.get_running_loop())
+
     # 测试出图 tempdir 遗留清扫（防 supervisor crash 泄漏 anima_gen_* 目录）
     from .services.inference_core import cleanup_stale_generate_tempdirs
     from .services import generate_cache, model_downloader as _md
