@@ -309,6 +309,27 @@ def run(ctx: TrainingContext) -> None:
                     wandb_step=ctx.global_step,
                 )
 
+            # 定期保存训练状态（epoch 版）
+            save_state_every_epochs = int(getattr(args, "save_state_every_epochs", 0) or 0)
+            if save_state_every_epochs > 0 and ctx.current_epoch % save_state_every_epochs == 0:
+                state_path = ctx.output_dir / f"training_state_epoch{ctx.current_epoch}.pt"
+                monitor_data = None
+                if ctx.monitor_server:
+                    try:
+                        from train_monitor import get_state
+                        monitor_data = get_state()
+                    except Exception:
+                        pass
+                with optimizer_eval_mode(ctx.optimizer):
+                    save_training_state(
+                        state_path, ctx.injector, ctx.optimizer, epoch, ctx.global_step,
+                        ctx.loss_history, monitor_state=monitor_data, scheduler=ctx.scheduler,
+                    )
+                    lora_path = ctx.output_dir / f"{args.output_name}_epoch{ctx.current_epoch}.safetensors"
+                    if not lora_path.exists():
+                        ctx.injector.save(lora_path)
+                ctx.emit(f"Saved training state: training_state_epoch{ctx.current_epoch}.pt")
+
         # 检查 max_steps
         if args.max_steps and ctx.global_step >= args.max_steps:
             break
