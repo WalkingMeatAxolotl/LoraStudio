@@ -91,13 +91,16 @@ def test_create_ppsf_import_error_message() -> None:
 
 
 @pytest.mark.skipif(not _has_ppsf(), reason="PPSF 未安装")
-def test_create_ppsf_forces_lr_to_one(capsys: pytest.CaptureFixture[str]) -> None:
+def test_create_ppsf_forces_lr_to_one(caplog: pytest.LogCaptureFixture) -> None:
     """传非 1.0 的 lr 时强制覆盖并 WARN（PPSF 要求 lr=1.0）。"""
+    import logging
     model = nn.Linear(4, 4)
-    optim = create_prodigy_plus_schedulefree(model.parameters(), lr=1e-4)
-    captured = capsys.readouterr().out
-    assert "lr=1.0" in captured
-    assert "WARN" in captured
+    with caplog.at_level(logging.WARNING, logger="utils.optimizer_utils"):
+        optim = create_prodigy_plus_schedulefree(model.parameters(), lr=1e-4)
+    assert any(
+        "lr=1.0" in r.getMessage() and r.levelno >= logging.WARNING
+        for r in caplog.records
+    ), f"expected WARNING with 'lr=1.0', got: {[r.getMessage() for r in caplog.records]}"
     assert optim.param_groups[0]["lr"] == 1.0
 
 
