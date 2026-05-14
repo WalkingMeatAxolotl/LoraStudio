@@ -36,6 +36,17 @@ def _is_param_groups(params: Any) -> bool:
     return False
 
 
+# 用户通过 schema (ppsf_* 字段) 显式配置的 kwarg。如果上游版本不接受这些，
+# silent drop 会让用户的勾选/数值悄悄失效，可能 8 小时后才发现训练效果不对——
+# 所以这些必须 fail loud，而不是只 log warning。
+_USER_EXPOSED_PPSF_KWARGS = frozenset({
+    "d_coef", "prodigy_steps",
+    "split_groups", "split_groups_mean",
+    "use_speed", "fused_back_pass",
+    "use_stableadamw",
+})
+
+
 def _filter_kwargs_by_signature(cls_or_fn, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     try:
         sig = inspect.signature(cls_or_fn)
@@ -55,6 +66,15 @@ def _filter_kwargs_by_signature(cls_or_fn, kwargs: Dict[str, Any]) -> Dict[str, 
     filtered = {k: v for k, v in kwargs.items() if k in accepted}
     dropped = [k for k in kwargs if k not in accepted]
     if dropped:
+        exposed_dropped = [k for k in dropped if k in _USER_EXPOSED_PPSF_KWARGS]
+        if exposed_dropped:
+            cls_name = getattr(cls_or_fn, "__name__", str(cls_or_fn))
+            raise RuntimeError(
+                f"[optimizer] {cls_name} 不支持以下用户配置的 kwarg："
+                f"{exposed_dropped}。可能是 prodigy-plus-schedule-free 库版本不匹配 "
+                f"（pip show prodigy-plus-schedule-free 检查版本）。"
+                f"升级/降级依赖，或在 yaml 关掉对应字段。"
+            )
         logger.warning(
             f"[optimizer] Dropped unsupported kwargs for "
             f"{getattr(cls_or_fn, '__name__', cls_or_fn)}: {dropped}"
