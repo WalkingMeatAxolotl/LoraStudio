@@ -8,6 +8,7 @@
 |---|---|---|---|
 | 0001 | [LoKr 适配器走 lycoris-lora 而不切 sd-scripts](0001-lokr-via-lycoris-lora.md) | Accepted | 2025 |
 | 0002 | [Webui 内自更新（flag + shell wrapper loop）](0002-webui-self-update.md) | Proposed | 2026-05-12 |
+| 0003 | [anima_train.py 模块化重构（plugin 边界 + adapter hook protocol）](0003-anima-train-refactor.md) | Proposed | 2026-05-14 |
 
 ## 状态值
 

@@ -14,7 +14,7 @@
 
 讨论顺序：
 
-1. 暂停 + resume 训练（[Ctrl+C 现成机制](../../runtime/anima_train.py#L2374-L2401)，差 supervisor 发对信号 + UI 接线）
+1. 暂停 + resume 训练（[Ctrl+C 现成机制](../../runtime/anima_train.py)，看 `signal_handler` / `signal.SIGINT`；PR-A 之后会搬到 `runtime/training/phases/resume.py`。差 supervisor 发对信号 + UI 接线）
 2. webui 一键更新（本 ADR）
 
 两者配套出"无痛升级 + 长任务护盘" 完整故事。
@@ -385,5 +385,5 @@ Idle ──[check]──> HasUpdate ──[update click]──> CheckPreconditio
 ## 参考
 
 - 业界调研：[A1111 restart.py](https://github.com/AUTOMATIC1111/stable-diffusion-webui/blob/master/modules/restart.py) / [ComfyUI-Manager manager_server.py](https://github.com/Comfy-Org/ComfyUI-Manager/blob/main/glob/manager_server.py) / [oobabooga one_click.py](https://github.com/oobabooga/text-generation-webui/blob/main/one_click.py) / [SwarmUI AdminAPI.cs](https://github.com/mcmonkeyprojects/SwarmUI/blob/master/src/WebAPI/AdminAPI.cs)
-- 仓库现有机制：[`studio/cli.py:cmd_run`](../../studio/cli.py) / [`studio/services/pending_install.py`](../../studio/services/pending_install.py) / [`studio.sh:135-148`](../../studio.sh) / [`runtime/anima_train.py:2374-2401`](../../runtime/anima_train.py)
+- 仓库现有机制：[`studio/cli.py:cmd_run`](../../studio/cli.py) / [`studio/services/pending_install.py`](../../studio/services/pending_install.py) / [`studio.sh:135-148`](../../studio.sh) / [`runtime/anima_train.py`](../../runtime/anima_train.py) 的 `signal_handler`（grep `signal.SIGINT`）；ADR 0003 重构后位置改到 `runtime/training/phases/resume.py`
 - 暂停训练前置 feature：单独 ADR / PR 跟进
