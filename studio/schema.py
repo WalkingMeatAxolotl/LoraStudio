@@ -363,6 +363,41 @@ class TrainingConfig(BaseModel):
         description="【时间步采样】logit-normal / mode shift（>1 偏向高噪声端，<1 偏向细节端）",
         json_schema_extra=_meta("training", show_when="timestep_sampling!=uniform"),
     )
+    infonoise_enabled: bool = Field(
+        False,
+        description="【InfoNoise】启用自适应时间步采样（基于 I-MMSE 信息量，自动聚焦有效训练区间）",
+        json_schema_extra=_meta("training"),
+    )
+    infonoise_K: int = Field(
+        64, ge=16, le=256,
+        description="【InfoNoise】log-σ bin 数量",
+        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+    )
+    infonoise_N_warm: int = Field(
+        5000, ge=100,
+        description="【InfoNoise】热身步数（热身期用 baseline logit-normal）",
+        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+    )
+    infonoise_M: int = Field(
+        100, ge=10,
+        description="【InfoNoise】schedule 刷新周期（每 M 步重算一次采样分布）",
+        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+    )
+    infonoise_B: int = Field(
+        256, ge=32,
+        description="【InfoNoise】每 bin 的 FIFO buffer 容量",
+        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+    )
+    infonoise_beta: float = Field(
+        0.9, ge=0.1, le=0.999,
+        description="【InfoNoise】EMA 平滑率",
+        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+    )
+    infonoise_N_min: int = Field(
+        50, ge=1,
+        description="【InfoNoise】触发刷新所需的每 bin 最小样本数",
+        json_schema_extra=_meta("training", show_when="infonoise_enabled==true"),
+    )
     loss_weighting: Literal["none", "min_snr", "detail_inv_t", "cosmap"] = Field(
         "none",
         description="【损失加权】方案（min_snr 推荐；detail_inv_t 细节强化；cosmap SD3 风格）",

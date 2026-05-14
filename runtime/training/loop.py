@@ -85,11 +85,14 @@ def run(ctx: TrainingContext) -> None:
                     cross = cross[:, :_bucket, :].contiguous()
 
             # Flow Matching
-            t = sample_t(
-                bs, ctx.device,
-                mode=str(getattr(args, "timestep_sampling", "logit_normal") or "logit_normal"),
-                shift=float(getattr(args, "timestep_shift", 3.0) or 3.0),
-            )
+            if ctx.info_noise is not None:
+                t = ctx.info_noise.sample(bs, ctx.device)
+            else:
+                t = sample_t(
+                    bs, ctx.device,
+                    mode=str(getattr(args, "timestep_sampling", "logit_normal") or "logit_normal"),
+                    shift=float(getattr(args, "timestep_shift", 3.0) or 3.0),
+                )
 
             # PR-C：adapter hook — 允许变体按 sigma_t / step 调整运行时结构
             # （T-LoRA / AdaLoRA / B-LoRA 等）。LyCORIS 走默认 no-op。
@@ -121,6 +124,12 @@ def run(ctx: TrainingContext) -> None:
                     use_checkpoint=args.grad_checkpoint,
                 )
                 loss_per_sample = F.mse_loss(pred.float(), target.float(), reduction="none")
+                # InfoNoise：记录原始 per-sample MSE（加权前）
+                if ctx.info_noise is not None:
+                    _raw_mse = loss_per_sample.detach().mean(
+                        dim=list(range(1, loss_per_sample.dim()))
+                    )
+                    ctx.info_noise.record(t.detach(), _raw_mse)
                 # 按样本加权（正则集可降低权重）
                 if "loss_weight" in batch:
                     w = batch["loss_weight"].to(ctx.device).view(-1, *([1] * (loss_per_sample.dim() - 1)))
@@ -171,6 +180,10 @@ def run(ctx: TrainingContext) -> None:
                     ctx.scheduler.step()
                 ctx.optimizer.zero_grad()
                 ctx.global_step += 1
+
+                # InfoNoise：刷新采样分布
+                if ctx.info_noise is not None:
+                    ctx.info_noise.maybe_refresh(ctx.global_step)
 
                 # 记录 loss 历史
                 loss_val = float(loss.item() * args.grad_accum)
