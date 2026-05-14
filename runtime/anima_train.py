@@ -2160,7 +2160,7 @@ def main():
         update_monitor(
             total_epochs=int(args.epochs or 0),
             config={
-                "model": {"lokr": "Anima LoKr", "tlora": "Anima T-LoRA"}.get(args.lora_type, "Anima LoRA"),
+                "model": {"lokr": "Anima LoKr"}.get(args.lora_type, "Anima LoRA"),
                 "rank": args.lora_rank,
                 "alpha": args.lora_alpha,
                 "epochs": args.epochs,
@@ -2227,26 +2227,18 @@ def main():
 
     # 注入 LoRA
     logger.info(f"注入 {args.lora_type.upper()}...")
-    if args.lora_type == "tlora":
-        from utils.tlora_adapter import AnimaTLoRAAdapter
-        injector = AnimaTLoRAAdapter(
-            rank=args.lora_rank,
-            alpha=args.lora_alpha,
-            min_rank=int(getattr(args, "tlora_min_rank", 1) or 1),
-        )
-    else:
-        from utils.lycoris_adapter import AnimaLycorisAdapter
-        injector = AnimaLycorisAdapter(
-            algo=args.lora_type,
-            rank=args.lora_rank,
-            alpha=args.lora_alpha,
-            factor=args.lokr_factor,
-            dropout=float(getattr(args, "lora_dropout", 0.0) or 0.0),
-            rank_dropout=float(getattr(args, "lora_rank_dropout", 0.0) or 0.0),
-            module_dropout=float(getattr(args, "lora_module_dropout", 0.0) or 0.0),
-            weight_decompose=bool(getattr(args, "lora_dora", False)),
-            rs_lora=bool(getattr(args, "lora_rs", False)),
-        )
+    from utils.lycoris_adapter import AnimaLycorisAdapter
+    injector = AnimaLycorisAdapter(
+        algo=args.lora_type,
+        rank=args.lora_rank,
+        alpha=args.lora_alpha,
+        factor=args.lokr_factor,
+        dropout=float(getattr(args, "lora_dropout", 0.0) or 0.0),
+        rank_dropout=float(getattr(args, "lora_rank_dropout", 0.0) or 0.0),
+        module_dropout=float(getattr(args, "lora_module_dropout", 0.0) or 0.0),
+        weight_decompose=bool(getattr(args, "lora_dora", False)),
+        rs_lora=bool(getattr(args, "lora_rs", False)),
+    )
     injector.inject(model)
     
     # 从已有 LoRA 继续训练
@@ -2644,8 +2636,6 @@ def main():
                 mode=str(getattr(args, "timestep_sampling", "logit_normal") or "logit_normal"),
                 shift=float(getattr(args, "timestep_shift", 3.0) or 3.0),
             )
-            if args.lora_type == "tlora":
-                injector.set_mask(injector.build_sigma_mask(t, device))
             t_exp = t.view(-1, 1, 1, 1, 1)
             noise = make_noise(
                 latents,
