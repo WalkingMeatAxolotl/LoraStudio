@@ -34,7 +34,7 @@ function version(stage: Version['stage']): Version {
 
 function renderStepper(p: ProjectDetail, v: Version | null) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
       <ProjectStepper project={p} version={v} />
     </MemoryRouter>
   )
