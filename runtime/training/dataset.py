@@ -1,0 +1,569 @@
+"""数据集与 collate：ARB 分桶 + ImageDataset + 正则集 merge + cached latent。
+
+抽自原 runtime/anima_train.py L1144-1675 + L1939-1962（ADR 0003 PR-A）。
+
+公开：
+- BucketManager / ImageDataset / RepeatDataset / MergedDataset
+- BucketBatchSampler / CachedLatentDataset
+- collate_fn / collate_fn_cached — DataLoader collate
+"""
+
+from __future__ import annotations
+
+import logging
+import random
+from pathlib import Path
+
+import torch
+from torch.utils.data import Dataset
+
+
+logger = logging.getLogger(__name__)
+
+
+class BucketManager:
+    """ARB 分桶管理"""
+    def __init__(self, base_reso=1024, min_reso=512, max_reso=2048, step=64):
+        self.base_reso = base_reso
+        self.buckets = self._generate(min_reso, max_reso, step, base_reso)
+
+    def _generate(self, min_r, max_r, step, base):
+        buckets = []
+        base_area = base * base
+        for w in range(min_r, max_r + 1, step):
+            for h in range(min_r, max_r + 1, step):
+                if abs(w * h - base_area) / base_area > 0.1:
+                    continue
+                if max(w/h, h/w) > 2.0:
+                    continue
+                buckets.append((w, h))
+        return buckets
+
+    def get_bucket(self, w, h):
+        aspect = w / h
+        best = (self.base_reso, self.base_reso)
+        best_diff = float("inf")
+        for bw, bh in self.buckets:
+            diff = abs(aspect - bw/bh)
+            if diff < best_diff:
+                best_diff = diff
+                best = (bw, bh)
+        return best
+
+
+class ImageDataset(Dataset):
+    """
+    图像数据集
+    
+    支持两种 caption 格式：
+    1. JSON 文件（优先）- 支持分类 shuffle
+    2. TXT 文件（回退）- 传统 shuffle
+    """
+    # 保持与 studio/datasets.py:IMAGE_EXTS 同步（anima_train.py 是独立 CLI 脚本，
+    # 不强制 import studio package；改一处时另一处也要跟着改）。
+    EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
+
+    def __init__(self, data_dir, resolution=1024, bucket_mgr=None,
+                 shuffle_caption=False, keep_tokens=0, flip_augment=False,
+                 tag_dropout=0.0, prefer_json=True, caption_override=None):
+        self.data_dir = Path(data_dir)
+        self.resolution = resolution
+        self.bucket_mgr = bucket_mgr
+        self.shuffle_caption = shuffle_caption
+        self.keep_tokens = keep_tokens
+        self.flip_augment = flip_augment
+        self.tag_dropout = tag_dropout
+        self.prefer_json = prefer_json
+        self.caption_override = caption_override  # 正则集：统一 caption，如 "1girl, solo"
+        
+        # 尝试导入 caption_utils（直接导入避开 __init__.py）
+        self.caption_utils = None
+        if prefer_json:
+            try:
+                import importlib.util
+                import sys
+                
+                # 直接加载 caption_utils.py
+                utils_path = Path(__file__).parent.parent / "utils" / "caption_utils.py"  # noqa: E501 — 等价原 runtime/utils/...，见 ADR 0003 PR-A
+                if utils_path.exists():
+                    spec = importlib.util.spec_from_file_location("caption_utils", utils_path)
+                    caption_module = importlib.util.module_from_spec(spec)
+                    sys.modules["caption_utils"] = caption_module
+                    spec.loader.exec_module(caption_module)
+                    
+                    self.caption_utils = {
+                        "load_and_build": caption_module.load_and_build_caption,
+                        "load_json": caption_module.load_caption_json,
+                        "normalize": caption_module.normalize_caption_json,
+                        "build": caption_module.build_caption_from_json,
+                    }
+                    logger.info("JSON caption 模式已启用（分类 shuffle）")
+                else:
+                    logger.warning(f"caption_utils.py 未找到: {utils_path}")
+            except Exception as e:
+                logger.warning(f"caption_utils 加载失败: {e}，回退到 TXT 模式")
+        
+        self.samples = self._scan()
+        json_count = sum(1 for s in self.samples if s.get("json_path"))
+        txt_count = len(self.samples) - json_count
+        unique_count = len(set(id(s) for s in self.samples))
+        logger.info(f"数据集: {unique_count} 张图 → {len(self.samples)} 样本（含 repeat）(JSON: {json_count}, TXT: {txt_count})")
+
+    @staticmethod
+    def _parse_repeats_from_dir(name: str) -> int:
+        """从文件夹名解析 Kohya 风格重复次数，如 '5_concept' → 5"""
+        prefix = name.split("_", 1)[0]
+        if prefix.isdigit():
+            return max(int(prefix), 1)
+        return 1
+
+    def _make_sample(self, img_path):
+        """为单张图构建 sample dict，找不到 caption 返回 None"""
+        sample = {"image": img_path}
+        json_path = img_path.with_suffix(".json")
+        if self.prefer_json and json_path.exists():
+            sample["json_path"] = json_path
+            sample["txt_path"] = None
+        else:
+            txt_path = img_path.with_suffix(".txt")
+            if not txt_path.exists():
+                txt_path = img_path.with_suffix(".caption")
+            if not txt_path.exists():
+                return None
+            sample["json_path"] = None
+            sample["txt_path"] = txt_path
+        return sample
+
+    def _scan(self):
+        """扫描数据集目录，支持 Kohya 风格文件夹重复。
+
+        目录结构示例::
+
+            dataset/
+            ├── 1_old/       ← repeat 1
+            │   ├── img.jpg
+            │   └── img.txt
+            └── 5_new/       ← repeat 5
+                ├── img.jpg
+                └── img.txt
+
+        没有数字前缀的文件夹或根目录下的图片按 repeat=1 处理。
+        """
+        unique_samples = []
+        folder_info = []  # (folder_name, repeat, count) for logging
+
+        # 收集根目录下的图片（repeat=1）
+        root_count = 0
+        for p in sorted(self.data_dir.iterdir()):
+            if p.is_file() and p.suffix.lower() in self.EXTS:
+                s = self._make_sample(p)
+                if s:
+                    s["_repeat"] = 1
+                    unique_samples.append(s)
+                    root_count += 1
+        if root_count:
+            folder_info.append(("(root)", 1, root_count))
+
+        # 收集子文件夹中的图片（解析 repeat）
+        for subdir in sorted(self.data_dir.iterdir()):
+            if not subdir.is_dir():
+                continue
+            repeats = self._parse_repeats_from_dir(subdir.name)
+            count = 0
+            for img_path in sorted(subdir.rglob("*")):
+                if img_path.suffix.lower() not in self.EXTS:
+                    continue
+                s = self._make_sample(img_path)
+                if s:
+                    s["_repeat"] = repeats
+                    unique_samples.append(s)
+                    count += 1
+            if count:
+                folder_info.append((subdir.name, repeats, count))
+
+        # 展开 repeat：将每个样本按其 repeat 次数复制
+        samples = []
+        for s in unique_samples:
+            r = s.pop("_repeat", 1)
+            for _ in range(r):
+                samples.append(s)
+
+        # 日志：每个文件夹的 repeat 信息
+        if folder_info:
+            for name, rep, cnt in folder_info:
+                logger.info(f"  文件夹 {name}: {cnt} 张 × repeat {rep} = {cnt * rep} 样本")
+
+        return samples
+
+    def _process_caption_txt(self, caption):
+        """处理 TXT caption: 传统 tag 打乱 + keep_tokens"""
+        if not caption:
+            return ""
+        if "," in caption:
+            tags = [t.strip() for t in caption.split(",")]
+        else:
+            tags = caption.split()
+
+        if self.keep_tokens > 0:
+            kept = tags[:self.keep_tokens]
+            rest = tags[self.keep_tokens:]
+            if self.shuffle_caption:
+                random.shuffle(rest)
+            tags = kept + rest
+        elif self.shuffle_caption:
+            random.shuffle(tags)
+
+        return ", ".join(tags)
+
+    def _process_caption_json(self, json_path):
+        """处理 JSON caption: 分类 shuffle"""
+        if self.caption_utils is None:
+            return None
+        
+        try:
+            raw_json = self.caption_utils["load_json"](json_path)
+            if raw_json is None:
+                return None
+            
+            # 检查是否已经是标准格式
+            if "tags" in raw_json and "meta" in raw_json:
+                normalized = raw_json
+            else:
+                normalized = self.caption_utils["normalize"](raw_json)
+            
+            # 构建 caption（分类 shuffle）
+            return self.caption_utils["build"](
+                normalized,
+                shuffle_appearance=self.shuffle_caption,
+                shuffle_tags=self.shuffle_caption,
+                shuffle_environment=self.shuffle_caption,
+                tag_dropout=self.tag_dropout,
+            )
+        except Exception as e:
+            logger.warning(f"JSON 处理失败 {json_path}: {e}")
+            return None
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        import numpy as np
+        from PIL import Image
+        sample = self.samples[idx]
+        img = Image.open(sample["image"]).convert("RGB")
+        
+        # 获取 caption（正则集可用 caption_override 统一覆盖）
+        caption = None
+        if self.caption_override is not None:
+            caption = self.caption_override
+        elif sample.get("json_path"):
+            caption = self._process_caption_json(sample["json_path"])
+        
+        if caption is None and sample.get("txt_path"):
+            caption = sample["txt_path"].read_text(encoding="utf-8").strip()
+            caption = self._process_caption_txt(caption)
+        
+        if caption is None:
+            caption = ""
+
+        # ARB 分桶
+        if self.bucket_mgr:
+            tw, th = self.bucket_mgr.get_bucket(img.width, img.height)
+        else:
+            tw = th = self.resolution
+
+        # 缩放裁剪
+        scale = max(tw / img.width, th / img.height)
+        nw, nh = int(img.width * scale), int(img.height * scale)
+        img = img.resize((nw, nh), Image.LANCZOS)
+
+        left = (nw - tw) // 2
+        top = (nh - th) // 2
+        img = img.crop((left, top, left + tw, top + th))
+
+        # 水平翻转增强
+        if self.flip_augment and random.random() > 0.5:
+            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+
+        # 转 tensor [-1, 1]
+        arr = np.array(img).astype(np.float32) / 127.5 - 1.0
+        tensor = torch.from_numpy(arr).permute(2, 0, 1)
+
+        return {"pixel_values": tensor, "caption": caption}
+
+
+class RepeatDataset(Dataset):
+    """Kohya 风格数据集重复"""
+    def __init__(self, dataset, repeats=1):
+        self.dataset = dataset
+        self.repeats = max(1, int(repeats))
+
+    def __len__(self):
+        return len(self.dataset) * self.repeats
+
+    def __getitem__(self, idx):
+        return self.dataset[idx % len(self.dataset)]
+
+
+class MergedDataset(Dataset):
+    """合并主数据集与正则数据集（Kohya 风格 reg）"""
+    def __init__(self, main_dataset, reg_dataset, reg_weight: float = 1.0):
+        self.main_dataset = main_dataset
+        self.reg_dataset = reg_dataset
+        self.reg_weight = float(reg_weight)
+        self._main_len = len(main_dataset)
+        self._reg_len = len(reg_dataset)
+
+        # 为 BucketBatchSampler 构建 bucket_for_index
+        self.bucket_for_index = self._build_bucket_for_index()
+
+    def _get_cached_dataset(self, d):
+        if hasattr(d, "bucket_for_index"):
+            return d
+        if hasattr(d, "dataset"):
+            return self._get_cached_dataset(d.dataset)
+        return None
+
+    def _build_bucket_for_index(self):
+        main_cached = self._get_cached_dataset(self.main_dataset)
+        reg_cached = self._get_cached_dataset(self.reg_dataset)
+        buckets = []
+        if main_cached and main_cached.bucket_for_index:
+            main_base_len = len(main_cached.bucket_for_index)
+            for idx in range(self._main_len):
+                b = main_cached.bucket_for_index[idx % main_base_len]
+                buckets.append(b if b is not None else (0, 0))
+        else:
+            buckets.extend([(0, 0)] * self._main_len)
+        if reg_cached and reg_cached.bucket_for_index:
+            reg_base_len = len(reg_cached.bucket_for_index)
+            for idx in range(self._reg_len):
+                b = reg_cached.bucket_for_index[idx % reg_base_len]
+                buckets.append(b if b is not None else (0, 0))
+        else:
+            buckets.extend([(0, 0)] * self._reg_len)
+        return buckets
+
+    def __len__(self):
+        return self._main_len + self._reg_len
+
+    def __getitem__(self, idx):
+        if idx < self._main_len:
+            item = self.main_dataset[idx]
+            item["loss_weight"] = 1.0
+            return item
+        item = self.reg_dataset[idx - self._main_len]
+        item["loss_weight"] = self.reg_weight
+        return item
+
+
+class BucketBatchSampler:
+    """Batch sampler that groups samples by bucket so latents in each batch have the same size."""
+    def __init__(self, dataset, batch_size, drop_last=True, shuffle=True, seed=42):
+        self.dataset = dataset
+        self.batch_size = int(batch_size)
+        self.drop_last = bool(drop_last)
+        self.shuffle = bool(shuffle)
+        self.seed = int(seed)
+        self.epoch = 0
+        self._cached_dataset = self._get_cached_dataset(dataset)
+        self._base_len = len(self._cached_dataset) if self._cached_dataset else 0
+
+    def _get_cached_dataset(self, d):
+        if hasattr(d, "bucket_for_index"):
+            return d
+        if hasattr(d, "dataset"):
+            return self._get_cached_dataset(d.dataset)
+        return None
+
+    def set_epoch(self, epoch):
+        self.epoch = int(epoch)
+
+    def __len__(self):
+        n = len(self.dataset)
+        if self.drop_last:
+            return n // self.batch_size
+        return (n + self.batch_size - 1) // self.batch_size
+
+    def __iter__(self):
+        rng = random.Random(self.seed + self.epoch)
+        if self._cached_dataset is None:
+            indices = list(range(len(self.dataset)))
+            if self.shuffle:
+                rng.shuffle(indices)
+            for i in range(0, len(indices), self.batch_size):
+                batch = indices[i:i + self.batch_size]
+                if len(batch) < self.batch_size and self.drop_last:
+                    continue
+                yield batch
+            return
+
+        bucket_to_indices = {}
+        for idx in range(len(self.dataset)):
+            base_idx = idx % self._base_len
+            bucket = self._cached_dataset.bucket_for_index[base_idx]
+            if bucket is None:
+                bucket = (0, 0)
+            bucket_to_indices.setdefault(bucket, []).append(idx)
+
+        buckets = list(bucket_to_indices.keys())
+        if self.shuffle:
+            rng.shuffle(buckets)
+        for bucket in buckets:
+            indices = bucket_to_indices[bucket]
+            if self.shuffle:
+                rng.shuffle(indices)
+            for i in range(0, len(indices), self.batch_size):
+                batch = indices[i:i + self.batch_size]
+                if len(batch) < self.batch_size and self.drop_last:
+                    continue
+                yield batch
+
+
+class CachedLatentDataset(Dataset):
+    """Kohya 风格 npz 文件缓存的数据集"""
+    def __init__(self, base_dataset, vae, device, dtype, cache_dir=None):
+        import numpy as np
+        self.base_dataset = base_dataset
+        self.np = np
+        # 获取原始数据集的 samples 列表
+        self.samples = self._get_base_samples(base_dataset)
+        self.cache_dir = Path(cache_dir) if cache_dir else None
+        self.bucket_for_index = []
+        self._build_cache(vae, device, dtype)
+
+    def _get_base_samples(self, dataset):
+        """获取原始 ImageDataset 的 samples"""
+        if hasattr(dataset, "samples"):
+            return dataset.samples
+        elif hasattr(dataset, "dataset"):
+            return self._get_base_samples(dataset.dataset)
+        return []
+
+    def _get_npz_path(self, img_path):
+        """获取图像对应的 npz 缓存路径"""
+        img_path = Path(img_path)
+        return img_path.with_suffix(".npz")
+
+    def _is_cache_valid(self, img_path, npz_path):
+        """检查缓存是否有效（图像未修改，且格式含 latent 键）。
+        若为其他模型的不兼容缓存，则删除并返回 False。"""
+        if not npz_path.exists():
+            return False
+        if npz_path.stat().st_mtime < img_path.stat().st_mtime:
+            return False
+        try:
+            data = self.np.load(npz_path)
+            if "latent" not in data.files:
+                npz_path.unlink()
+                logger.debug(f"已删除不兼容缓存: {npz_path.name}")
+                return False
+        except Exception:
+            try:
+                npz_path.unlink()
+            except Exception:
+                pass
+            return False
+        return True
+
+    def _build_cache(self, vae, device, dtype):
+        """构建/加载 npz 缓存"""
+        logger.info("检查 VAE latent 缓存...")
+        to_encode = []
+        for i, sample in enumerate(self.samples):
+            img_path = sample["image"]
+            npz_path = self._get_npz_path(img_path)
+            if not self._is_cache_valid(img_path, npz_path):
+                to_encode.append(i)
+
+        if to_encode:
+            logger.info(f"需要编码 {len(to_encode)}/{len(self.samples)} 张图像...")
+            self._encode_and_save(to_encode, vae, device, dtype)
+        else:
+            logger.info(f"所有 {len(self.samples)} 张图像已缓存")
+
+        self._fill_bucket_for_index()
+
+    def _fill_bucket_for_index(self):
+        """Fill bucket_for_index for all samples (needed for BucketBatchSampler).
+        Uses latent spatial shape (h, w) as grouping key so batches have consistent tensor sizes."""
+        self.bucket_for_index = [None] * len(self.samples)
+        for i in range(len(self.samples)):
+            npz_path = self._get_npz_path(self.samples[i]["image"])
+            if not npz_path.exists():
+                continue
+            data = self.np.load(npz_path)
+            latent = data["latent"]
+            s = latent.shape
+            if len(s) == 5:
+                _, _, _, h, w = s
+            else:
+                _, _, h, w = s
+            self.bucket_for_index[i] = (int(h), int(w))
+
+    def _encode_and_save(self, indices, vae, device, dtype):
+        """编码图像并保存为 npz"""
+        for count, i in enumerate(indices):
+            item = self.base_dataset[i]
+            pixels = item["pixel_values"].unsqueeze(0).to(device, dtype=dtype)
+            _, _, ph, pw = pixels.shape
+            bucket_w, bucket_h = pw, ph
+            with torch.no_grad():
+                pixels_5d = pixels.unsqueeze(2)
+                latent = vae.model.encode(pixels_5d, vae.scale)
+            latent_np = latent.squeeze(0).cpu().float().numpy()
+            npz_path = self._get_npz_path(self.samples[i]["image"])
+            self.np.savez(npz_path, latent=latent_np, bucket_w=bucket_w, bucket_h=bucket_h)
+            if (count + 1) % 10 == 0 or count == len(indices) - 1:
+                logger.info(f"  编码进度: {count + 1}/{len(indices)}")
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        sample = self.samples[idx]
+        npz_path = self._get_npz_path(sample["image"])
+        data = self.np.load(npz_path)
+        latent = torch.from_numpy(data["latent"])
+        
+        # 获取 base_dataset 的引用（处理可能的嵌套）
+        base = self.base_dataset
+        while hasattr(base, "dataset"):
+            base = base.dataset
+        
+        # 处理 caption（正则集 caption_override 优先）
+        caption = None
+        if getattr(base, "caption_override", None) is not None:
+            caption = base.caption_override
+        elif sample.get("json_path") and hasattr(base, "_process_caption_json"):
+            caption = base._process_caption_json(sample["json_path"])
+        
+        if caption is None and sample.get("txt_path"):
+            caption = sample["txt_path"].read_text(encoding="utf-8").strip()
+            if hasattr(base, "_process_caption_txt"):
+                caption = base._process_caption_txt(caption)
+        
+        if caption is None:
+            caption = ""
+        
+        return {"latent": latent, "caption": caption}
+
+
+def collate_fn(batch):
+    """DataLoader collate"""
+    pixels = torch.stack([b["pixel_values"] for b in batch])
+    captions = [b["caption"] for b in batch]
+    result = {"pixel_values": pixels, "captions": captions}
+    if "loss_weight" in batch[0]:
+        result["loss_weight"] = torch.tensor([b["loss_weight"] for b in batch], dtype=torch.float32)
+    return result
+
+
+def collate_fn_cached(batch):
+    """DataLoader collate for cached latents"""
+    latents = torch.stack([b["latent"] for b in batch])
+    captions = [b["caption"] for b in batch]
+    result = {"latents": latents, "captions": captions}
+    if "loss_weight" in batch[0]:
+        result["loss_weight"] = torch.tensor([b["loss_weight"] for b in batch], dtype=torch.float32)
+    return result
