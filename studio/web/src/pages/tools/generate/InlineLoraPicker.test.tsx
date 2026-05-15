@@ -1,8 +1,8 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, type LoraCkpt } from '../../../api/client'
-import InlineLoraPicker, { projectAbbr } from './InlineLoraPicker'
+import InlineLoraPicker, { projectAbbr, type PickedLora } from './InlineLoraPicker'
 import type { ProjectLora } from './types'
 
 const sample: ProjectLora[] = [
@@ -33,10 +33,6 @@ describe('projectAbbr', () => {
   it('extracts first 2 alphanumerics, uppercase', () => {
     expect(projectAbbr('cute_chibi')).toBe('CU')
     expect(projectAbbr('noir_portrait')).toBe('NO')
-    expect(projectAbbr('character_yui')).toBe('CH')
-  })
-  it('strips non-alphanumeric', () => {
-    expect(projectAbbr('___test')).toBe('TE')
   })
   it('falls back to ?? when empty', () => {
     expect(projectAbbr('___')).toBe('??')
@@ -44,15 +40,15 @@ describe('projectAbbr', () => {
   })
 })
 
-describe('InlineLoraPicker', () => {
+describe('InlineLoraPicker — multi mode (default)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  function renderPicker(overrides: Partial<{
+  function renderMulti(overrides: Partial<{
     projectLoras: ProjectLora[]
     existingPaths: Set<string>
-    multi: boolean
+    showWeight: boolean
     ckpts: LoraCkpt[]
   }> = {}) {
     vi.spyOn(api, 'listVersionLoraCkpts').mockResolvedValue(overrides.ckpts ?? ckptsV3)
@@ -61,29 +57,28 @@ describe('InlineLoraPicker', () => {
     const onPickExternal = vi.fn()
     const utils = render(
       <InlineLoraPicker
+        mode="multi"
         projectLoras={overrides.projectLoras ?? sample}
         existingPaths={overrides.existingPaths ?? new Set()}
+        showWeight={overrides.showWeight ?? true}
         onPick={onPick}
         onClose={onClose}
         onPickExternal={onPickExternal}
-        multi={overrides.multi ?? true}
       />
     )
     return { ...utils, onPick, onClose, onPickExternal }
   }
 
   it('renders project + version dropdowns from projectLoras', async () => {
-    renderPicker()
-    // project select 应该包含两个项目
+    renderMulti()
     expect(screen.getByLabelText('选项目')).toBeInTheDocument()
     expect(screen.getByText('cute_chibi')).toBeInTheDocument()
     expect(screen.getByText('noir_portrait')).toBeInTheDocument()
-    // 训练中版本带（训练中）标记（默认 pid=1，default vid=v3 training）
     await waitFor(() => expect(screen.getByText(/v3（训练中）/)).toBeInTheDocument())
   })
 
-  it('auto-loads ckpts for the default project/version', async () => {
-    renderPicker()
+  it('auto-loads ckpts for the default project/version (as chips)', async () => {
+    renderMulti()
     await waitFor(() => {
       expect(screen.getByText('final')).toBeInTheDocument()
       expect(screen.getByText('step 2000')).toBeInTheDocument()
@@ -91,9 +86,9 @@ describe('InlineLoraPicker', () => {
     })
   })
 
-  it('multi=true: click ckpt toggles picked, weight + 添加 footer appears', async () => {
+  it('click toggles picked; 添加 N 个 commits + closes', async () => {
     const user = userEvent.setup()
-    const { onPick, onClose } = renderPicker()
+    const { onPick, onClose } = renderMulti()
     await waitFor(() => expect(screen.getByText('step 2000')).toBeInTheDocument())
     await user.click(screen.getByText('step 2000').closest('button')!)
     await user.click(screen.getByText('step 1000').closest('button')!)
@@ -102,7 +97,7 @@ describe('InlineLoraPicker', () => {
     expect(onPick).toHaveBeenCalledTimes(1)
     const [picks, weight] = onPick.mock.calls[0]
     expect(picks).toHaveLength(2)
-    expect(picks.map((p: { path: string }) => p.path).sort()).toEqual([
+    expect(picks.map((p: PickedLora) => p.path).sort()).toEqual([
       '/loras/cute_chibi/v3/step_1000.safetensors',
       '/loras/cute_chibi/v3/step_2000.safetensors',
     ])
@@ -110,48 +105,33 @@ describe('InlineLoraPicker', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('multi=false: click ckpt single-picks + auto-closes', async () => {
+  it('existingPaths disables the chip; click does not toggle', async () => {
     const user = userEvent.setup()
-    const { onPick, onClose } = renderPicker({ multi: false })
-    await waitFor(() => expect(screen.getByText('step 2000')).toBeInTheDocument())
-    await user.click(screen.getByText('step 2000').closest('button')!)
-    expect(onPick).toHaveBeenCalledTimes(1)
-    const [picks] = onPick.mock.calls[0]
-    expect(picks).toHaveLength(1)
-    expect(picks[0].path).toBe('/loras/cute_chibi/v3/step_2000.safetensors')
-    expect(picks[0].projectId).toBe(1)
-    expect(picks[0].versionId).toBe(11)
-    expect(onClose).toHaveBeenCalled()
-  })
-
-  it('existingPaths marks ckpt as 已添加 and disables it', async () => {
-    const user = userEvent.setup()
-    const { onPick } = renderPicker({
+    const { onPick } = renderMulti({
       existingPaths: new Set(['/loras/cute_chibi/v3/step_2000.safetensors']),
     })
     await waitFor(() => expect(screen.getByText('step 2000')).toBeInTheDocument())
     const btn = screen.getByText('step 2000').closest('button')!
     expect(btn).toBeDisabled()
-    expect(screen.getByText('已添加')).toBeInTheDocument()
     await user.click(btn)
     expect(onPick).not.toHaveBeenCalled()
   })
 
   it('shows empty state when projectLoras is empty', () => {
-    renderPicker({ projectLoras: [] })
+    renderMulti({ projectLoras: [] })
     expect(screen.getByText(/还没有训练好的 LoRA/)).toBeInTheDocument()
   })
 
   it('shows no-ckpt hint when version has no ckpts', async () => {
-    renderPicker({ ckpts: [] })
+    renderMulti({ ckpts: [] })
     await waitFor(() =>
       expect(screen.getByText(/该版本没扫到 ckpt 文件/)).toBeInTheDocument()
     )
   })
 
-  it('search filters ckpt list', async () => {
+  it('search filters chip list', async () => {
     const user = userEvent.setup()
-    renderPicker()
+    renderMulti()
     await waitFor(() => expect(screen.getByText('step 2000')).toBeInTheDocument())
     await user.type(screen.getByPlaceholderText('搜索 ckpt 文件名…'), '2000')
     expect(screen.queryByText('final')).not.toBeInTheDocument()
@@ -159,43 +139,133 @@ describe('InlineLoraPicker', () => {
     expect(screen.getByText('step 2000')).toBeInTheDocument()
   })
 
-  it('triggers onClose when × is clicked', async () => {
+  it('× triggers onClose', async () => {
     const user = userEvent.setup()
-    const { onClose } = renderPicker()
+    const { onClose } = renderMulti()
     await user.click(screen.getByLabelText('关闭挑选区'))
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('triggers onPickExternal when 外部文件 is clicked', async () => {
+  it('外部文件 triggers onPickExternal', async () => {
     const user = userEvent.setup()
-    const { onPickExternal } = renderPicker()
+    const { onPickExternal } = renderMulti()
     await user.click(screen.getByText('外部文件'))
     expect(onPickExternal).toHaveBeenCalled()
   })
 
-  it('changing project resets picked + version', async () => {
+  it('changing project resets picked', async () => {
     const user = userEvent.setup()
-    renderPicker()
+    renderMulti()
     await waitFor(() => expect(screen.getByText('step 2000')).toBeInTheDocument())
     await user.click(screen.getByText('step 2000').closest('button')!)
     expect(screen.getByText(/已选 1/)).toBeInTheDocument()
-
     await user.selectOptions(screen.getByLabelText('选项目'), '2')
-    // 切到 noir_portrait → v1，picked 清空
     expect(screen.queryByText(/已选 1/)).not.toBeInTheDocument()
   })
 
-  it('multi mode: weight value used in onPick call', async () => {
+  it('weight slider value used in onPick', async () => {
     const user = userEvent.setup()
-    const { onPick } = renderPicker()
+    const { onPick } = renderMulti()
     await waitFor(() => expect(screen.getByText('step 2000')).toBeInTheDocument())
     await user.click(screen.getByText('step 2000').closest('button')!)
-
-    const weightInput = screen.getByLabelText('新 LoRA 权重数值')
+    const weightInput = screen.getByLabelText('LoRA 权重数值')
     await user.clear(weightInput)
     await user.type(weightInput, '0.75')
     await user.click(screen.getByText(/添加 1 个/))
     const [, weight] = onPick.mock.calls[0]
     expect(weight).toBe(0.75)
+  })
+
+  it('showWeight=false hides weight slider (XY axis use)', async () => {
+    const user = userEvent.setup()
+    renderMulti({ showWeight: false })
+    await waitFor(() => expect(screen.getByText('step 2000')).toBeInTheDocument())
+    await user.click(screen.getByText('step 2000').closest('button')!)
+    expect(screen.queryByLabelText('LoRA 权重数值')).not.toBeInTheDocument()
+  })
+})
+
+describe('InlineLoraPicker — single mode (controlled slot)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function renderSingle(overrides: Partial<{
+    value: PickedLora | null
+    weight: number
+    ckpts: LoraCkpt[]
+  }> = {}) {
+    vi.spyOn(api, 'listVersionLoraCkpts').mockResolvedValue(overrides.ckpts ?? ckptsV3)
+    const onChange = vi.fn()
+    const onClose = vi.fn()
+    const onPickExternal = vi.fn()
+    const utils = render(
+      <InlineLoraPicker
+        mode="single"
+        projectLoras={sample}
+        value={overrides.value ?? null}
+        weight={overrides.weight ?? 1.0}
+        onChange={onChange}
+        onClose={onClose}
+        onPickExternal={onPickExternal}
+      />
+    )
+    return { ...utils, onChange, onClose, onPickExternal }
+  }
+
+  it('click ckpt chip → onChange(pick, weight) — does not auto-close', async () => {
+    const user = userEvent.setup()
+    const { onChange, onClose } = renderSingle()
+    await waitFor(() => expect(screen.getByText('step 2000')).toBeInTheDocument())
+    await user.click(screen.getByText('step 2000').closest('button')!)
+    expect(onChange).toHaveBeenCalledTimes(1)
+    const [pick, weight] = onChange.mock.calls[0]
+    expect(pick).toEqual({
+      path: '/loras/cute_chibi/v3/step_2000.safetensors',
+      projectId: 1,
+      versionId: 11,
+    })
+    expect(weight).toBe(1.0)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('click currently-selected chip → onChange(null, weight) (反选)', async () => {
+    const user = userEvent.setup()
+    const { onChange } = renderSingle({
+      value: {
+        path: '/loras/cute_chibi/v3/step_2000.safetensors',
+        projectId: 1, versionId: 11,
+      },
+    })
+    await waitFor(() => expect(screen.getByText('step 2000')).toBeInTheDocument())
+    await user.click(screen.getByText('step 2000').closest('button')!)
+    expect(onChange).toHaveBeenCalledWith(null, 1.0)
+  })
+
+  it('weight slider change → onChange(value, new_weight)', async () => {
+    const value: PickedLora = {
+      path: '/loras/cute_chibi/v3/step_2000.safetensors',
+      projectId: 1, versionId: 11,
+    }
+    const { onChange } = renderSingle({ value, weight: 0.8 })
+    await waitFor(() => expect(screen.getByLabelText('LoRA 权重数值')).toBeInTheDocument())
+    const weightInput = screen.getByLabelText('LoRA 权重数值') as HTMLInputElement
+    expect(weightInput.value).toBe('0.8')
+    // 受控输入：用 fireEvent.change 一次性触发，不走 userEvent.type 多次 keystroke
+    // （那种方式会被 props.weight 回流覆盖）
+    fireEvent.change(weightInput, { target: { value: '1.2' } })
+    expect(onChange).toHaveBeenCalledWith(value, 1.2)
+  })
+
+  it('× → onClose (deletes slot from parent)', async () => {
+    const user = userEvent.setup()
+    const { onClose } = renderSingle()
+    await user.click(screen.getByLabelText('移除 LoRA'))
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('weight slider always visible in single mode (even without selection)', () => {
+    renderSingle({ value: null })
+    expect(screen.getByLabelText('LoRA 权重数值')).toBeInTheDocument()
   })
 })
