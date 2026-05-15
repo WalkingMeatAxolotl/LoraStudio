@@ -5,6 +5,7 @@ import {
   type PresetSummary,
   type SchemaResponse,
 } from '../../api/client'
+import ConfigSkeleton from '../../components/ConfigSkeleton'
 import { useDialog } from '../../components/Dialog'
 import SchemaForm from '../../components/SchemaForm'
 import { useToast } from '../../components/Toast'
@@ -539,7 +540,7 @@ export default function PresetsPage() {
           {/* schema 表单 */}
           {!schema || !config ? (
             <div className="h-[200px] rounded-md border border-subtle bg-surface p-3.5">
-              <SkeletonGroups />
+              <ConfigSkeleton variant="flat" label="加载预设配置中" />
             </div>
           ) : (
             <section className="rounded-md border border-subtle bg-surface px-3.5 py-2.5">
@@ -614,25 +615,3 @@ export default function PresetsPage() {
   )
 }
 
-// ── Schema 加载骨架 ──
-function SkeletonGroups() {
-  const rows = [5, 6, 4, 5]
-  return (
-    <div className="flex flex-col gap-3 animate-pulse" role="status" aria-label="加载预设配置中">
-      {rows.map((r, gi) => (
-        <div key={gi} className="flex flex-col gap-2">
-          <div className="h-3 w-24 rounded-sm bg-sunken opacity-60" />
-          <div className="flex flex-col gap-1.5">
-            {Array.from({ length: r }).map((_, ri) => (
-              <div key={ri} className="flex flex-col gap-0.5">
-                <div className="h-2 w-20 rounded-sm bg-sunken opacity-50" />
-                <div className="h-[26px] rounded-sm border border-subtle bg-canvas" />
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-      <span className="sr-only">加载预设配置中...</span>
-    </div>
-  )
-}

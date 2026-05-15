@@ -10,6 +10,7 @@ import {
   type Version,
   type VersionConfigResponse,
 } from '../../../api/client'
+import ConfigSkeleton from '../../../components/ConfigSkeleton'
 import { useDialog } from '../../../components/Dialog'
 import SchemaForm from '../../../components/SchemaForm'
 import StepShell from '../../../components/StepShell'
@@ -625,7 +626,7 @@ export default function TrainPage() {
                 </div>
               </section>
             ) : configResp === null || !schema ? (
-              <ConfigSkeleton />
+              <ConfigSkeleton label="加载训练配置中" />
             ) : !configResp.has_config ? (
               <div className="flex-1 flex items-center justify-center text-fg-tertiary text-sm rounded-md border border-dashed border-dim">
                 请从上方预设卡片选择一个，复制进当前 version 后即可编辑配置。
@@ -661,7 +662,7 @@ export default function TrainPage() {
                 />
               </section>
             ) : (
-              <ConfigSkeleton />
+              <ConfigSkeleton label="加载训练配置中" />
             )}
           </div>
 
@@ -871,36 +872,5 @@ function Row({
         fontWeight: bold ? 700 : 500,
       }}>{value}</span>
     </div>
-  )
-}
-
-
-function ConfigSkeleton() {
-  // 一个分组卡片：标题条 + 4-6 行字段（label + input 灰条）
-  const groups = [5, 6, 4, 5]
-  return (
-    <section
-      className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3"
-      role="status"
-      aria-label="加载训练配置中"
-    >
-      {groups.map((rows, gi) => (
-        <div
-          key={gi}
-          className="animate-pulse rounded-md border border-subtle bg-surface p-3.5"
-        >
-          <div className="h-3.5 w-32 rounded-sm bg-sunken mb-2.5" />
-          <div className="flex flex-col gap-2">
-            {Array.from({ length: rows }).map((_, ri) => (
-              <div key={ri} className="flex flex-col gap-1">
-                <div className="h-2.5 w-24 rounded-sm bg-sunken opacity-70" />
-                <div className="h-7 rounded-sm bg-canvas border border-subtle" />
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-      <span className="sr-only">加载训练配置中...</span>
-    </section>
   )
 }
