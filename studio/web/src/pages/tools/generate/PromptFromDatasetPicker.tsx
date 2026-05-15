@@ -1,15 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type CaptionEntry, type ProjectSummary } from '../../../api/client'
+import { useLocalStorageState } from '../../../lib/useLocalStorageState'
 
-const LAST_PROJECT_KEY = 'anima.generate.promptDataset.projectId'
-const LAST_VERSION_KEY = 'anima.generate.promptDataset.versionId'
+// 命名前缀对齐 useAdvancedMode 的 `studio:` 约定（PR #66 P1-4）。旧的
+// `anima.generate.promptDataset.*` key 在 mount 时 migrate 一次后丢弃。
+const LAST_PROJECT_KEY = 'studio:generate:promptDataset:projectId'
+const LAST_VERSION_KEY = 'studio:generate:promptDataset:versionId'
+const LEGACY_PROJECT_KEY = 'anima.generate.promptDataset.projectId'
+const LEGACY_VERSION_KEY = 'anima.generate.promptDataset.versionId'
 
-function readStoredNumber(key: string): number | null {
-  if (typeof window === 'undefined') return null
-  const raw = window.localStorage.getItem(key)
-  if (!raw) return null
+function migrateLegacyKey(legacyKey: string, newKey: string): void {
+  if (typeof window === 'undefined') return
+  if (window.localStorage.getItem(newKey) !== null) return
+  const raw = window.localStorage.getItem(legacyKey)
+  if (raw === null) return
   const n = Number(raw)
-  return Number.isFinite(n) ? n : null
+  if (Number.isFinite(n)) {
+    window.localStorage.setItem(newKey, JSON.stringify(n))
+  }
+  window.localStorage.removeItem(legacyKey)
 }
 
 /** 从训练集 caption 里选一条，把 tags 拿到生成 prompt 里。
@@ -26,9 +35,16 @@ export default function PromptFromDatasetPicker({
   onReplace: (tags: string[]) => void
   onClose: () => void
 }) {
+  // 一次性 migrate 旧 anima.* key 到 studio: 命名（PR #66 P1-4 约定）；module 顶部
+  // 调用即可，没必要进 useEffect —— 没读 / 写 React state 副作用，只动 localStorage。
+  if (typeof window !== 'undefined') {
+    migrateLegacyKey(LEGACY_PROJECT_KEY, LAST_PROJECT_KEY)
+    migrateLegacyKey(LEGACY_VERSION_KEY, LAST_VERSION_KEY)
+  }
+
   const [projects, setProjects] = useState<ProjectSummary[]>([])
-  const [pid, setPid] = useState<number | null>(null)
-  const [vid, setVid] = useState<number | null>(null)
+  const [pid, setPid] = useLocalStorageState<number | null>(LAST_PROJECT_KEY, null)
+  const [vid, setVid] = useLocalStorageState<number | null>(LAST_VERSION_KEY, null)
   const [versions, setVersions] = useState<Array<{ id: number; label: string }>>([])
   const [captions, setCaptions] = useState<CaptionEntry[]>([])
   const [loading, setLoading] = useState(false)
@@ -36,43 +52,32 @@ export default function PromptFromDatasetPicker({
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
-  // 1. 拉项目列表
+  // 1. 拉项目列表；若上次记的 pid 在新项目列表中不存在则清掉避免幽灵选择
   useEffect(() => {
     void api.listProjects()
       .then((items) => {
         setProjects(items)
-        const storedPid = readStoredNumber(LAST_PROJECT_KEY)
-        if (storedPid != null && items.some((p) => p.id === storedPid)) {
-          setPid(storedPid)
-        }
+        if (pid != null && !items.some((p) => p.id === pid)) setPid(null)
       })
       .catch((e) => setError(String(e)))
+    // pid 进依赖会触发反复拉项目；mount 一次就够
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 2. 选项目后拉版本列表
+  // 2. 选项目后拉版本列表；优先复用 vid（如果该版本在新项目里仍存在）
   useEffect(() => {
     if (!pid) { setVersions([]); setVid(null); return }
     void api.getProject(pid)
       .then((p) => {
         const vs = p.versions.map((v) => ({ id: v.id, label: v.label }))
         setVersions(vs)
-        const storedVid = readStoredNumber(LAST_VERSION_KEY)
-        if (storedVid != null && vs.some((v) => v.id === storedVid)) setVid(storedVid)
-        else if (vs.length > 0) setVid(vs[0].id)
-        else setVid(null)
+        if (vid != null && vs.some((v) => v.id === vid)) return  // 旧 vid 仍在 → 保留
+        setVid(vs.length > 0 ? vs[0].id : null)
       })
       .catch((e) => setError(String(e)))
+    // 同上：vid 只在 effect 内部读，不进依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (pid != null) window.localStorage.setItem(LAST_PROJECT_KEY, String(pid))
-  }, [pid])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (vid != null) window.localStorage.setItem(LAST_VERSION_KEY, String(vid))
-  }, [vid])
 
   // 3. 选版本后拉 captions
   useEffect(() => {
