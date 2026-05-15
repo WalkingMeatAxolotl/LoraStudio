@@ -160,9 +160,9 @@ export default function InlineLoraPicker(props: Props) {
       const { value } = props
       const isCurrent = value && value.path === c.path
       if (isCurrent) {
-        // 单选模式下点击已选中 chip = no-op（槽内必有 ckpt；想清空走 × 删槽）。
-        // 旧实现这里 onChange(null) 会触发 SidebarLoras 把整槽从 loras[] 删掉，
-        // 导致 picker 闪退；改为 no-op 后只有 × 删槽，更符合直觉。
+        // 反选：槽内 ckpt 清空（视觉等同初次打开的空槽）；SidebarLoras 收到
+        // null 不会删整个槽，只把 path 置空（× 才删槽）。
+        props.onChange(null, internalWeight)
         return
       }
       props.onChange(

@@ -6,8 +6,13 @@ import type { ProjectLora } from './types'
 
 /** Sidebar 的 LoRA 区：每个 LoRA = 一个常驻 picker 槽（项目下拉 + ckpt chip + 权重 + ×）。
  *
- * 之前是「N 张 LoraCard 摘要 + 1 个折叠 picker」两层；现在统一为「N 个 picker
- * 实例」，新增 LoRA 就 push 一个空槽。删除走 picker 自己的 × 按钮。 */
+ * 数据模型统一：所有 picker 槽都用 loras[] 表示，path='' 表示「空槽」（用户
+ * 点了 + 添加 LoRA 但还没挑 ckpt）。这样：
+ *   - 「+ 添加 LoRA」push 一条空 entry → 新增一个 picker（key 稳定，不会闪）
+ *   - 反选 (点已选 chip) = 槽 path 设回 ''，picker 自己仍渲染 → 跟初次打开一样
+ *   - × = 真正把 entry 从数组里删掉
+ * Generate.tsx handleGenerate 在送 backend 前会 `loras.filter((l) => l.path.trim())`
+ * 过滤空槽，不影响 enqueue。 */
 export default function SidebarLoras({
   loras, onChange, projectLoras,
 }: {
@@ -15,93 +20,69 @@ export default function SidebarLoras({
   onChange: (l: LoraEntry[]) => void
   projectLoras: ProjectLora[]
 }) {
-  // 外部文件 picker 当前给哪个槽用（loras 索引；null = 没在选）
   const [externalForIdx, setExternalForIdx] = useState<number | null>(null)
-  // 「新增空槽」按钮触发后的临时槽数：UI 上 render 多出 N 个空 picker，挑了 ckpt
-  // 才落进 loras[]。否则空 picker 不会污染 loras 数组。
-  const [emptySlots, setEmptySlots] = useState<number>(0)
 
-  // 已选 path（用于在所有 picker 的 chip 列表上互相 disable 重复 path）
-  const existingPaths = useMemo(() => new Set(loras.map((l) => l.path)), [loras])
+  // 已选 path（互相 disable，避免重复添加）—— 排除空槽
+  const existingPaths = useMemo(
+    () => new Set(loras.filter((l) => l.path).map((l) => l.path)),
+    [loras],
+  )
 
   const handleSlotChange = (i: number, picked: PickedLora | null, weight: number) => {
-    if (picked === null) {
-      // picker 内单选模式不会再发 null（点同 chip = no-op）；这里保留兜底
-      // 但不删槽 —— 只更新 weight，path 保持原样
-      onChange(loras.map((l, idx) => (idx === i ? { ...l, scale: weight } : l)))
-      return
-    }
-    const entry: LoraEntry = {
-      path: picked.path,
-      scale: weight,
-      project_id: picked.projectId,
-      version_id: picked.versionId,
-    }
+    const entry: LoraEntry = picked
+      ? {
+          path: picked.path,
+          scale: weight,
+          project_id: picked.projectId,
+          version_id: picked.versionId,
+        }
+      : {
+          // 反选：槽保留但 path 清空，picker 仍渲染（视觉等同初次打开的空槽）
+          path: '',
+          scale: weight,
+          project_id: null,
+          version_id: null,
+        }
     onChange(loras.map((l, idx) => (idx === i ? entry : l)))
   }
 
   const handleSlotRemove = (i: number) => {
     onChange(loras.filter((_, idx) => idx !== i))
+    if (externalForIdx === i) setExternalForIdx(null)
   }
 
-  const handleEmptySlotPick = (slotIdx: number, picked: PickedLora | null, weight: number) => {
-    if (picked === null) {
-      // 空槽里被点了又取消 —— 啥都不变
-      return
-    }
-    // 空槽确认选了 ckpt → 进 loras[]
-    const entry: LoraEntry = {
-      path: picked.path,
-      scale: weight,
-      project_id: picked.projectId,
-      version_id: picked.versionId,
-    }
-    onChange([...loras, entry])
-    // 占位的空槽数 -1（被「具象化」成 loras 里一条）
-    setEmptySlots((n) => Math.max(0, n - 1))
-    if (externalForIdx === loras.length + slotIdx) setExternalForIdx(null)
-  }
-
-  const handleEmptySlotRemove = (slotIdx: number) => {
-    // 空槽 × 直接撤
-    setEmptySlots((n) => Math.max(0, n - 1))
-    if (externalForIdx === loras.length + slotIdx) setExternalForIdx(null)
+  const handleAddSlot = () => {
+    onChange([
+      ...loras,
+      { path: '', scale: 1.0, project_id: null, version_id: null },
+    ])
   }
 
   return (
     <div className="flex flex-col gap-2">
-      {/* 已具象的 LoRA 槽 */}
-      {loras.map((l, i) => (
-        <InlineLoraPicker
-          // key 只用 index：避免 ckpt 切换 (path 变) 时整个 picker remount，
-          // 否则会重新拉 ckpt 列表 + 内部 state 重置 → 视觉闪烁
-          key={`lora-${i}`}
-          mode="single"
-          projectLoras={projectLoras}
-          value={{ path: l.path, projectId: l.project_id ?? null, versionId: l.version_id ?? null }}
-          weight={l.scale}
-          onChange={(p, w) => handleSlotChange(i, p, w)}
-          onClose={() => handleSlotRemove(i)}
-          onPickExternal={() => setExternalForIdx(i)}
-        />
-      ))}
-
-      {/* 临时空槽：用户按了「+ 添加 LoRA」但还没确认 ckpt 的占位 picker */}
-      {Array.from({ length: emptySlots }, (_, k) => k).map((slotIdx) => (
-        <InlineLoraPicker
-          key={`empty-${slotIdx}`}
-          mode="single"
-          projectLoras={projectLoras}
-          value={null}
-          weight={1.0}
-          onChange={(p, w) => handleEmptySlotPick(slotIdx, p, w)}
-          onClose={() => handleEmptySlotRemove(slotIdx)}
-          onPickExternal={() => setExternalForIdx(loras.length + slotIdx)}
-        />
-      ))}
+      {loras.map((l, i) => {
+        const hasCkpt = !!l.path
+        return (
+          <InlineLoraPicker
+            // key 只用 index：避免 ckpt 切换 / 反选时整个 picker remount
+            key={`lora-${i}`}
+            mode="single"
+            projectLoras={projectLoras}
+            value={
+              hasCkpt
+                ? { path: l.path, projectId: l.project_id ?? null, versionId: l.version_id ?? null }
+                : null
+            }
+            weight={l.scale}
+            onChange={(p, w) => handleSlotChange(i, p, w)}
+            onClose={() => handleSlotRemove(i)}
+            onPickExternal={() => setExternalForIdx(i)}
+          />
+        )
+      })}
 
       <button
-        onClick={() => setEmptySlots((n) => n + 1)}
+        onClick={handleAddSlot}
         className="font-mono inline-flex items-center gap-1.5 self-start"
         style={{
           border: '1px solid var(--border-subtle)',
@@ -133,15 +114,9 @@ export default function SidebarLoras({
               project_id: null,
               version_id: null,
             }
-            // 已具象槽 → 覆盖；空槽 → push（emptySlots 也 -1）
-            if (externalForIdx < loras.length) {
-              onChange(loras.map((l, idx) => (idx === externalForIdx ? entry : l)))
-            } else {
-              onChange([...loras, entry])
-              setEmptySlots((n) => Math.max(0, n - 1))
-            }
-            // 不在 existingPaths 里强查 —— 外部文件可以叠多次
+            // 覆盖目标槽的内容；existingPaths 已排除空 path，外部文件可叠加
             void existingPaths
+            onChange(loras.map((l, idx) => (idx === externalForIdx ? entry : l)))
             setExternalForIdx(null)
           }}
           onClose={() => setExternalForIdx(null)}
