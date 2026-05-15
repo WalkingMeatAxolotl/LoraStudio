@@ -110,7 +110,7 @@ function AxisLoraPicker({
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [externalOpen, setExternalOpen] = useState(false)
-  const selectedPaths = useMemo(() => new Set(loras.map((l) => l.path)), [loras])
+  const existingPaths = useMemo(() => new Set(loras.map((l) => l.path)), [loras])
 
   const addAndBind = (path: string, projectId: number | null, versionId: number | null) => {
     const idx = loras.findIndex((l) => l.path === path)
@@ -180,10 +180,12 @@ function AxisLoraPicker({
       ) : (
         <InlineLoraPicker
           projectLoras={projectLoras}
-          selectedPaths={selectedPaths}
-          onPick={(path) => {
-            const matched = projectLoras.find((p) => p.path === path)
-            addAndBind(path, matched?.projectId ?? null, matched?.versionId ?? null)
+          existingPaths={existingPaths}
+          multi={false}
+          onPick={(picks) => {
+            const first = picks[0]
+            if (!first) return
+            addAndBind(first.path, first.projectId, first.versionId)
           }}
           onClose={() => setPickerOpen(false)}
           onPickExternal={() => setExternalOpen(true)}

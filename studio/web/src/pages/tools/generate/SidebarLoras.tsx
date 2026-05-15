@@ -37,18 +37,22 @@ export default function SidebarLoras({
       entry.version_id != null ? map.get(entry.version_id) : undefined
   }, [projectLoras])
 
-  const selectedPaths = useMemo(() => new Set(loras.map((l) => l.path)), [loras])
+  const existingPaths = useMemo(() => new Set(loras.map((l) => l.path)), [loras])
 
-  const addLora = (path: string) => {
-    if (!path || selectedPaths.has(path)) return
-    // 找 picker 里这个 path 对应的 project/version，绑定到 LoraEntry
-    const matched = projectLoras.find((l) => l.path === path)
-    onChange([...loras, {
-      path,
-      scale: 1.0,
-      project_id: matched?.projectId ?? null,
-      version_id: matched?.versionId ?? null,
-    }])
+  const addLoras = (
+    picks: Array<{ path: string; projectId: number | null; versionId: number | null }>,
+    weight: number,
+  ) => {
+    const fresh = picks
+      .filter((p) => p.path && !existingPaths.has(p.path))
+      .map((p) => ({
+        path: p.path,
+        scale: weight,
+        project_id: p.projectId,
+        version_id: p.versionId,
+      }))
+    if (fresh.length === 0) return
+    onChange([...loras, ...fresh])
   }
   const removeAt = (i: number) => onChange(loras.filter((_, idx) => idx !== i))
   const replaceAt = (i: number, next: LoraEntry) =>
@@ -93,10 +97,8 @@ export default function SidebarLoras({
       ) : (
         <InlineLoraPicker
           projectLoras={projectLoras}
-          selectedPaths={selectedPaths}
-          onPick={(path) => addLora(path)}
-          onRemove={(path) => onChange(loras.filter((l) => l.path !== path))}
-          onClearAll={() => onChange([])}
+          existingPaths={existingPaths}
+          onPick={(picks, weight) => addLoras(picks, weight)}
           onClose={() => setPickerOpen(false)}
           onPickExternal={() => setPathPickerOpen(true)}
         />
@@ -106,7 +108,7 @@ export default function SidebarLoras({
         <PathPicker
           dirOnly={false}
           onPick={(p) => {
-            addLora(p)
+            addLoras([{ path: p, projectId: null, versionId: null }], 1.0)
             setPathPickerOpen(false)
           }}
           onClose={() => setPathPickerOpen(false)}
