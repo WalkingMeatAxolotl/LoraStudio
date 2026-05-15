@@ -118,7 +118,9 @@ export interface WandBConfig {
   entity: string
   base_url: string
   mode: 'online' | 'offline' | 'disabled'
-  /** 上传前缩到最长边像素，默认 512 */
+  /** 是否把训练采样图上传到 wandb.ai，默认开；私有 / NSFW 数据集请关掉。 */
+  log_samples: boolean
+  /** 上传前缩到最长边像素，默认 1216 */
   sample_max_side: number
   /** step 节流：>0 时只在 global_step % N == 0 上传，0 = 不额外节流 */
   sample_every_n_steps: number

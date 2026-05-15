@@ -21,6 +21,7 @@ from typing import Any
 
 from . import projects, versions
 from .datasets import IMAGE_EXTS
+from .paths import safe_join
 
 # Kohya: 可选 `N_` 前缀 + 字母（不允许纯数字 / `5_` 这种空 label）
 _FOLDER_PATTERN = re.compile(r"^([0-9]+_)?[A-Za-z][A-Za-z0-9_-]*$")
@@ -164,11 +165,14 @@ def copy_to_train(
     missing: list[str] = []
     for name in files:
         _validate_filename(name)
-        src = src_dir / name
+        try:
+            src = safe_join(src_dir, name)
+            dst = safe_join(dst_dir, name)
+        except ValueError as exc:
+            raise CurationError(f"非法文件名: {name!r} ({exc})") from exc
         if not src.exists():
             missing.append(name)
             continue
-        dst = dst_dir / name
         if dst.exists():
             skipped.append(name)
             continue
@@ -199,7 +203,10 @@ def remove_from_train(
     missing: list[str] = []
     for name in files:
         _validate_filename(name)
-        p = fdir / name
+        try:
+            p = safe_join(fdir, name)
+        except ValueError as exc:
+            raise CurationError(f"非法文件名: {name!r} ({exc})") from exc
         if not p.exists():
             missing.append(name)
             continue
