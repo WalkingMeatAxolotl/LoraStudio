@@ -66,6 +66,13 @@ class InfoNoiseScheduler:
         self._mse_ema = np.zeros(K, dtype=np.float64)
         self._n_count = np.zeros(K, dtype=np.int32)
         self._cdf_values: Optional["np.ndarray"] = None
+        # 可观测性（P1-1 反方/正方都标了"InfoNoise 静默退化是 trust killer"）：
+        # last_refresh_status 暴露 _refresh 上一次的退出原因；refresh_attempts 计退化次数；
+        # warned_cold_start 防 logger 刷屏。
+        self._last_refresh_status: str = "not_refreshed_yet"
+        self._refresh_attempts: int = 0
+        self._refresh_degraded_count: int = 0
+        self._warned_cold_start: bool = False
 
     def sample(self, bs: int, device) -> torch.Tensor:
         """采样 t ∈ (0,1)。热身期用 logit-normal baseline，之后用自适应 CDF。"""
@@ -106,11 +113,36 @@ class InfoNoiseScheduler:
             return
         import numpy as np
         if int(np.min(self._n_count)) < self.N_min:
+            self._last_refresh_status = "skipped_bins_not_full"
             return
         self._refresh()
+        # 冷启动退化 trip wire（P1-1）：跑完一次完整 _refresh 但 CDF 仍未就绪
+        # → InfoNoise 静默走 baseline，必须告知用户避免"花算力没效果"。
+        if self._cdf_values is None and not self._warned_cold_start:
+            logger.warning(
+                "InfoNoise: warmup 已过且各 bin 样本充足，但首次 schedule "
+                "刷新仍未产生有效 CDF（原因：%s）。当前继续使用 logit-normal "
+                "baseline 采样；若该状态持续到训练后期，说明你的 loss 分布在 "
+                "log-σ 空间过于均匀（如已收敛模型），InfoNoise 无加速效果，"
+                "建议关闭 infonoise_enabled。",
+                self._last_refresh_status,
+            )
+            self._warned_cold_start = True
+
+    def status(self) -> dict:
+        """暴露当前 scheduler 状态（给 wandb 监控 / debug 用）。"""
+        return {
+            "cdf_ready": self._cdf_values is not None,
+            "last_refresh_status": self._last_refresh_status,
+            "refresh_attempts": self._refresh_attempts,
+            "refresh_degraded_count": self._refresh_degraded_count,
+            "internal_step": self._internal_step,
+        }
 
     def _refresh(self):
         import numpy as np
+
+        self._refresh_attempts += 1
 
         # Step A+B: 平均 loss + EMA 平滑
         # 论文 Algorithm 1 第 11 行：mse^k ← (1-β)·mse^k + β·ℓ̄_k
@@ -128,10 +160,14 @@ class InfoNoiseScheduler:
         # Step D: 找 gate pivot c（从低 σ 向高 σ 扫，取第一个超过 p_onset 的前一个 bin）
         r_max = float(r_hat.max())
         if r_max < 1e-30:
+            self._last_refresh_status = "mse_collapsed"
+            self._refresh_degraded_count += 1
             return
         r_norm = r_hat / r_max
         above = r_norm >= self.p_onset
         if not any(above):
+            self._last_refresh_status = "gate_empty"
+            self._refresh_degraded_count += 1
             return
         first_above = int(above.argmax())
         c = float(self._sigma_centers[max(0, first_above - 1)])
@@ -145,11 +181,14 @@ class InfoNoiseScheduler:
         q = r_tilde.clip(0.0)
         Z = float(q.sum() * self._delta_log_sigma)
         if Z < 1e-30:
+            self._last_refresh_status = "normalizer_too_small"
+            self._refresh_degraded_count += 1
             return
         q_norm = q / Z
         cdf = np.concatenate([[0.0], np.cumsum(q_norm * self._delta_log_sigma)])
         cdf[-1] = 1.0
         self._cdf_values = cdf.clip(0.0, 1.0)
+        self._last_refresh_status = "ok"
 
 
 def build_info_noise(args, total_steps: Optional[int]) -> Optional[InfoNoiseScheduler]:

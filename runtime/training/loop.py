@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -213,14 +214,17 @@ def run(ctx: TrainingContext) -> None:
                 dt_step = now - step_start_time
                 steps_per_sec = (1.0 / dt_step) if dt_step > 0 else 0.0
                 ctx.speed_ema = steps_per_sec if ctx.speed_ema is None else (0.9 * ctx.speed_ema + 0.1 * steps_per_sec)
-                ctx.wandb_monitor.log(
-                    {
-                        "train/loss": loss_val,
-                        "train/lr": float(lr),
-                        "train/speed_it_s": float(ctx.speed_ema or 0),
-                    },
-                    step=ctx.global_step,
-                )
+                log_payload: dict[str, Any] = {
+                    "train/loss": loss_val,
+                    "train/lr": float(lr),
+                    "train/speed_it_s": float(ctx.speed_ema or 0),
+                }
+                # InfoNoise 可观测性（P1-1）：CDF 是否就绪 + 退化次数
+                if ctx.info_noise is not None and ctx.global_step % args.log_every == 0:
+                    status = ctx.info_noise.status()
+                    log_payload["infonoise/cdf_ready"] = float(status["cdf_ready"])
+                    log_payload["infonoise/refresh_degraded_count"] = status["refresh_degraded_count"]
+                ctx.wandb_monitor.log(log_payload, step=ctx.global_step)
 
                 if ctx.use_rich:
                     desc = f"epoch {epoch+1}/{args.epochs} step {ctx.global_step}/{ctx.total_steps or '?'}"
