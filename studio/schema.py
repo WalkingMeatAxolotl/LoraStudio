@@ -391,7 +391,7 @@ class TrainingConfig(BaseModel):
     )
     infonoise_N_warm: int = Field(
         0, ge=0,
-        description="【InfoNoise】热身步数（0 = 自动，取总步数的 20%，最少 200 步）",
+        description="【InfoNoise】热身步数（0 = 自动，取总步数的 1/5，最少 200 步）",
         json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true", advanced=True),
     )
     infonoise_M: int = Field(
@@ -406,7 +406,7 @@ class TrainingConfig(BaseModel):
     )
     infonoise_beta: float = Field(
         0.9, ge=0.1, le=0.999,
-        description="【InfoNoise】EMA 平滑率",
+        description="【InfoNoise】EMA 历史权重（越大越平滑，0.9 即保留 0.9 比例历史 + 0.1 新值）",
         json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true", advanced=True),
     )
     infonoise_N_min: int = Field(

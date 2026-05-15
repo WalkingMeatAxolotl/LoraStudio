@@ -13,6 +13,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from ..paths import safe_join, validate_path_component
+
 CAPTION_EXTS = (".txt", ".json")
 SNAPSHOT_DIRNAME = "caption_snapshots"
 
@@ -89,9 +91,14 @@ def list_snapshots(version_dir: Path) -> list[dict[str, Any]]:
 
 
 def _resolve_snapshot(version_dir: Path, sid: str) -> Path:
-    if "/" in sid or "\\" in sid or not sid:
-        raise SnapshotError(f"非法 id: {sid}")
-    p = snapshot_root(version_dir) / f"{sid}.zip"
+    try:
+        validate_path_component(sid)
+    except ValueError as exc:
+        raise SnapshotError(f"非法 id: {sid} ({exc})") from exc
+    try:
+        p = safe_join(snapshot_root(version_dir), f"{sid}.zip")
+    except ValueError as exc:
+        raise SnapshotError(f"非法 id: {sid} ({exc})") from exc
     if not p.exists():
         raise FileNotFoundError(f"snapshot not found: {sid}")
     return p
@@ -121,19 +128,20 @@ def restore_snapshot(version_dir: Path, sid: str) -> dict[str, Any]:
             name = member.filename
             if member.is_dir():
                 continue
-            if "/" not in name or ".." in name or name.startswith("/"):
+            if "/" not in name:
                 skipped.append(name)
                 continue
             folder, fname = name.split("/", 1)
-            if "/" in fname or "\\" in fname:
-                skipped.append(name)
-                continue
             if Path(fname).suffix.lower() not in CAPTION_EXTS:
                 skipped.append(name)
                 continue
-            target_dir = train_dir / folder
-            target_dir.mkdir(parents=True, exist_ok=True)
-            with z.open(member) as src, open(target_dir / fname, "wb") as dst:
+            try:
+                target = safe_join(train_dir, folder, fname)
+            except ValueError:
+                skipped.append(name)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with z.open(member) as src, open(target, "wb") as dst:
                 dst.write(src.read())
             written += 1
 

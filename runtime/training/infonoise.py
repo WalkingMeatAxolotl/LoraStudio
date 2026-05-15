@@ -106,11 +106,12 @@ class InfoNoiseScheduler:
         import numpy as np
 
         # Step A+B: 平均 loss + EMA 平滑
+        # 标准 EMA：beta 是历史权重，beta=0.9 → 保留 90% 历史，新值占 10%（高平滑）。
         l_bar = np.array([
             float(np.mean(list(buf))) if buf else 0.0
             for buf in self._fifo
         ])
-        self._mse_ema = (1.0 - self.beta) * self._mse_ema + self.beta * l_bar
+        self._mse_ema = self.beta * self._mse_ema + (1.0 - self.beta) * l_bar
 
         # Step C: entropy rate r̂_k = mse_k / σ_k³
         r_hat = self._mse_ema / (self._sigma_centers ** 3 + 1e-30)

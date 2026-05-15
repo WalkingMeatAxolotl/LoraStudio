@@ -74,7 +74,7 @@ def test_apply_pending_runs_torch_reinstall_and_clears(
     from studio.services import torch_setup
     captured: list[str] = []
 
-    def fake_reinstall(target):
+    def fake_reinstall(target, *, stream=False):
         captured.append(target)
         return {
             "target": target, "tag": "cu128",
@@ -99,7 +99,7 @@ def test_apply_pending_keeps_marker_on_failure(
     pending_install.register_torch_reinstall("cu128")
     from studio.services import torch_setup
 
-    def fake_reinstall(_t):
+    def fake_reinstall(_t, *, stream=False):
         raise RuntimeError("network failed")
 
     monkeypatch.setattr(torch_setup, "reinstall", fake_reinstall)

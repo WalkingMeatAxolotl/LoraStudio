@@ -68,9 +68,9 @@ class WandBConfig(BaseModel):
     entity: str = ""
     base_url: str = ""
     mode: str = "online"
-    # 默认关 — 训练采样图会上传到 wandb.ai 公网，对私有 IP / NSFW 数据集是合规风险，
-    # 让用户在 Settings 显式打开。
-    log_samples: bool = False
+    # 默认开 — wandb 启用时一并上传采样图，省得用户每次额外勾一次。私有 IP / NSFW
+    # 数据集请在 Settings 里关掉这个开关；关了之后只上传指标，图片不出本机。
+    log_samples: bool = True
     # 上传前缩到最长边像素；原图常 2K+，512 已足够 wandb 面板浏览，省流量。
     sample_max_side: int = 512
     # step 节流：>0 时只在 `global_step % N == 0` 上传，避免长训练上 GB 级图。

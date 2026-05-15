@@ -24,6 +24,7 @@ from typing import Any, Optional
 
 from .. import projects, versions
 from ..datasets import IMAGE_EXTS
+from ..paths import safe_join
 
 SCHEMA_VERSION = 1
 MANIFEST_NAME = "manifest.json"
@@ -217,13 +218,15 @@ def import_train(
 
             for info, inner in entries:
                 folder, filename = inner.split("/", 1)
-                # 文件名再保险一层
-                if "/" in filename or "\\" in filename or filename.startswith("."):
+                # 文件名再保险一层 + containment check
+                if filename.startswith("."):
                     raise TrainIOError(f"非法文件名: {filename!r}")
-                target_dir = train_dir / folder
-                target_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    target = safe_join(train_dir, folder, filename)
+                except ValueError as exc:
+                    raise TrainIOError(f"非法文件名: {filename!r} ({exc})") from exc
+                target.parent.mkdir(parents=True, exist_ok=True)
                 seen_folders.add(folder)
-                target = target_dir / filename
                 with zf.open(info) as src, target.open("wb") as dst:
                     while True:
                         chunk = src.read(64 * 1024)

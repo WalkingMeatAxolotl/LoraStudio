@@ -37,3 +37,46 @@ def ensure_dirs() -> None:
     migrate_configs_to_presets()
     for d in (USER_PRESETS_DIR, LOGS_DIR):
         d.mkdir(parents=True, exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Path traversal 防护
+# ---------------------------------------------------------------------------
+#
+# 历史教训：早期端点只用字面量黑名单（`"/" in name or "\\" in name or ".." in name`）
+# 防穿越。`..` 字面量检查会误杀含 ASCII 省略号的合法文件名（Pixiv 标题 `「これ...」`），
+# 删掉又会让 defense-in-depth 单薄。统一走 resolve() + relative_to() containment check：
+# 既允许 `..` 作为文件名字符出现，又保证拼出来的最终路径不能逃出 base。
+
+def validate_path_component(name: str) -> None:
+    """校验单个路径片段：拒绝空串 / 含路径分隔符 / 绝对路径前缀。
+
+    `..` 字面量本身放行（containment check 是真正防线），所以
+    `「これでいっすか...」.txt` 这种合法文件名能通过。
+    """
+    if not name:
+        raise ValueError("path component is empty")
+    if "/" in name or "\\" in name:
+        raise ValueError(f"path component contains separator: {name!r}")
+    # Windows 盘符（C:\...）和 POSIX 绝对路径（/foo）一律视作非法片段
+    if Path(name).is_absolute():
+        raise ValueError(f"path component is absolute: {name!r}")
+
+
+def safe_join(base: Path, *parts: str) -> Path:
+    """把 parts 拼到 base 下并做 containment 校验。
+
+    每个 part 走 `validate_path_component`；拼接 + resolve() 后必须仍在
+    `base.resolve()` 子树内，否则 raise ValueError。
+
+    返回 resolve() 后的绝对 Path。调用方按需做 exists() / is_file() 检查。
+    """
+    for p in parts:
+        validate_path_component(p)
+    base_resolved = base.resolve()
+    candidate = base_resolved.joinpath(*parts).resolve()
+    try:
+        candidate.relative_to(base_resolved)
+    except ValueError as exc:
+        raise ValueError(f"path escapes base: {candidate} not in {base_resolved}") from exc
+    return candidate

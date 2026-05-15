@@ -85,6 +85,8 @@ from .paths import (
     USER_PRESETS_DIR,
     WEB_DIST,
     ensure_dirs,
+    safe_join,
+    validate_path_component,
 )
 from .schema import (
     GROUP_ORDER,
@@ -102,6 +104,22 @@ ensure_dirs()
 db.init_db()
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_join_or_400(base: Path, *parts: str) -> Path:
+    """safe_join 的 HTTPException 版本。把 ValueError 包成 400。"""
+    try:
+        return safe_join(base, *parts)
+    except ValueError as exc:
+        raise HTTPException(400, f"invalid path: {exc}") from exc
+
+
+def _validate_component_or_400(name: str) -> None:
+    """validate_path_component 的 HTTPException 版本（用于不需要 join 的纯名校验）。"""
+    try:
+        validate_path_component(name)
+    except ValueError as exc:
+        raise HTTPException(400, f"invalid path: {exc}") from exc
 
 
 def _install_proactor_disconnect_filter(loop: asyncio.AbstractEventLoop) -> None:
@@ -1002,14 +1020,7 @@ def delete_project_files(
     deleted: list[str] = []
     missing: list[str] = []
     for name in body.names:
-        if (
-            not name
-            or "/" in name
-            or "\\" in name
-            or ".." in name
-        ):
-            raise HTTPException(400, f"invalid name: {name!r}")
-        f = pdir / name
+        f = _safe_join_or_400(pdir, name)
         if not f.exists() or not f.is_file():
             missing.append(name)
             continue
@@ -1092,13 +1103,12 @@ def project_thumb(
     """
     if bucket != "download":
         raise HTTPException(400, "PP2 仅支持 bucket=download")
-    if "/" in name or "\\" in name or not name:
-        raise HTTPException(400, "invalid name")
     with db.connection_for() as conn:
         p = projects.get_project(conn, pid)
     if not p:
         raise HTTPException(404, f"项目不存在: id={pid}")
-    f = projects.project_dir(p["id"], p["slug"]) / "download" / name
+    download_dir = projects.project_dir(p["id"], p["slug"]) / "download"
+    f = _safe_join_or_400(download_dir, name)
     if not f.exists() or f.suffix.lower() not in datasets.IMAGE_EXTS:
         logger.info("thumb 404: pid=%s bucket=%s name=%s -> %s", pid, bucket, name, f)
         raise HTTPException(404)
@@ -1698,8 +1708,7 @@ def list_captions_endpoint(
     _, _, train = _version_train_dir_or_404(pid, vid)
     if folder is None:
         return {"folder": None, "items": tagedit.list_all_captions(train, full=full)}
-    if not folder or "/" in folder or "\\" in folder or ".." in folder:
-        raise HTTPException(400, "invalid folder")
+    _safe_join_or_400(train, folder)
     return {
         "folder": folder,
         "items": tagedit.list_captions_in_folder(train, folder, full=full),
@@ -1710,11 +1719,8 @@ def list_captions_endpoint(
 def get_caption_endpoint(
     pid: int, vid: int, folder: str, filename: str
 ) -> dict[str, Any]:
-    if "/" in filename or "\\" in filename:
-        raise HTTPException(400, "invalid filename")
-    if "/" in folder or "\\" in folder:
-        raise HTTPException(400, "invalid folder")
     _, _, train = _version_train_dir_or_404(pid, vid)
+    _safe_join_or_400(train, folder, filename)
     try:
         return tagedit.read_one(train, folder, filename)
     except FileNotFoundError as exc:
@@ -1725,11 +1731,8 @@ def get_caption_endpoint(
 def put_caption_endpoint(
     pid: int, vid: int, folder: str, filename: str, body: CaptionEdit
 ) -> dict[str, Any]:
-    if "/" in filename or "\\" in filename:
-        raise HTTPException(400, "invalid filename")
-    if "/" in folder or "\\" in folder:
-        raise HTTPException(400, "invalid folder")
     _, _, train = _version_train_dir_or_404(pid, vid)
+    _safe_join_or_400(train, folder, filename)
     try:
         return tagedit.write_one(train, folder, filename, body.tags)
     except FileNotFoundError as exc:
@@ -1795,13 +1798,11 @@ def commit_captions(pid: int, vid: int, body: CommitRequest) -> dict[str, Any]:
     written = 0
     skipped: list[str] = []
     for it in body.items:
-        if "/" in it.folder or "\\" in it.folder or ".." in it.folder:
+        try:
+            img = safe_join(train, it.folder, it.name)
+        except ValueError:
             skipped.append(f"{it.folder}/{it.name}")
             continue
-        if "/" in it.name or "\\" in it.name or ".." in it.name:
-            skipped.append(f"{it.folder}/{it.name}")
-            continue
-        img = train / it.folder / it.name
         if not img.exists():
             skipped.append(f"{it.folder}/{it.name}")
             continue
@@ -1949,15 +1950,13 @@ def start_reg_build(pid: int, vid: int, body: RegBuildRequest) -> dict[str, Any]
 @app.get("/api/projects/{pid}/versions/{vid}/reg/caption")
 def get_reg_caption(pid: int, vid: int, path: str) -> dict[str, Any]:
     """读 reg 集中单张图的 caption。`path` 是相对 reg/ 的路径（含子文件夹）。"""
-    if not path or ".." in path or path.startswith("/") or path.startswith("\\"):
+    if not path:
         raise HTTPException(400, "invalid path")
     _, _, vdir = _version_dir_or_404(pid, vid)
     rdir = _reg_dir(vdir)
-    img = (rdir / path).resolve()
-    try:
-        img.relative_to(rdir.resolve())
-    except ValueError:
-        raise HTTPException(400, "path outside reg dir")
+    # path 允许含 `/` 子目录；按分隔符拆成片段交给 safe_join 做组件校验 + containment
+    parts = [p for p in path.replace("\\", "/").split("/") if p]
+    img = _safe_join_or_400(rdir, *parts)
     if not img.exists() or img.suffix.lower() not in datasets.IMAGE_EXTS:
         raise HTTPException(404, "image not found")
     return {"path": path, "tags": tagedit.read_tags(img)}
@@ -2245,8 +2244,7 @@ def get_generate_sample(task_id: int, filename: str) -> Any:
     直接返回 bytes。LRU / 客户端断连清理在 commit 11 加 —— 在那之前 cache
     跟着 supervisor finalize 释放（一 task 一组 entry，task 终止时全清）。
     """
-    if "/" in filename or "\\" in filename:
-        raise HTTPException(400, "invalid filename")
+    _validate_component_or_400(filename)
     if not filename.lower().endswith(".png"):
         raise HTTPException(400, "only .png supported")
     from fastapi.responses import Response
@@ -2461,8 +2459,6 @@ def version_thumb(
 ) -> FileResponse:
     if bucket not in {"train", "reg", "samples"}:
         raise HTTPException(400, f"非法 bucket: {bucket}")
-    if "/" in name or "\\" in name or not name:
-        raise HTTPException(400, "invalid name")
     with db.connection_for() as conn:
         v = versions.get_version(conn, vid)
         p = projects.get_project(conn, pid)
@@ -2470,11 +2466,11 @@ def version_thumb(
         raise HTTPException(404, "版本不存在")
     vdir = versions.version_dir(p["id"], p["slug"], v["label"]) / bucket
     if bucket in {"train", "reg"}:
-        if not folder or "/" in folder or "\\" in folder or ".." in folder:
+        if not folder:
             raise HTTPException(400, "invalid folder")
-        f = vdir / folder / name
+        f = _safe_join_or_400(vdir, folder, name)
     else:
-        f = vdir / name
+        f = _safe_join_or_400(vdir, name)
     if not f.exists() or f.suffix.lower() not in datasets.IMAGE_EXTS:
         logger.info(
             "version thumb 404: pid=%s vid=%s bucket=%s folder=%s name=%s -> %s",
@@ -2759,8 +2755,7 @@ def download_task_outputs_zip(
         missing: list[str] = []
         selected = []
         for name in wanted:
-            if "/" in name or "\\" in name or ".." in name:
-                raise HTTPException(400, f"invalid filename: {name}")
+            _validate_component_or_400(name)
             f = by_name.get(name)
             if not f:
                 missing.append(name)
@@ -2808,8 +2803,6 @@ def download_task_outputs_zip(
 def download_task_output(task_id: int, filename: str) -> FileResponse:
     """下载 output 目录下的指定文件。`Content-Disposition: attachment` 让
     浏览器走「保存」对话框而不是 inline 渲染。"""
-    if "/" in filename or "\\" in filename or not filename:
-        raise HTTPException(400, "invalid filename")
     with db.connection_for() as conn:
         task = db.get_task(conn, task_id)
     if not task:
@@ -2817,7 +2810,7 @@ def download_task_output(task_id: int, filename: str) -> FileResponse:
     out_dir = _task_output_dir(task)
     if not out_dir or not out_dir.exists():
         raise HTTPException(404, "no output dir")
-    f = out_dir / filename
+    f = _safe_join_or_400(out_dir, filename)
     if not f.exists() or not f.is_file():
         raise HTTPException(404, "file not found")
     return FileResponse(
@@ -2907,11 +2900,13 @@ def browse_dir(path: str = "") -> dict[str, Any]:
 
 @app.get("/api/datasets/thumbnail")
 def get_dataset_thumbnail(folder: str, name: str) -> FileResponse:
-    """返回 dataset 缩略图（实际是原图，前端用 CSS 缩放）。"""
-    if "\\" in name or "/" in name:
-        raise HTTPException(400, "invalid path component")
+    """返回 dataset 缩略图（实际是原图，前端用 CSS 缩放）。
+
+    `folder` 可以是绝对路径或相对路径（用户在 dataset 浏览器里点出来的），
+    `name` 必须是单一文件名（不含分隔符）。最终路径必须在 REPO_ROOT 内。
+    """
+    _validate_component_or_400(name)
     p = (Path(folder) / name).resolve()
-    # 保证落在 repo 内（防止任意磁盘读取）
     try:
         p.relative_to(REPO_ROOT.resolve())
     except ValueError:
@@ -2980,8 +2975,7 @@ def get_sample(
     不给 → 返回原图。两种都走 _thumb_response 的弱 etag + no-cache，浏览器
     304 命中即可，避免「重启窗口期失败响应被永久缓存」问题。
     """
-    if "/" in filename or "\\" in filename:
-        raise HTTPException(400, "invalid filename")
+    _validate_component_or_400(filename)
 
     resolved: Optional[Path] = None
     if task_id is not None:
