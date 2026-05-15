@@ -476,6 +476,76 @@ def start_model_download(body: ModelDownloadRequest) -> dict[str, Any]:
     return {"key": key, "status": snap.get(key, {}).get("status", "running")}
 
 
+class UpscalerSelectRequest(BaseModel):
+    label: str   # 预设 key 或 custom 文件名
+
+
+@app.post("/api/upscalers/select")
+def select_upscaler(body: UpscalerSelectRequest) -> dict[str, Any]:
+    """切换默认放大器。写入 secrets.models.selected_upscaler。
+
+    接受预设 label 或本地已有的 custom 文件名；非法值（既不在预设也不在
+    upscalers/ 目录）返回 400。
+    """
+    label = body.label.strip()
+    if not label:
+        raise HTTPException(400, "label 不能为空")
+    valid = label in model_downloader.UPSCALER_VARIANTS
+    if not valid:
+        # custom 文件名：必须已经在磁盘上
+        try:
+            target = model_downloader.upscaler_target(label)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if not target.exists():
+            raise HTTPException(
+                404, f"放大器不存在: {label}（既非预设也未在 upscalers/ 找到）"
+            )
+    cur = secrets.load()
+    new_models = cur.models.model_copy(update={"selected_upscaler": label})
+    new = cur.model_copy(update={"models": new_models})
+    secrets.save(new)
+    return {"selected": label}
+
+
+class UpscalerCustomDownloadRequest(BaseModel):
+    source: str   # "hf" | "ms"
+    repo_id: str  # 例 "Kim2091/UltraSharp" 或 ModelScope 同形式
+    filename: str  # 例 "4x-UltraSharp.pth"
+
+
+@app.post("/api/upscalers/download_custom")
+def start_upscaler_custom_download(
+    body: UpscalerCustomDownloadRequest,
+) -> dict[str, Any]:
+    """自定义放大器下载：用户填 HF/MS repo + 文件名，落到 `{upscalers}/{filename}`。
+
+    复用通用 start_download_async；key 形如 `upscaler:custom:foo.pth` 便于前端 SSE
+    过滤 + catalog 状态匹配。
+    """
+    from pathlib import Path as _Path
+
+    if body.source not in ("hf", "ms"):
+        raise HTTPException(400, f"未知下载源: {body.source}")
+    if not body.repo_id.strip() or not body.filename.strip():
+        raise HTTPException(400, "repo_id / filename 不能为空")
+    save_name = _Path(body.filename).name
+    if not save_name.lower().endswith(model_downloader.UPSCALER_EXTS):
+        raise HTTPException(
+            400,
+            f"仅支持 {model_downloader.UPSCALER_EXTS} 扩展名",
+        )
+    key = f"upscaler:custom:{save_name}"
+    model_downloader.start_download_async(
+        key,
+        lambda log: model_downloader.download_upscaler_custom(
+            body.source, body.repo_id, body.filename, on_log=log
+        ),
+    )
+    snap = model_downloader.get_status_snapshot()
+    return {"key": key, "status": snap.get(key, {}).get("status", "running")}
+
+
 # ---------------------------------------------------------------------------
 # /api/projects + /api/projects/{pid}/versions  (PP1)
 # ---------------------------------------------------------------------------
@@ -1014,15 +1084,17 @@ def start_preprocess(pid: int, body: PreprocessStartRequest) -> dict[str, Any]:
     ):
         raise HTTPException(400, f"target_area 超出范围: {body.target_area}")
 
-    # 模型权重必须先下载（避免 worker 启起来才报错）
-    target = model_downloader.upscaler_target(body.model) \
-        if body.model in model_downloader.UPSCALER_VARIANTS else None
-    if target is None:
-        raise HTTPException(400, f"未知放大器: {body.model}")
+    # 模型权重必须先下载（避免 worker 启起来才报错）。
+    # body.model 可以是预设 label 或 custom filename（带扩展名）；
+    # upscaler_target 内部做穿越保护 + 扩展名白名单。
+    try:
+        target = model_downloader.upscaler_target(body.model)
+    except ValueError as exc:
+        raise HTTPException(400, f"未知放大器: {body.model}") from exc
     if not target.exists():
         raise HTTPException(
             409,
-            f"放大器权重未下载: {body.model}（请先到「设置 → 模型」下载）",
+            f"放大器权重未下载: {body.model}（请先到「设置 → 预处理」下载）",
         )
 
     with db.connection_for() as conn:
