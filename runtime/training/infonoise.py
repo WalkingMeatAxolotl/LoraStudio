@@ -5,6 +5,13 @@
 
 在 Flow Matching 的 t ∈ (0,1) 空间工作，内部把 t 映射到 σ = t/(1-t)
 后在 log-σ 空间均匀分 bin，以保持与原始论文的一致性。
+
+参考论文：arxiv 2602.18647 "Information-Guided Noise Allocation for Efficient
+Diffusion Training"，Algorithm 1 第 11 行：
+    mse^k ← (1-β)·mse^k + β·ℓ̄_k
+**β 乘的是新值**（responsiveness 强、平滑弱）；FIFO buffer 已做了一轮平均，
+EMA 是第二层平滑，β=0.9 即"新值占 90% 权重"是论文设计意图，不是 bug。
+**任何"按主观 EMA 直觉"翻转公式的 PR 都会改错算法，请先 verify 论文。**
 """
 
 from __future__ import annotations
@@ -106,12 +113,14 @@ class InfoNoiseScheduler:
         import numpy as np
 
         # Step A+B: 平均 loss + EMA 平滑
-        # 标准 EMA：beta 是历史权重，beta=0.9 → 保留 90% 历史，新值占 10%（高平滑）。
+        # 论文 Algorithm 1 第 11 行：mse^k ← (1-β)·mse^k + β·ℓ̄_k
+        # β 乘新值，beta=0.9 即"新值占 90% 权重"（responsiveness 强、第二层轻平滑）。
+        # 顶部 docstring 有更完整说明，不要按主观 EMA 直觉翻转。
         l_bar = np.array([
             float(np.mean(list(buf))) if buf else 0.0
             for buf in self._fifo
         ])
-        self._mse_ema = self.beta * self._mse_ema + (1.0 - self.beta) * l_bar
+        self._mse_ema = (1.0 - self.beta) * self._mse_ema + self.beta * l_bar
 
         # Step C: entropy rate r̂_k = mse_k / σ_k³
         r_hat = self._mse_ema / (self._sigma_centers ** 3 + 1e-30)

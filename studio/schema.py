@@ -406,7 +406,7 @@ class TrainingConfig(BaseModel):
     )
     infonoise_beta: float = Field(
         0.9, ge=0.1, le=0.999,
-        description="【InfoNoise】EMA 历史权重（越大越平滑，0.9 即保留 0.9 比例历史 + 0.1 新值）",
+        description="【InfoNoise】EMA 新值权重（论文 β 乘新值，0.9 即新值占 0.9 权重；FIFO 已做一轮平均故 β 偏高合理）",
         json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true", advanced=True),
     )
     infonoise_N_min: int = Field(
