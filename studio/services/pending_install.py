@@ -73,6 +73,7 @@ def apply_pending() -> None:
         target = pending.get("target", "auto")
         print(f"[studio] 检测到 pending torch 重装请求 (target={target})，开始安装...")
         print("[studio] 提示：按 Ctrl+C 可跳过本次安装（marker 保留，下次启动重试）")
+        print(f"[studio] 若希望永久跳过，删除 marker 文件：{PENDING_MARKER}")
         # 延迟 import：torch_setup -> onnxruntime_setup 链触发的副作用全留到此刻
         from . import torch_setup  # noqa: PLC0415
         try:
@@ -80,10 +81,14 @@ def apply_pending() -> None:
         except KeyboardInterrupt:
             print("\n[studio] 用户中断 torch 重装，跳过。marker 保留，下次启动会重试。",
                   file=sys.stderr)
+            print(f"[studio] 若希望永久跳过，删除 marker 文件：{PENDING_MARKER}",
+                  file=sys.stderr)
             return  # 不 clear_pending，下次启动继续尝试
         except RuntimeError as exc:
             print(f"[studio] torch 重装失败: {exc}", file=sys.stderr)
             print("[studio] marker 保留，下次启动会重试", file=sys.stderr)
+            print(f"[studio] 若装包持续失败想永久跳过，删除 marker 文件：{PENDING_MARKER}",
+                  file=sys.stderr)
             return
         print(f"[studio] torch 重装完成: {res.get('version')} ({res.get('tag')})")
     else:
