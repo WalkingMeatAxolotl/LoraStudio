@@ -316,6 +316,9 @@ export interface ModelsConfig {
    * Studio 创建新 version 时把它展开成绝对路径写到 yaml.transformer_path；
    * 已存在 version 不动（保证训练重现性）。 */
   selected_anima: string
+  /** 预处理默认放大器：预设 label（"4x-AnimeSharp" 等）或 custom 文件名
+   * （"my-anime.pth"）。Preprocess 页和 worker 用它定权重路径。 */
+  selected_upscaler: string
 }
 
 export interface QueueConfig {
@@ -455,17 +458,27 @@ export interface ModelDownloadStatus {
 
 export interface UpscalerVariant {
   label: string
-  repo: string
+  filename: string
+  kind: 'preset' | 'custom'
+  hf_repo: string | null
+  ms_repo: string | null
+  size_mb: number | null
+  description: string
   target_path: string
+  is_current: boolean
   exists: boolean
   size: number
   mtime: number
+  /** @deprecated 兼容老 build，新代码用 hf_repo/ms_repo */
+  repo?: string
 }
 export interface UpscalersCatalog {
   id: 'upscalers'
   name: string
   description: string
   default: string
+  /** 当前选中的放大器（来自 secrets.models.selected_upscaler，回退 default） */
+  current: string
   target_dir: string
   variants: UpscalerVariant[]
 }
@@ -1125,6 +1138,20 @@ export const api = {
     req<{ key: string; status: string }>('/api/models/download', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  startUpscalerCustomDownload: (body: {
+    source: 'hf' | 'ms'
+    repo_id: string
+    filename: string
+  }) =>
+    req<{ key: string; status: string }>('/api/upscalers/download_custom', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  selectUpscaler: (label: string) =>
+    req<{ selected: string }>('/api/upscalers/select', {
+      method: 'POST',
+      body: JSON.stringify({ label }),
     }),
   refreshLLMModels: (body: {
     preset_id?: string
