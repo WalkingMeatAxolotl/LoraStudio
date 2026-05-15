@@ -203,6 +203,10 @@ export default function TagEditPage() {
     setActiveKey('')
     setSel(new Set())
     setAnchor(null)
+    // P2：restore 后清 filterTag。restore 是大改动，旧 filter tag 在新结果里可能
+    // 已不存在 → 显示空网格让用户困惑。一并 reset 让用户看到完整 restore 结果，
+    // 想再过滤可以重选。
+    setFilterTag('')
     await reload()
   }
 

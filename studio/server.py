@@ -2252,6 +2252,11 @@ def get_generate_sample(task_id: int, filename: str) -> Any:
     data = generate_cache.get_image(task_id, filename)
     if data is None:
         raise HTTPException(404)
+    # 用 no-store 不是 _thumb_response 那套 no-cache + ETag：
+    # generate cache 同 (task_id, filename) 内容会随重跑覆盖（用户改 prompt 重生成），
+    # 没有稳定 ETag 可发；用 no-store 让浏览器每次都重拉，永远拿到最新结果。
+    # 带宽代价小：用户在测试出图页主动看才命中本 endpoint，QPS 低。
+    # （Thumbnail / dataset 那种内容稳定的图，继续用 _thumb_response 的 ETag。）
     return Response(
         content=data,
         media_type="image/png",

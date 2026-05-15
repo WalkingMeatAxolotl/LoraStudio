@@ -175,9 +175,10 @@ export default function BulkActionBar({
         )}
       </div>
 
-      {/* Hint row */}
-      <div className="text-fg-tertiary text-[11px]">
-        点击图片 = 查看大图并编辑 · 勾选 = 多选 · Shift/Ctrl+点击 = 快速多选
+      {/* Hint row：进阶快捷键拆到第二行，避免单行 50+ 字过密 */}
+      <div className="text-fg-tertiary text-[11px] flex flex-col gap-0.5">
+        <span>点击图片 = 查看大图并编辑 · 勾选 = 多选</span>
+        <span>Shift / Ctrl / ⌘ + 点击 = 快速多选</span>
       </div>
 
       {/* Popover row */}

@@ -59,6 +59,9 @@ export default function InlineLoraPicker({
     return Array.from(seen.entries()).map(([key, l]) => ({ key, item: l }))
   }, [projectId, projectLoras])
 
+  // versions 变化（切项目 / 上游 projectLoras 增减）时，若当前 versionKey 不再
+  // 出现在新 versions 中，回退到 'all'。切项目时 onChange 已显式 reset，这条 effect
+  // 是 projectLoras 列表外部变化（新增 / 删除 LoRA）的兜底，保留两路是有意为之。
   useEffect(() => {
     if (versionKey === 'all') return
     if (!versions.some((v) => v.key === versionKey)) setVersionKey('all')
@@ -85,40 +88,10 @@ export default function InlineLoraPicker({
       className="rounded-md border border-subtle bg-overlay p-2.5 flex flex-col gap-2"
       data-testid="inline-lora-picker"
     >
-      {/* header: project/version filters + search + actions */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <select
-          className="input text-xs"
-          value={projectId}
-          onChange={(e) => {
-            setProjectId(e.target.value)
-            setVersionKey('all')
-          }}
-          aria-label="筛选项目"
-          style={{ width: 132 }}
-        >
-          <option value="all">全部项目</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.title}</option>
-          ))}
-        </select>
-        <select
-          className="input text-xs"
-          value={versionKey}
-          onChange={(e) => setVersionKey(e.target.value)}
-          aria-label="筛选版本"
-          disabled={versions.length === 0}
-          style={{ width: 150 }}
-        >
-          <option value="all">全部版本</option>
-          {versions.map(({ key, item }) => (
-            <option key={key} value={key}>
-              {projectId === 'all'
-                ? `${item.projectTitle} / ${item.versionLabel}`
-                : item.versionLabel}
-            </option>
-          ))}
-        </select>
+      {/* 两行布局（P1-H）：第 1 行 = 搜索 + 操作；第 2 行 = 项目 / 版本筛选。
+          原来挤一行 7 个元素在 picker 宽 < 600px 时 wrap 成 2-3 行视觉零散。
+          项目数 ≤ 1 时直接隐藏筛选行（dropdown 无意义）。 */}
+      <div className="flex items-center gap-2">
         <input
           type="text"
           className="input flex-1 text-xs min-w-[160px]"
@@ -155,6 +128,42 @@ export default function InlineLoraPicker({
           ×
         </button>
       </div>
+      {projects.length > 1 && (
+        <div className="flex items-center gap-2">
+          <select
+            className="input text-xs"
+            value={projectId}
+            onChange={(e) => {
+              setProjectId(e.target.value)
+              setVersionKey('all')
+            }}
+            aria-label="筛选项目"
+            style={{ width: 132 }}
+          >
+            <option value="all">全部项目</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.title}</option>
+            ))}
+          </select>
+          <select
+            className="input text-xs"
+            value={versionKey}
+            onChange={(e) => setVersionKey(e.target.value)}
+            aria-label="筛选版本"
+            disabled={versions.length === 0}
+            style={{ width: 150 }}
+          >
+            <option value="all">全部版本</option>
+            {versions.map(({ key, item }) => (
+              <option key={key} value={key}>
+                {projectId === 'all'
+                  ? `${item.projectTitle} / ${item.versionLabel}`
+                  : item.versionLabel}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* 列表：扁平，每行一个 LoRA */}
       <div

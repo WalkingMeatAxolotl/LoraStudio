@@ -163,7 +163,8 @@ export default function QueuePage() {
     return `已运行 ${fmtDurationShort(elapsed)}`
   }, [])
 
-  const hasRunning = useMemo(() => tasks.some(t => t.status === 'running'), [tasks])
+  // 用 runningTask 派生比 tasks.some 再扫一遍便宜（runningTask 已经 memo 过）
+  const hasRunning = runningTask !== null
 
   // 后端只有 per-task cancel，没有 queue-level pause。"暂停" 语义会让用户误以为
   // 可以恢复，但 cancelTask 是 terminal cancel（task 进 canceled 状态，重启从 0
@@ -200,7 +201,7 @@ export default function QueuePage() {
           {hasRunning && (
             <button
               onClick={() => void cancelRunning()}
-              disabled={busy || !runningTask}
+              disabled={busy}
               className="btn btn-secondary btn-sm text-warn border-warn"
               title="发送取消信号，让当前运行任务停止"
             >
