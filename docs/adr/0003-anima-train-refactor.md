@@ -686,4 +686,98 @@ PR-C：同上 + 新增 `tests/test_plugin_registry.py`：
 
 - **每个 PR 合 dev 的门槛**：单测全绿 + `python runtime/anima_train.py --help` diff 为空
 - **PR-C 完成后**：用户本地跑完整 LoRA 训练 + 评估效果（不光看 loss，看出图质量是否漂移）
+
+---
+
+## 后续扩展记录
+
+ADR 0003 三 PR（PR #56/#57/#58）合并后，原计划之外的 plugin 子包后续按需新增。本节记录
+这些扩展，以验证 ADR 的"3-4 步本地加变体"承诺在真实新增场景下站得住脚。
+
+### 扩展 1：`timestep_samplers/` — PR #63 / PR #66（2026-05-15）
+
+**起因**：PR #63 引入 InfoNoise（I-MMSE 自适应 timestep 采样器），原始实现 hard-wire
+`ctx.info_noise` 字段在 `TrainingContext` 上，loop.py 用三处 `if ctx.info_noise is not None`
+守卫。这违反 ADR 0003 的 plugin 原则：
+
+- "下一个想加 Min-SNR-aware sampler 的人会复制 hard-wire 模式" — 这正是 ADR 0003 "Case 1
+  DoRA" 章节警告过的反模式
+- 第二种 adaptive sampler 要么再加 `ctx.min_snr_sampler`，要么改成 dispatch chain，**两种都
+  烂**
+
+**PR #66 落地的结构**：
+
+```
+training/timestep_samplers/
+├── protocol.py        ← TimestepSamplerProtocol（1 必需 + 3 可选 hook，runtime_checkable）
+├── baseline.py        ← BaselineTimestepSampler 包装现有 sample_t 4 mode
+├── infonoise.py       ← InfoNoiseScheduler + build
+└── __init__.py        ← BUILDERS + build_timestep_sampler
+```
+
+接口设计（参考 `AdapterProtocol`）：
+
+```python
+class TimestepSamplerProtocol(Protocol):
+    def sample(self, bs: int, device) -> Tensor: ...               # 必需
+
+    # 可选 hook，非自适应采样器（baseline）默认 no-op
+    def record(self, t: Tensor, raw_mse: Tensor) -> None: ...      # 给 adaptive 收集统计
+    def maybe_refresh(self, global_step: int) -> None: ...         # 给 adaptive 周期性更新分布
+    def status(self) -> dict: ...                                  # 给 wandb 监控
+```
+
+**调用方简化**（loop.py 三处 `if` 守卫消失）：
+
+```python
+t = ctx.timestep_sampler.sample(bs, ctx.device)           # 统一接口，baseline 也走这个
+...
+ctx.timestep_sampler.record(t.detach(), _raw_mse)         # baseline 是 no-op
+...
+ctx.timestep_sampler.maybe_refresh(ctx.global_step)       # baseline 是 no-op
+```
+
+**与原 ADR 的偏差**：这是第 5 个 plugin 子包，原 ADR 目标布局只列了 4 个（adapters /
+optimizers / schedulers / inference_samplers）。属于"按需追加新维度"的正常扩展，不算
+违反 ADR。
+
+**派发策略差异**：`build_timestep_sampler` 用 **bool 开关派发**（`args.infonoise_enabled`），
+而非其他 4 个 plugin 用的 `Literal` 派发。这是有意的：
+
+| 派发方式 | 何时用 | 例子 |
+|---|---|---|
+| `Literal[...]` + 完全互斥 | 用户从一组中选一个（mutex），且每种语义清晰 | `lora_type` / `optimizer_type` / `lr_scheduler` |
+| bool 开关 + 优先级链 | 启用条件正交，可能将来想"baseline 兜底 + 自适应叠加" | `infonoise_enabled` |
+
+第 2 个 adaptive sampler（如 Min-SNR-aware）加入时再 review：如果跟 InfoNoise 互斥 → 切
+`Literal`；如果可叠加（比如 Min-SNR-aware 作为 baseline，InfoNoise 在其上做 importance
+sampling）→ 保留 bool 开关。
+
+**`validate_schema_consistency()` 暂未加**：bool 派发不依赖 Literal 集合，schema 字段单点
+真相，不需要双向校验。一旦切 Literal 派发就加。
+
+**何时切 Literal 派发**：原则上 ≥3 种 adaptive sampler 时再切。当前 baseline + infonoise
+两种，提前抽象违反 YAGNI。
+
+### 评估：新结构对未来 plugin 维护的支持
+
+对照 ADR 0003 "3-4 步本地加变体" 承诺，PR #66 引入 `timestep_samplers/` 后**新增同类**
+（如 Min-SNR-aware sampler）：
+
+| 步骤 | 改动 | 文件 |
+|---|---|---|
+| 1. 实现 | 新 `MinSnrAwareSampler` 类实现 protocol + `build()` 工厂 | `timestep_samplers/min_snr_aware.py`（新文件）|
+| 2. 注册 | `BUILDERS["min_snr_aware"] = min_snr_aware.build` | `timestep_samplers/__init__.py`（1 行）|
+| 3. 派发 | `if args.min_snr_aware_enabled: return BUILDERS["min_snr_aware"](args, total_steps)` | `timestep_samplers/__init__.py`（2 行）|
+| 4. schema | `min_snr_aware_enabled: bool` + 该 sampler 专属字段 | `studio/schema.py` |
+
+`loop.py` / `phases/optimizer.py` / `context.py` / `loop.py` 调用代码 **零改动**。
+
+承诺达成。
+
+### 待办
+
+- 新增 plugin 子包加入 `phases/bootstrap.run()` 的 `validate_schema_consistency()` 调用
+  时机：仅在该子包切到 Literal 派发后（当前 `timestep_samplers/` 不调用）
+- 未来若再加 plugin 子包（loss_weighters / noise_schedulers 等），按本节模式记录
 - 单 PR 不强制做"真模型 100 step loss bit-for-bit 一致"——代价过高且 fp 非确定性可能假阳。靠端到端的最终训练做 ground truth 验证

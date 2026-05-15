@@ -34,7 +34,8 @@ runtime/training/
 ├── state.py                ← save / load_training_state
 ├── dataset.py              ← BucketManager + ImageDataset + 5 衍生类 + collate
 ├── sampling.py             ← 推理用 sample_image + sigma 调度（被 sister script 也用）
-├── timestep_sampling.py    ← 训练 step 用 sample_t（logit_normal / uniform / mode）
+├── timestep_sampling.py    ← 训练 step 用 sample_t（logit_normal / uniform / mode）；
+│                            被 timestep_samplers/baseline.py 复用
 ├── noise.py                ← make_noise（offset + pyramid）
 ├── loss_weighting.py       ← compute_loss_weight（min_snr / cosmap / detail_inv_t）
 │
@@ -42,11 +43,12 @@ runtime/training/
 │   ├── bootstrap.py        ← yaml + 交互 + seed + device + wandb + monitor_state writer
 │   ├── models.py           ← path resolve + 加载 transformer/vae/text encoders + LoRA inject
 │   ├── dataset.py          ← build 主集 + 正则集 + dataloader + VAE roundtrip 自检
-│   ├── optimizer.py        ← build_optimizer + validate + scheduler + total_steps
+│   ├── optimizer.py        ← build_optimizer + validate + scheduler + total_steps +
+│   │                          build_timestep_sampler（N_warm 依赖 total_steps）
 │   ├── resume.py           ← init_progress + state recovery + SIGINT + sample prompts + baseline
 │   └── finalize.py         ← 最终 LoRA save + 清理 progress + 最终 loss curve + wandb finish
 │
-└── ── 4 个 plugin 子包 ──（加变体本地化的关键）
+└── ── 5 个 plugin 子包 ──（加变体本地化的关键）
     ├── adapters/           ← LoRA 变体
     │   ├── protocol.py     ← AdapterProtocol + StepContext
     │   ├── lycoris.py      ← build_adapter for lokr/loha/lora
@@ -60,9 +62,15 @@ runtime/training/
     │   ├── cosine.py / cosine_with_restart.py
     │   └── __init__.py     ← BUILDERS + build_scheduler
     │
-    └── inference_samplers/ ← er_sde（未来加 euler / dpmpp 直接塞文件）
-        ├── er_sde.py
-        └── __init__.py     ← BUILDERS + build_inference_sampler
+    ├── inference_samplers/ ← er_sde（未来加 euler / dpmpp 直接塞文件）
+    │   ├── er_sde.py
+    │   └── __init__.py     ← BUILDERS + build_inference_sampler
+    │
+    └── timestep_samplers/  ← 训练 timestep 采样器（PR #66 引入）
+        ├── protocol.py     ← TimestepSamplerProtocol（1 必需 + 3 可选 hook）
+        ├── baseline.py     ← sample_t 4 mode 的 thin wrapper（非自适应）
+        ├── infonoise.py    ← InfoNoise I-MMSE 自适应采样器（arxiv 2602.18647）
+        └── __init__.py     ← BUILDERS + build_timestep_sampler（bool 派发，非 Literal）
 ```
 
 ## 数据流
@@ -123,6 +131,25 @@ phases.finalize.run(ctx)               ──  final save + cleanup
 1. `training/inference_samplers/{name}.py` 含 `sample(denoise_fn, x, sigmas, **kw) -> Tensor`
 2. `__init__.py` `BUILDERS` 字典加一行
 3. 用户在 schema/yaml 写 `sample_sampler_name: {name}` 即生效（注：现 schema 是 `str` 不是 `Literal`，未注册的 name 会回退 sample_image 内 inline Euler）
+
+### 加一个新 timestep 采样器（如 Min-SNR-aware / P-Loss-aware）
+
+跟其他 plugin 模式略有差异：当前 registry 用 **bool 开关派发**而非 `Literal` 枚举派发，因为
+每个自适应 sampler 可能有不同的 args / 启用条件。
+
+1. **实现**：写 `training/timestep_samplers/{name}.py` 含：
+   - `class {Name}Sampler` 实现 `TimestepSamplerProtocol`（`sample` 必需；`record` /
+     `maybe_refresh` / `status` 按需 override）
+   - `build(args, total_steps) -> {Name}Sampler` 工厂
+2. **注册**：`training/timestep_samplers/__init__.py` 的 `BUILDERS` 加一行
+3. **派发**：同文件 `build_timestep_sampler` 加 if 分支（按优先级 `args.{name}_enabled == True`）
+4. **schema**：`studio/schema.py` 加 `{name}_enabled: bool` + 该采样器专属字段
+
+`loop.py` / `phases/optimizer.py` / `context.py` **零改动**（接口已通过 plugin 抽象屏蔽）。
+
+如果将来有 ≥3 个 adaptive sampler，可考虑重构成 `timestep_sampler_kind: Literal["baseline",
+"infonoise", "min_snr_aware", ...]` 的 Literal 派发 + `validate_schema_consistency()`，跟
+adapters / optimizers 一致；目前 2 个（baseline + infonoise）不值得这层抽象。
 
 ### 删一个变体
 
@@ -190,6 +217,9 @@ _va(); _vo(); _vs()
 
 `sample_sampler_name` 是 `str` 不是 `Literal`，所以 `inference_samplers/` 没有 schema 校验，未注册名字走 sample_image 内 inline Euler 兜底。
 
+`timestep_samplers/` 用 bool 开关派发（`infonoise_enabled`）而非 `Literal`，所以也没有
+schema↔registry 一致性校验。当 adaptive sampler 数量 ≥3 时考虑切到 `Literal` 派发。
+
 ## 测试
 
 ```bash
@@ -197,6 +227,8 @@ _va(); _vo(); _vs()
 pytest tests/test_anima_train_migration.py        # CLI / YAML / parse_args 契约
 pytest tests/test_anima_generate_xy.py            # sister script `_T.X` 访问模式
 pytest tests/test_plugin_registry.py              # registry 三件套 + Protocol hook
+pytest tests/test_infonoise.py                    # InfoNoise EMA 公式 + 状态机 + factory（含
+                                                  # 论文 Algorithm 1 公式 codify，防 P0-2 类回归）
 ```
 
 `test_plugin_registry.py` 防回归断言：`phases/optimizer.py` 不该再含 `if optimizer_type == "prodigy"` 字面量、`phases/models.py` 不该再 `AnimaLycorisAdapter(`、`sampling.py` 不该 `if sampler_name == "er_sde"`。
