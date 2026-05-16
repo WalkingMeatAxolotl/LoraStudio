@@ -146,10 +146,11 @@ export default function InlineLoraPicker(props: Props) {
   const [internalWeight, setInternalWeight] = useState<number>(
     isSingle ? props.weight : (props.mode === 'multi' ? props.defaultWeight ?? 1.0 : 1.0)
   )
-  // single 模式 weight 跟着 props 走
+  // single 模式 weight 跟着 props 走；multi 模式 singleWeight 恒为 0，不会触发同步
+  const singleWeight = isSingle ? props.weight : 0
   useEffect(() => {
-    if (isSingle) setInternalWeight(props.weight)
-  }, [isSingle, isSingle ? props.weight : 0])
+    if (isSingle) setInternalWeight(singleWeight)
+  }, [isSingle, singleWeight])
 
   const currentVersion = versions.find((v) => v.id === vid)
 
