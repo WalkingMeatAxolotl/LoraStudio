@@ -43,18 +43,46 @@ export function formatDevStateText(check: SystemUpdateCheck | null): string {
   return '当前 commit 不在 dev 历史上'
 }
 
-/** master 通道"更新"按钮是否应该显示（state=update_available 且有目标版本）。 */
-export function shouldShowMasterUpdateButton(check: SystemUpdateCheck | null): boolean {
+/** master 通道"更新到 vX.Y.Z"按钮是否应该显示。
+ *
+ * 仅在「装的是 stable + 远端有新稳定版」时显示 —— 装非 stable（dev / custom）
+ * 时由「切到稳定版 vX.Y.Z」按钮覆盖（两个按钮做同一件事，避免同屏显示重复）。
+ */
+export function shouldShowMasterUpdateButton(
+  check: SystemUpdateCheck | null,
+  installedKind: 'stable' | 'dev' | 'custom' | undefined,
+): boolean {
   if (!check || check.state !== 'update_available') return false
+  if (installedKind !== 'stable') return false
   return !!(check.latest_version ?? check.latest_tag)
+}
+
+/** master 通道「切到稳定版 vX.Y.Z」按钮是否应该显示。
+ *
+ * 装非 stable 时显示（切回最新稳定版的入口）。装 stable 时由
+ * `shouldShowMasterUpdateButton` 覆盖。
+ */
+export function shouldShowSwitchToStableButton(
+  check: SystemUpdateCheck | null,
+  installedKind: 'stable' | 'dev' | 'custom' | undefined,
+): boolean {
+  if (!check || installedKind === 'stable') return false
+  return !!check.latest_version
 }
 
 /** dev 通道"切到 dev HEAD"按钮是否应该 disabled。
  *
- * 当 state=up_to_date 时按钮 disabled —— 即便用户的 installed_kind 是
- * stable，只要 commit 已等于 origin/dev HEAD，切操作就是 no-op，
- * 该 disabled 避免点了无反应（release 直后场景）。
+ * 优先看 check.state：state=up_to_date → disabled（commit 已等于 dev HEAD，
+ * 切是 no-op；release 直后场景常见）。
+ *
+ * check 未加载时按 installedKind fallback：装的是 dev tip → disabled
+ * （避免 check 还没 resolve 期间按钮看上去可点但实际 no-op）。
  */
-export function isDevSwitchButtonDisabled(check: SystemUpdateCheck | null): boolean {
-  return check?.state === 'up_to_date'
+export function isDevSwitchButtonDisabled(
+  check: SystemUpdateCheck | null,
+  installedKind?: 'stable' | 'dev' | 'custom',
+): boolean {
+  if (check?.state === 'up_to_date') return true
+  if (!check && installedKind === 'dev') return true
+  return false
 }

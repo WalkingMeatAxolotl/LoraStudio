@@ -5,6 +5,7 @@ import {
   formatMasterStateText,
   isDevSwitchButtonDisabled,
   shouldShowMasterUpdateButton,
+  shouldShowSwitchToStableButton,
 } from './versionPanel'
 
 /** 构造一个 check 对象（必填字段填默认值，便于按需 override）。 */
@@ -113,30 +114,72 @@ describe('formatDevStateText (ADR 0005)', () => {
 
 describe('shouldShowMasterUpdateButton', () => {
   it('null check → false', () => {
-    expect(shouldShowMasterUpdateButton(null)).toBe(false)
+    expect(shouldShowMasterUpdateButton(null, 'stable')).toBe(false)
   })
 
   it('up_to_date → false（已是最新，不显示更新按钮）', () => {
     expect(shouldShowMasterUpdateButton(mkCheck({
       state: 'up_to_date', latest_version: 'v0.8.0',
-    }))).toBe(false)
+    }), 'stable')).toBe(false)
   })
 
-  it('update_available + latest_version → true', () => {
+  it('update_available + 装 stable + latest_version → true', () => {
     expect(shouldShowMasterUpdateButton(mkCheck({
       state: 'update_available', latest_version: 'v0.9.0',
-    }))).toBe(true)
+    }), 'stable')).toBe(true)
+  })
+
+  it('update_available + 装 dev → false（由"切到稳定版"按钮覆盖，避免双按钮）', () => {
+    expect(shouldShowMasterUpdateButton(mkCheck({
+      state: 'update_available', latest_version: 'v0.8.0',
+    }), 'dev')).toBe(false)
+  })
+
+  it('update_available + 装 custom → false', () => {
+    expect(shouldShowMasterUpdateButton(mkCheck({
+      state: 'update_available', latest_version: 'v0.8.0',
+    }), 'custom')).toBe(false)
   })
 
   it('update_available 但无目标版本号 → false（防止显示空目标按钮）', () => {
     expect(shouldShowMasterUpdateButton(mkCheck({
       state: 'update_available', latest_version: null, latest_tag: null,
-    }))).toBe(false)
+    }), 'stable')).toBe(false)
   })
 
   it('ahead / detached → false（不暗示用户能"更新到自己"）', () => {
-    expect(shouldShowMasterUpdateButton(mkCheck({ state: 'ahead' }))).toBe(false)
-    expect(shouldShowMasterUpdateButton(mkCheck({ state: 'detached' }))).toBe(false)
+    expect(shouldShowMasterUpdateButton(mkCheck({ state: 'ahead' }), 'stable')).toBe(false)
+    expect(shouldShowMasterUpdateButton(mkCheck({ state: 'detached' }), 'stable')).toBe(false)
+  })
+})
+
+describe('shouldShowSwitchToStableButton', () => {
+  it('装 stable → false（已经在稳定版了）', () => {
+    expect(shouldShowSwitchToStableButton(mkCheck({
+      state: 'update_available', latest_version: 'v0.9.0',
+    }), 'stable')).toBe(false)
+  })
+
+  it('装 dev + 远端有 latest_version → true', () => {
+    expect(shouldShowSwitchToStableButton(mkCheck({
+      latest_version: 'v0.8.0',
+    }), 'dev')).toBe(true)
+  })
+
+  it('装 custom + 远端有 latest_version → true', () => {
+    expect(shouldShowSwitchToStableButton(mkCheck({
+      latest_version: 'v0.8.0',
+    }), 'custom')).toBe(true)
+  })
+
+  it('装 dev + 远端无 latest_version → false', () => {
+    expect(shouldShowSwitchToStableButton(mkCheck({
+      latest_version: null,
+    }), 'dev')).toBe(false)
+  })
+
+  it('null check → false', () => {
+    expect(shouldShowSwitchToStableButton(null, 'dev')).toBe(false)
   })
 })
 
@@ -153,7 +196,15 @@ describe('isDevSwitchButtonDisabled (release 直后场景 regression)', () => {
     }))).toBe(false)
   })
 
-  it('null check → 可点（用户没抓取过，按钮要能触发抓取 + 切换）', () => {
+  it('null check + installedKind=dev → disabled（fallback，避免按钮看上去可点）', () => {
+    expect(isDevSwitchButtonDisabled(null, 'dev')).toBe(true)
+  })
+
+  it('null check + installedKind=stable → 可点（要能触发抓取 + 切换）', () => {
+    expect(isDevSwitchButtonDisabled(null, 'stable')).toBe(false)
+  })
+
+  it('null check 无 installedKind → 可点', () => {
     expect(isDevSwitchButtonDisabled(null)).toBe(false)
   })
 })

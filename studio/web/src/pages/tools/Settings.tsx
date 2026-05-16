@@ -33,6 +33,7 @@ import {
   formatMasterStateText,
   formatDevStateText,
   shouldShowMasterUpdateButton,
+  shouldShowSwitchToStableButton,
   isDevSwitchButtonDisabled,
 } from '../../lib/versionPanel'
 import { applyDensity, applyTheme, getStoredDensity, getStoredTheme, setStoredDensity, setStoredTheme, type Density, type Theme } from '../../lib/theme'
@@ -2688,15 +2689,22 @@ function VersionSection() {
   // 即便装的是 stable，用户切到 dev 通道偏好时也要能立刻看到 dev HEAD 信息。
   const channelPref: 'stable' | 'dev' = prefs?.update_channel ?? 'stable'
   const showDevView = channelPref === 'dev'
+  // 两个 fetch 拆独立 effect：避免「commits 先 resolve 触发 re-render，
+  // effect 用 devCommits !== null 早 return 跳过 check fetch」race
+  // —— 实测会导致 devCheck 一直 null、"切到 dev HEAD" 按钮不知道
+  // 该 disabled，UI 显示 enabled 但点了 no-op。
   useEffect(() => {
     if (!showDevView || devCommits !== null) return
     let cancelled = false
     void api.getDevCommits(10).then((r) => { if (!cancelled) setDevCommits(r) }).catch(() => { /* silent */ })
-    if (devCheck === null) {
-      void api.checkSystemUpdate('dev', true).then((r) => { if (!cancelled) setDevCheck(r) }).catch(() => { /* silent */ })
-    }
     return () => { cancelled = true }
-  }, [showDevView, devCommits, devCheck])
+  }, [showDevView, devCommits])
+  useEffect(() => {
+    if (!showDevView || devCheck !== null) return
+    let cancelled = false
+    void api.checkSystemUpdate('dev', true).then((r) => { if (!cancelled) setDevCheck(r) }).catch(() => { /* silent */ })
+    return () => { cancelled = true }
+  }, [showDevView, devCheck])
 
   const handleCheck = async () => {
     setChecking(true)
@@ -3005,6 +3013,7 @@ function VersionSection() {
               check={devCheck}
               commits={devCommits}
               currentSha={version?.commit ?? ''}
+              installedKind={version?.installed_kind}
               selectedSha={selectedSha}
               setSelectedSha={setSelectedSha}
               checking={checkingDev}
@@ -3280,14 +3289,18 @@ function MasterReleaseNotes({
 }
 
 function MasterCard(p: MasterCardProps) {
-  // 当前装的版本号优先用 stable_version（精确），fallback 到 __version__
-  const currentTag = p.version?.stable_version
-    ?? p.version?.tag
-    ?? (p.version ? `v${p.version.version}` : '加载中…')
+  // 装的是 stable 时显示当前稳定版号，否则 ver-tag 区不显示 from（"你装的"
+  // 顶部行已经表达了装了什么，避免 "v0.8.0 → v0.8.0" 这种因 __version__
+  // 字符串与目标 tag 字面相同导致的伪箭头）
+  const installedIsStable = p.version?.installed_kind === 'stable'
+  const currentTag = installedIsStable
+    ? (p.version?.stable_version ?? p.version?.tag ?? `v${p.version?.version ?? ''}`)
+    : null
   // 远端最新稳定版（state=update_available 时显示）
   const targetTag = p.check?.latest_version ?? p.check?.latest_tag ?? ''
   const stateText = formatMasterStateText(p.check)
-  const showUpdateButton = shouldShowMasterUpdateButton(p.check)
+  const showUpdateButton = shouldShowMasterUpdateButton(p.check, p.version?.installed_kind)
+  const showSwitchToStableButton = shouldShowSwitchToStableButton(p.check, p.version?.installed_kind)
   if (p.cardState === 'preview' && p.pendingTarget && p.pendingTarget.kind === 'master') {
     return (
       <div className="vs-chan">
@@ -3302,7 +3315,7 @@ function MasterCard(p: MasterCardProps) {
         </div>
         <PreviewPane
           channel="master"
-          fromLabel={currentTag}
+          fromLabel={currentTag ?? p.version?.installed_label ?? '当前'}
           toLabel={p.pendingTarget.label}
           details={
             <div className="vs-change-block">
@@ -3328,7 +3341,7 @@ function MasterCard(p: MasterCardProps) {
             <span className="vs-pill vs-pill-stable"><span className="vs-dot" />稳定</span>
           </div>
         </div>
-        <ProgressPane fromLabel={currentTag} toLabel={p.pendingTarget.label} />
+        <ProgressPane fromLabel={currentTag ?? p.version?.installed_label ?? '当前'} toLabel={p.pendingTarget.label} />
       </div>
     )
   }
@@ -3384,13 +3397,21 @@ function MasterCard(p: MasterCardProps) {
       <div className={`vs-chan-body ${p.solo ? 'solo' : 'split'}`}>
         <div className="vs-ver-block" style={{ flex: p.solo ? '0 0 220px' : 1 }}>
           <div className="vs-ver-tag">
-            {p.hasUpdate && targetTag ? (
+            {/* 装的是 stable 且有新稳定版：显示 from → to 箭头
+                装的是 stable 但已是最新：只显示当前版本号
+                装的不是 stable（dev / custom）：只显示目标稳定版号（如有），
+                  不再显示 "v0.8.0 → v0.8.0" 伪箭头 */}
+            {installedIsStable && p.hasUpdate && targetTag && currentTag !== targetTag ? (
               <>
                 <span className="vs-dim">{currentTag}</span>
                 <span className="vs-arrow">→</span>
                 <span className="vs-target">{targetTag}</span>
               </>
-            ) : currentTag}
+            ) : installedIsStable ? (
+              currentTag
+            ) : targetTag ? (
+              <span className="vs-target">{targetTag}</span>
+            ) : null}
           </div>
           <div className="vs-ver-meta">
             {releasedAt && <span>发布于 <b>{releasedAt}</b></span>}
@@ -3404,7 +3425,7 @@ function MasterCard(p: MasterCardProps) {
 
         <div className="vs-change-block">
           <div className="vs-h">
-            {p.hasUpdate ? `${targetTag} · 更新内容` : `${currentTag} · 此版本`}
+            {p.hasUpdate ? `${targetTag} · 更新内容` : `${targetTag || currentTag || ''} · 此版本`}
           </div>
           <MasterReleaseNotes notes={p.releaseNotes} onShowDetail={p.onShowReleaseNotesDetail} />
         </div>
@@ -3427,10 +3448,12 @@ function MasterCard(p: MasterCardProps) {
               {p.busy ? '更新中…' : `更新到 ${targetTag}…`}
             </button>
           )}
-          {/* 装在非稳定版（dev / custom）时显示"切到最新稳定版"按钮 */}
-          {p.version && p.version.installed_kind !== 'stable' && p.check?.latest_version && (
+          {/* 装在非稳定版（dev / custom）时显示"切到最新稳定版"按钮；
+              与"更新到 X"按钮互斥（shouldShowMasterUpdateButton 内部已按
+              installed_kind 排除了非 stable），避免同屏显示两个做同样事的按钮 */}
+          {showSwitchToStableButton && (
             <button onClick={p.onSwitchToMaster} disabled={p.busy || p.checking} className="btn btn-sm btn-primary">
-              {p.busy ? '切换中…' : `切到稳定版 ${p.check.latest_version}…`}
+              {p.busy ? '切换中…' : `切到稳定版 ${p.check?.latest_version}…`}
             </button>
           )}
         </div>
@@ -3473,6 +3496,7 @@ type DevCardProps = {
   check: SystemUpdateCheck | null
   commits: DevCommitsResult | null
   currentSha: string
+  installedKind: 'stable' | 'dev' | 'custom' | undefined
   selectedSha: string | null
   setSelectedSha: (sha: string | null) => void
   checking: boolean
@@ -3495,7 +3519,9 @@ function DevCard(p: DevCardProps) {
   const fetchError = p.commits?.error ?? p.check?.error
   const currentShortSha = p.currentSha ? p.currentSha.slice(0, 8) : '当前'
   const stateText = formatDevStateText(p.check)
-  const devSwitchDisabled = isDevSwitchButtonDisabled(p.check)
+  // installedKind 用作 check 还没 resolve 期间的 fallback：装 dev tip 时
+  // 按钮 disabled，避免显示可点但点了 no-op
+  const devSwitchDisabled = isDevSwitchButtonDisabled(p.check, p.installedKind)
   if (p.cardState === 'preview' && p.pendingTarget && p.pendingTarget.kind === 'dev') {
     const t = p.pendingTarget
     return (
