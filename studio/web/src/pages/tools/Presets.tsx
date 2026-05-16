@@ -259,33 +259,22 @@ export default function PresetsPage() {
     }).catch((e) => toast(String(e), 'error')).finally(() => setBusy(false))
   }
 
+  // 端到端文件 I/O：直接拿磁盘上的 `studio_data/presets/{name}.yaml` 流。
+  // 走 <a download> 而非 fetch + blob，让浏览器使用原生下载机制。
   const handleExport = () => {
-    if (!config || !selected) return
-    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
+    if (!selected) return
     const a = document.createElement('a')
-    a.href = url; a.download = `${selected}.json`; a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    a.href = `/api/presets/${encodeURIComponent(selected)}/download`
+    a.download = `${selected}.yaml`
+    a.click()
   }
 
-  // 「导入」：解析后切到新建模式预填，让用户在表单里改 + 输名字 + 看 schema 确认。
-  // 不再用 window.prompt 直接保存——跟新建走同一条路径。
+  // 「导入」：上传文件给后端做 yaml + pydantic 校验，拿回 config + suggested_name；
+  // 切到新建模式预填，让用户在表单里改 + 输名字 + 看 schema 确认。
   const handleImportFile = async (f: File) => {
     try {
-      const text = await f.text()
-      let data: ConfigData
-      if (f.name.endsWith('.json')) {
-        data = JSON.parse(text)
-      } else {
-        // 简单 YAML（仅 key: value 行）
-        data = {}
-        for (const line of text.split('\n')) {
-          const m = line.match(/^([a-zA-Z_]\w*)\s*:\s*(.+)/)
-          if (m) data[m[1]] = m[2].trim()
-        }
-      }
-      const suggested = f.name.replace(/\.(json|ya?ml)$/i, '').replace(/[^A-Za-z0-9_\-]/g, '-')
-      draftSeedRef.current = { config: data, desc: '', name: suggested }
+      const { config: data, suggested_name } = await api.importPreset(f)
+      draftSeedRef.current = { config: data, desc: '', name: suggested_name }
       setSelected(null)
       toast('已加载，确认无误后点保存', 'success')
     } catch (e) { toast(String(e), 'error') }
@@ -368,7 +357,7 @@ export default function PresetsPage() {
               复制副本
             </button>
             <button onClick={handleExport} disabled={busy || !config} className="btn btn-ghost btn-sm">
-              导出 JSON
+              导出 YAML
             </button>
             <button onClick={handleDelete} disabled={busy} className="btn btn-ghost btn-sm" style={{ color: 'var(--err)' }}>
               删除

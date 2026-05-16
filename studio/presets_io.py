@@ -35,6 +35,36 @@ def _preset_path(name: str, base: Path | None = None) -> Path:
     return (base or USER_PRESETS_DIR) / f"{name}.yaml"
 
 
+def preset_path(name: str, base: Path | None = None) -> Path:
+    """公开版 `_preset_path`，给端到端文件下载用（server 不要碰 _ 私有 helper）。"""
+    return _preset_path(name, base)
+
+
+def parse_preset_bytes(raw: bytes, filename: str) -> tuple[dict[str, Any], str]:
+    """解析 .yaml/.yml/.json 上传内容 + pydantic 校验，返回 (config_dict, suggested_name)。
+
+    不写盘 —— caller 决定最终落盘名字（前端 confirm flow 让用户改名再保存）。
+    yaml.safe_load 是 JSON 的 superset，所以 .json 文件也能直接吃。
+    """
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise PresetError(f"文件不是 UTF-8: {exc}") from exc
+    try:
+        data = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise PresetError(f"YAML/JSON 解析失败: {exc}") from exc
+    if not isinstance(data, dict):
+        raise PresetError("预设格式错误（顶层不是 mapping）")
+    try:
+        cfg = TrainingConfig.model_validate(data)
+    except ValidationError as exc:
+        raise PresetError(f"预设校验失败: {exc}") from exc
+    stem = re.sub(r"\.(ya?ml|json)$", "", filename, flags=re.I)
+    suggested = re.sub(r"[^A-Za-z0-9_-]+", "-", stem).strip("-") or "imported"
+    return cfg.model_dump(mode="python"), suggested
+
+
 def list_presets(base: Path | None = None) -> list[dict[str, Any]]:
     """返回 `[{name, path, updated_at}]`，按修改时间倒序。"""
     base = base or USER_PRESETS_DIR

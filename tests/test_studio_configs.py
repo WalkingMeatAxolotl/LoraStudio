@@ -168,6 +168,95 @@ def test_yaml_on_disk_is_human_readable(client: TestClient, presets_dir: Path) -
 
 
 # ---------------------------------------------------------------------------
+# 端到端文件 I/O: /api/presets/{name}/download + /api/presets/import
+# ---------------------------------------------------------------------------
+
+
+def test_download_returns_raw_yaml(client: TestClient, presets_dir: Path) -> None:
+    """下载端点字节级一致：磁盘上 yaml 文件原封不动透传给客户端。"""
+    client.put("/api/presets/dl", json=_payload())
+    on_disk = (presets_dir / "dl.yaml").read_bytes()
+
+    resp = client.get("/api/presets/dl/download")
+    assert resp.status_code == 200
+    assert resp.content == on_disk
+    assert resp.headers["content-type"].startswith("application/yaml")
+    assert 'filename="dl.yaml"' in resp.headers["content-disposition"]
+
+
+def test_download_missing(client: TestClient) -> None:
+    assert client.get("/api/presets/ghost/download").status_code == 404
+
+
+def test_download_invalid_name(client: TestClient) -> None:
+    assert client.get("/api/presets/has..dot/download").status_code in (400, 422)
+
+
+def test_import_yaml_roundtrip(client: TestClient, presets_dir: Path) -> None:
+    """上传 yaml → 拿回 config + suggested_name；不写盘。"""
+    payload = _payload()
+    payload["epochs"] = 9
+    yaml_bytes = yaml.safe_dump(payload, allow_unicode=True).encode("utf-8")
+
+    resp = client.post(
+        "/api/presets/import",
+        files={"file": ("my-run.yaml", yaml_bytes, "application/yaml")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["config"]["epochs"] == 9
+    assert body["suggested_name"] == "my-run"
+    # 不写盘：磁盘上不该多出 my-run.yaml
+    assert not (presets_dir / "my-run.yaml").exists()
+
+
+def test_import_json_also_works(client: TestClient) -> None:
+    """yaml.safe_load 是 JSON superset，旧的 .json 导出也能直接 import。"""
+    import json as json_mod
+    payload = _payload()
+    payload["epochs"] = 3
+    resp = client.post(
+        "/api/presets/import",
+        files={"file": ("legacy.json", json_mod.dumps(payload).encode(), "application/json")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["epochs"] == 3
+
+
+def test_import_rejects_unknown_field(client: TestClient) -> None:
+    bad = _payload()
+    bad["nonexistent_field"] = 123
+    yaml_bytes = yaml.safe_dump(bad).encode("utf-8")
+    resp = client.post(
+        "/api/presets/import",
+        files={"file": ("bad.yaml", yaml_bytes, "application/yaml")},
+    )
+    assert resp.status_code == 422
+
+
+def test_import_rejects_malformed_yaml(client: TestClient) -> None:
+    resp = client.post(
+        "/api/presets/import",
+        files={"file": ("trash.yaml", b"this: : not yaml\n  invalid", "application/yaml")},
+    )
+    assert resp.status_code in (400, 422)
+
+
+def test_import_sanitizes_suggested_name(client: TestClient) -> None:
+    """文件名带空格 / 中文 / 特殊字符 → suggested_name 走 [A-Za-z0-9_-] 白名单。"""
+    yaml_bytes = yaml.safe_dump(_payload()).encode("utf-8")
+    resp = client.post(
+        "/api/presets/import",
+        files={"file": ("我的 preset (v2).yaml", yaml_bytes, "application/yaml")},
+    )
+    assert resp.status_code == 200
+    suggested = resp.json()["suggested_name"]
+    # 白名单：[A-Za-z0-9_-]+，非匹配字符压成 '-'，首尾 strip
+    assert all(c.isalnum() or c in "_-" for c in suggested)
+    assert "v2" in suggested
+
+
+# ---------------------------------------------------------------------------
 # /api/configs/* 兼容（308 redirect → /api/presets/*）
 # ---------------------------------------------------------------------------
 

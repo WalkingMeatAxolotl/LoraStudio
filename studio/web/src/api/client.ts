@@ -1119,6 +1119,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ new_name: newName }),
     }),
+  /** 端到端文件上传：把 .yaml/.yml/.json 文件给后端 yaml + pydantic 校验，
+   *  返回 config + suggested_name，前端走 draftSeed flow 让用户改名 + 编辑后保存。
+   *  绕过 req() 的 JSON header，让浏览器自加 multipart boundary。 */
+  importPreset: async (file: File): Promise<{ config: ConfigData; suggested_name: string }> => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    const resp = await fetch('/api/presets/import', { method: 'POST', body: fd })
+    if (!resp.ok) {
+      let detail = `${resp.status} ${resp.statusText}`
+      try {
+        const body = await resp.json()
+        if (body?.detail) detail = body.detail
+      } catch { /* ignore */ }
+      throw new Error(detail)
+    }
+    return (await resp.json()) as { config: ConfigData; suggested_name: string }
+  },
 
   // 兼容别名：PP0 之前叫 listConfigs / getConfig / ...。保留一段时间。
   listConfigs: () =>

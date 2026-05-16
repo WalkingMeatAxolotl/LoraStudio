@@ -419,6 +419,33 @@ def duplicate_preset_endpoint(name: str, body: DuplicateRequest) -> dict[str, st
     return {"name": body.new_name, "path": str(path)}
 
 
+@app.get("/api/presets/{name}/download")
+def download_preset(name: str) -> FileResponse:
+    """端到端文件 I/O：直接返回 `studio_data/presets/{name}.yaml` 原文件。"""
+    try:
+        path = presets_io.preset_path(name)
+    except presets_io.PresetError as exc:
+        raise HTTPException(status_code=_err_code(exc), detail=str(exc)) from exc
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"预设不存在: {name}")
+    return FileResponse(path, media_type="application/yaml", filename=f"{name}.yaml")
+
+
+@app.post("/api/presets/import")
+async def import_preset(file: UploadFile = File(...)) -> dict[str, Any]:
+    """接 .yaml/.yml/.json 上传 → 解析 + schema 校验 → 返回 config + suggested_name。
+
+    不写盘 —— 让前端 draftSeed flow 拿 config + suggested 进新建模式，
+    用户确认名字 + 编辑后再走 PUT /api/presets/{name}。
+    """
+    raw = await file.read()
+    try:
+        config, suggested = presets_io.parse_preset_bytes(raw, file.filename or "")
+    except presets_io.PresetError as exc:
+        raise HTTPException(status_code=_err_code(exc), detail=str(exc)) from exc
+    return {"config": config, "suggested_name": suggested}
+
+
 def _err_code(exc: presets_io.PresetError) -> int:
     """PresetError → HTTP 状态码：'不存在' → 404，名字非法/已存在 → 400，其它 → 422。"""
     msg = str(exc)

@@ -80,3 +80,71 @@ def test_duplicate_conflict(presets_dir: Path) -> None:
     presets_io.write_preset("b", _payload())
     with pytest.raises(presets_io.PresetError, match="已存在"):
         presets_io.duplicate_preset("a", "b")
+
+
+# ---------------------------------------------------------------------------
+# parse_preset_bytes（端到端文件导入用）
+# ---------------------------------------------------------------------------
+
+
+def test_parse_yaml_returns_config_and_suggested_name() -> None:
+    import yaml
+    payload = _payload()
+    payload["epochs"] = 12
+    raw = yaml.safe_dump(payload, allow_unicode=True).encode("utf-8")
+    config, suggested = presets_io.parse_preset_bytes(raw, "my-run.yaml")
+    assert config["epochs"] == 12
+    assert suggested == "my-run"
+
+
+def test_parse_json_works_via_yaml_superset() -> None:
+    """yaml.safe_load 同时吃 JSON —— 旧 .json 导出能直接导入回来。"""
+    import json
+    raw = json.dumps(_payload()).encode("utf-8")
+    config, suggested = presets_io.parse_preset_bytes(raw, "old.json")
+    assert config["lora_type"] == "lokr"
+    assert suggested == "old"
+
+
+def test_parse_rejects_unknown_field() -> None:
+    import yaml
+    bad = _payload()
+    bad["nonexistent_field"] = 123
+    raw = yaml.safe_dump(bad).encode("utf-8")
+    with pytest.raises(presets_io.PresetError, match="校验失败"):
+        presets_io.parse_preset_bytes(raw, "bad.yaml")
+
+
+def test_parse_rejects_non_mapping() -> None:
+    # 顶层是 list 不是 dict
+    raw = b"- foo\n- bar\n"
+    with pytest.raises(presets_io.PresetError, match="不是 mapping"):
+        presets_io.parse_preset_bytes(raw, "list.yaml")
+
+
+def test_parse_rejects_invalid_utf8() -> None:
+    raw = b"\xff\xfe\x00\x00bogus"
+    with pytest.raises(presets_io.PresetError, match="UTF-8"):
+        presets_io.parse_preset_bytes(raw, "binary.yaml")
+
+
+def test_parse_sanitizes_suggested_name() -> None:
+    """文件名带空格 / 中文 / 特殊字符 → suggested 走 [A-Za-z0-9_-] 白名单。"""
+    import yaml
+    raw = yaml.safe_dump(_payload()).encode("utf-8")
+    _, suggested = presets_io.parse_preset_bytes(raw, "我的 preset (v2).yaml")
+    assert all(c.isalnum() or c in "_-" for c in suggested)
+    assert "v2" in suggested
+
+
+def test_parse_empty_filename_fallback() -> None:
+    import yaml
+    raw = yaml.safe_dump(_payload()).encode("utf-8")
+    _, suggested = presets_io.parse_preset_bytes(raw, "")
+    assert suggested == "imported"
+
+
+def test_preset_path_is_public_alias() -> None:
+    assert presets_io.preset_path("foo").name == "foo.yaml"
+    with pytest.raises(presets_io.PresetError, match="非法预设名"):
+        presets_io.preset_path("bad/name")
