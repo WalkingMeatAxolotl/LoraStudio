@@ -16,7 +16,6 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     db.init_db(dbfile)
     monkeypatch.setattr(db, "STUDIO_DB", dbfile)
     monkeypatch.setattr(projects, "PROJECTS_DIR", tmp_path / "projects")
-    monkeypatch.setattr(projects, "TRASH_DIR", tmp_path / "_trash")
     # 全局 preset 池
     presets_dir = tmp_path / "presets"
     presets_dir.mkdir()

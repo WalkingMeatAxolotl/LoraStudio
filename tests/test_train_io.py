@@ -22,9 +22,7 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     dbfile = tmp_path / "studio.db"
     db.init_db(dbfile)
     pdir = tmp_path / "projects"
-    tdir = tmp_path / "_trash" / "projects"
     monkeypatch.setattr(projects, "PROJECTS_DIR", pdir)
-    monkeypatch.setattr(projects, "TRASH_DIR", tdir)
     monkeypatch.setattr(db, "STUDIO_DB", dbfile)
     return {"db": dbfile, "tmp": tmp_path}
 

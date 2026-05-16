@@ -168,12 +168,11 @@ def project_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """建 fake DB + 项目 + 3 个 version，落产出文件，返回 (dbfile, project)。
 
     复用 test_versions.py 的 isolation 模式：monkeypatch projects 模块的
-    PROJECTS_DIR / TRASH_DIR + db.STUDIO_DB。
+    PROJECTS_DIR + db.STUDIO_DB。
     """
     dbfile = tmp_path / "studio.db"
     db.init_db(dbfile)
     monkeypatch.setattr(projects, "PROJECTS_DIR", tmp_path / "projects")
-    monkeypatch.setattr(projects, "TRASH_DIR", tmp_path / "_trash" / "projects")
     monkeypatch.setattr(db, "STUDIO_DB", dbfile)
 
     with db.connection_for(dbfile) as conn:

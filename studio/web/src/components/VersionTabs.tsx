@@ -62,7 +62,7 @@ export default function VersionTabs({
                 onClick={() => onDelete(v.id)}
                 className="text-[10px] text-fg-tertiary hover:text-err px-1"
                 aria-label={`删除版本 ${v.label}`}
-                title="删除该版本（移到回收站）"
+                title="删除该版本（不可恢复）"
               >
                 ×
               </button>

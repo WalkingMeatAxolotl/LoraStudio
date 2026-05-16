@@ -9,11 +9,11 @@ interface Step {
 
 const STEPS: Step[] = [
   { key: 'download', label: '① 下载', scope: 'project' },
-  { key: 'preprocess', label: '② 预处理', scope: 'project' },
+  { key: 'preprocess', label: '② 预处理（可选）', scope: 'project' },
   { key: 'curate', label: '③ 筛选', scope: 'version' },
   { key: 'tag', label: '④ 打标', scope: 'version' },
   { key: 'edit', label: '⑤ 标签编辑', scope: 'version' },
-  { key: 'reg', label: '⑥ 正则集', scope: 'version' },
+  { key: 'reg', label: '⑥ 正则集（可选）', scope: 'version' },
   { key: 'train', label: '⑦ 训练', scope: 'version' },
 ]
 

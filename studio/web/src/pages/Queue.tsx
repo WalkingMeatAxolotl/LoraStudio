@@ -133,19 +133,6 @@ export default function QueuePage() {
   // 切换时 hook 自动清状态 + 重拉 /api/state 冷启动；不需要本组件再写清理逻辑。
   const { state: monitor } = useMonitorProgress(runningTaskId)
 
-  const clearDone = async () => {
-    const done = tasks.filter((t) => t.status === 'done')
-    if (done.length === 0) { toast('没有已完成的任务', 'success'); return }
-    if (!(await confirm(`删除 ${done.length} 个已完成任务？`, { tone: 'danger', okText: '删除' }))) return
-    setBusy(true)
-    try {
-      for (const t of done) await api.deleteTask(t.id)
-      toast(`已清理 ${done.length} 个任务`, 'success')
-      await reload()
-    } catch (e) { toast(String(e), 'error') }
-    finally { setBusy(false) }
-  }
-
   const sorted = useMemo(() => [...tasks].sort((a, b) => b.id - a.id), [tasks])
 
   const prevCount = useCallback((taskId: number): number => {
@@ -197,7 +184,6 @@ export default function QueuePage() {
       subtitle="同一时刻仅运行一个任务 · 完成后自动启动下一个"
       actions={
         <>
-          <button onClick={clearDone} disabled={busy} className="btn btn-ghost btn-sm">清理已完成</button>
           {hasRunning && (
             <button
               onClick={() => void cancelRunning()}

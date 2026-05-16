@@ -77,10 +77,13 @@ export default function ProjectsPage() {
   const handleDelete = async (p: ProjectSummary, e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (!(await confirm(`移到回收站？\n${p.title} (${p.slug})`, { tone: 'warn', okText: '移到回收站' }))) return
+    if (!(await confirm(
+      `删除项目「${p.title}」(${p.slug})？\n包括所有版本、数据集、训练产物，此操作不可恢复。`,
+      { tone: 'danger', okText: '删除' },
+    ))) return
     try {
       await api.deleteProject(p.id)
-      toast(`已移到回收站: ${p.title}`, 'success')
+      toast(`已删除: ${p.title}`, 'success')
       await refresh()
     } catch (err) {
       toast(String(err), 'error')
@@ -105,16 +108,6 @@ export default function ProjectsPage() {
     }
   }
 
-  const handleEmptyTrash = async () => {
-    if (!(await confirm('物理删除所有回收站项目？此操作不可恢复。', { tone: 'danger', okText: '清空回收站' }))) return
-    try {
-      const r = await api.emptyTrash()
-      toast(`清空了 ${r.removed} 个项目`, 'success')
-    } catch (e) {
-      toast(String(e), 'error')
-    }
-  }
-
   const openProject = (p: ProjectSummary) => {
     navigate(`/projects/${p.id}`)
   }
@@ -126,13 +119,6 @@ export default function ProjectsPage() {
         subtitle="每个项目对应一个 LoRA 训练目标 — 角色、风格或概念。新建一个项目开始流水线。"
         actions={
           <>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={handleEmptyTrash}
-              title="物理删除回收站"
-            >
-              清空回收站
-            </button>
             <input
               ref={fileInputRef}
               type="file"
@@ -261,7 +247,7 @@ function ProjectCard({
         <button
           onClick={onDelete}
           className="bg-transparent border-none px-1.5 py-0.5 rounded-sm text-fg-tertiary text-xs cursor-pointer"
-          title="移到回收站"
+          title="删除项目（不可恢复）"
         >
           ×
         </button>

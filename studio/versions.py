@@ -4,7 +4,7 @@ Version 是 Pipeline 的「实验单元」：每个 version 独立维护 train/ 
 output/ samples/ 与 monitor_state.json。label 由用户起（baseline /
 high-lr 这种语义名），同 project 内唯一，且不可改（路径锚点）。
 
-软删：目录搬到 `_trash/projects/{slug}/versions/{label}/`，db 行删除。
+删除：直接 rmtree version 目录 + DELETE db 行。不可恢复。
 若被删的是 active version，自动 reassign 到「最新创建的剩余 version」。
 """
 from __future__ import annotations
@@ -390,22 +390,13 @@ def update_version(
 
 
 def delete_version(conn: sqlite3.Connection, version_id: int) -> None:
-    """目录搬到 _trash；db 删行；若是 active 自动 reassign。"""
+    """rmtree version 目录 + DELETE db 行；若是 active 自动 reassign。不可恢复。"""
     v = _must_get(conn, version_id)
     p = projects.get_project(conn, v["project_id"])
     if p:
         src = version_dir(p["id"], p["slug"], v["label"])
         if src.exists():
-            trash = (
-                projects.TRASH_DIR
-                / f"{p['id']}-{p['slug']}"
-                / "versions"
-                / v["label"]
-            )
-            if trash.exists():
-                trash = trash.with_name(f"{v['label']}-{int(time.time())}")
-            trash.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(trash))
+            shutil.rmtree(src, ignore_errors=True)
 
         if p.get("active_version_id") == version_id:
             # 选剩下里 created_at 最新的；都没了就清空

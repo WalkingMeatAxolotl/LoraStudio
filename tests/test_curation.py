@@ -14,7 +14,6 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     dbfile = tmp_path / "studio.db"
     db.init_db(dbfile)
     monkeypatch.setattr(projects, "PROJECTS_DIR", tmp_path / "projects")
-    monkeypatch.setattr(projects, "TRASH_DIR", tmp_path / "_trash")
     monkeypatch.setattr(db, "STUDIO_DB", dbfile)
     with db.connection_for(dbfile) as conn:
         p = projects.create_project(conn, title="P")

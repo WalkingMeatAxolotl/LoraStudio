@@ -980,17 +980,6 @@ function PreprocessSidebar({
           tile 越大显存占用越高；OOM 时降到 128/192。
         </p>
       </div>
-
-      <div className="rounded-md border border-subtle bg-surface px-3 py-2.5">
-        <h3 className="caption flex items-center gap-1.5">
-          <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-warn opacity-60" />
-          下一步
-        </h3>
-        <p className="text-xs text-fg-secondary leading-snug">
-          预处理是可选阶段——跳过的图筛选页会用原图，已处理的图自动用预处理副本。
-          ADR 0004：用户只看到一份图。
-        </p>
-      </div>
     </div>
   )
 }

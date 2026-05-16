@@ -14,9 +14,7 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     dbfile = tmp_path / "studio.db"
     db.init_db(dbfile)
     pdir = tmp_path / "projects"
-    tdir = tmp_path / "_trash" / "projects"
     monkeypatch.setattr(projects, "PROJECTS_DIR", pdir)
-    monkeypatch.setattr(projects, "TRASH_DIR", tdir)
     monkeypatch.setattr(db, "STUDIO_DB", dbfile)
     monkeypatch.setattr(server.db, "STUDIO_DB", dbfile)
     return {"db": dbfile}
@@ -87,15 +85,13 @@ def test_patch_updates_note_and_stage(client: TestClient) -> None:
     assert body["stage"] == "curating"
 
 
-def test_delete_moves_to_trash_and_empty_trash(client: TestClient) -> None:
+def test_delete_removes_dir(client: TestClient) -> None:
     p = client.post("/api/projects", json={"title": "ToDel"}).json()
     pdir = projects.project_dir(p["id"], p["slug"])
     assert pdir.exists()
     assert client.delete(f"/api/projects/{p['id']}").status_code == 200
     assert client.get(f"/api/projects/{p['id']}").status_code == 404
     assert not pdir.exists()
-    r = client.post("/api/projects/_trash/empty").json()
-    assert r["removed"] == 1
 
 
 # ---------------------------------------------------------------------------

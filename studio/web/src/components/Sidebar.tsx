@@ -158,7 +158,7 @@ function VersionPanel({ collapsed }: { collapsed: boolean }) {
               {isActive && project.versions.length > 1 && (
                 <button
                   onClick={() => onDeleteVersion(v.id)}
-                  title="删除此版本（移到回收站）"
+                  title="删除此版本（不可恢复）"
                   className="px-[5px] py-0.5 text-fg-tertiary text-xs bg-transparent border-none cursor-pointer rounded-sm hover:text-err transition-colors shrink-0"
                 >
                   ×
@@ -194,11 +194,11 @@ function VersionPanel({ collapsed }: { collapsed: boolean }) {
 // ── project stepper nav ────────────────────────────────────────────────────
 const STEPS = [
   { key: 'download',   label: '下载',     idx: '1', icon: I.download, scope: 'project' as const },
-  { key: 'preprocess', label: '预处理',   idx: '2', icon: I.upscale,  scope: 'project' as const },
+  { key: 'preprocess', label: '预处理（可选）', idx: '2', icon: I.upscale,  scope: 'project' as const },
   { key: 'curate',     label: '筛选',     idx: '3', icon: I.filter,   scope: 'version' as const },
   { key: 'tag',        label: '打标',     idx: '4', icon: I.tag,      scope: 'version' as const },
   { key: 'edit',       label: '标签编辑', idx: '5', icon: I.edit,     scope: 'version' as const },
-  { key: 'reg',        label: '正则集',   idx: '6', icon: I.reg,      scope: 'version' as const },
+  { key: 'reg',        label: '正则集（可选）', idx: '6', icon: I.reg,      scope: 'version' as const },
   { key: 'train',      label: '训练',     idx: '7', icon: I.train,    scope: 'version' as const },
 ]
 

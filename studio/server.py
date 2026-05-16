@@ -689,15 +689,10 @@ def patch_project_endpoint(pid: int, body: ProjectUpdate) -> dict[str, Any]:
 def delete_project_endpoint(pid: int) -> dict[str, Any]:
     with db.connection_for() as conn:
         try:
-            projects.soft_delete_project(conn, pid)
+            projects.delete_project(conn, pid)
         except projects.ProjectError as exc:
             raise HTTPException(_project_err_code(exc), str(exc)) from exc
     return {"deleted": pid}
-
-
-@app.post("/api/projects/_trash/empty")
-def empty_trash_endpoint() -> dict[str, Any]:
-    return {"removed": projects.empty_trash()}
 
 
 # Versions ------------------------------------------------------------------

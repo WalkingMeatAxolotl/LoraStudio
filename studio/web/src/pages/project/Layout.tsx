@@ -83,7 +83,7 @@ export default function ProjectLayout() {
     if (!projectRef.current) return
     const v = projectRef.current.versions.find((x) => x.id === vid)
     if (!v) return
-    if (!(await confirm(`删除版本 ${v.label}？目录将移到回收站。`, { tone: 'warn', okText: '删版本' }))) return
+    if (!(await confirm(`删除版本「${v.label}」？包括 train/reg/output/samples，此操作不可恢复。`, { tone: 'danger', okText: '删除' }))) return
     const pid = projectRef.current.id
     try {
       await api.deleteVersion(pid, vid)

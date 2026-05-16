@@ -1,4 +1,4 @@
-"""PP1 — projects.py: slug 唯一性、目录创建、软删、empty_trash。"""
+"""PP1 — projects.py: slug 唯一性、目录创建、硬删除。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,11 +13,9 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     dbfile = tmp_path / "studio.db"
     db.init_db(dbfile)
     pdir = tmp_path / "projects"
-    tdir = tmp_path / "_trash" / "projects"
     monkeypatch.setattr(projects, "PROJECTS_DIR", pdir)
-    monkeypatch.setattr(projects, "TRASH_DIR", tdir)
     monkeypatch.setattr(db, "STUDIO_DB", dbfile)
-    return {"db": dbfile, "projects_dir": pdir, "trash_dir": tdir}
+    return {"db": dbfile, "projects_dir": pdir}
 
 
 # ---------------------------------------------------------------------------
@@ -113,29 +111,17 @@ def test_update_rejects_invalid_stage(isolated) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_soft_delete_moves_to_trash_and_removes_row(isolated) -> None:
+def test_delete_removes_dir_and_row(isolated) -> None:
     with db.connection_for(isolated["db"]) as conn:
         p = projects.create_project(conn, title="ToDel")
         pid = p["id"]
-        projects.soft_delete_project(conn, pid)
+        projects.delete_project(conn, pid)
         assert projects.get_project(conn, pid) is None
     src = projects.project_dir(pid, p["slug"])
     assert not src.exists()
-    trash_dst = isolated["trash_dir"] / f"{pid}-{p['slug']}"
-    assert trash_dst.exists()
 
 
-def test_empty_trash(isolated) -> None:
-    with db.connection_for(isolated["db"]) as conn:
-        p = projects.create_project(conn, title="X")
-        projects.soft_delete_project(conn, p["id"])
-    n = projects.empty_trash()
-    assert n == 1
-    # 再调一次安全
-    assert projects.empty_trash() == 0
-
-
-def test_soft_delete_missing_raises(isolated) -> None:
+def test_delete_missing_raises(isolated) -> None:
     with db.connection_for(isolated["db"]) as conn:
         with pytest.raises(projects.ProjectError, match="不存在"):
-            projects.soft_delete_project(conn, 9999)
+            projects.delete_project(conn, 9999)

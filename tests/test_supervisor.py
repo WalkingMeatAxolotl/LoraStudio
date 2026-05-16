@@ -382,7 +382,6 @@ def test_finalize_version_writes_output_lora_path(env, tmp_path, monkeypatch) ->
     from studio import projects, versions
 
     monkeypatch.setattr(projects, "PROJECTS_DIR", tmp_path / "projects")
-    monkeypatch.setattr(projects, "TRASH_DIR", tmp_path / "_trash")
 
     # 建 project + version + 假 lora_final.safetensors
     with db.connection_for(env["db"]) as conn:

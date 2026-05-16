@@ -13,9 +13,7 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     dbfile = tmp_path / "studio.db"
     db.init_db(dbfile)
     pdir = tmp_path / "projects"
-    tdir = tmp_path / "_trash" / "projects"
     monkeypatch.setattr(projects, "PROJECTS_DIR", pdir)
-    monkeypatch.setattr(projects, "TRASH_DIR", tdir)
     monkeypatch.setattr(db, "STUDIO_DB", dbfile)
     return {"db": dbfile}
 
@@ -238,7 +236,7 @@ def test_delete_last_version_clears_active(isolated) -> None:
     assert p2 and p2["active_version_id"] is None
 
 
-def test_delete_moves_dir_to_trash(isolated) -> None:
+def test_delete_removes_dir(isolated) -> None:
     p = _new_project(isolated)
     with db.connection_for(isolated["db"]) as conn:
         v = versions.create_version(conn, project_id=p["id"], label="baseline")
@@ -246,13 +244,6 @@ def test_delete_moves_dir_to_trash(isolated) -> None:
         assert src.exists()
         versions.delete_version(conn, v["id"])
     assert not src.exists()
-    trash = (
-        projects.TRASH_DIR
-        / f"{p['id']}-{p['slug']}"
-        / "versions"
-        / "baseline"
-    )
-    assert trash.exists()
 
 
 # ---------------------------------------------------------------------------

@@ -66,7 +66,6 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     db.init_db(dbfile)
     monkeypatch.setattr(db, "STUDIO_DB", dbfile)
     monkeypatch.setattr(projects, "PROJECTS_DIR", tmp_path / "projects")
-    monkeypatch.setattr(projects, "TRASH_DIR", tmp_path / "_trash")
     monkeypatch.setattr(project_jobs, "JOB_LOGS_DIR", tmp_path / "jobs")
     # tag_worker 内部 import 用的是 studio.services.tagger.get_tagger；
     # 接受 overrides=... 的新签名（由 PP4 后续 wd14 per-job 覆盖功能引入）。
