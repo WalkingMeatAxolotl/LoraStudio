@@ -20,7 +20,9 @@
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
+import io
 import json
 import logging
 import re
@@ -34,6 +36,18 @@ from typing import Any, Callable, Optional
 
 from .. import __version__
 from ..paths import REPO_ROOT, STUDIO_DATA
+
+# dulwich 是纯 Python git 实现（requirements.txt 硬依赖），不依赖系统装 git。
+# 覆盖所有 self-update 场景：git clone / zip 解压 / 系统没装 git。详见
+# ADR 0005「跟进决策：self-update 改 dulwich」。
+try:
+    from dulwich import porcelain as _dul_porcelain
+    from dulwich.errors import NotGitRepository
+    from dulwich.repo import Repo as _DulRepo
+    _DULWICH_OK = True
+except ImportError:  # pragma: no cover
+    _DULWICH_OK = False
+    NotGitRepository = Exception  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -128,13 +142,17 @@ class UpdateStatus:
 
 # ----- Git 调用 helper ----------------------------------------------------
 def _git(*args: str, timeout: float = 15.0) -> tuple[int, str, str]:
-    """跑 git 命令，返回 (rc, stdout, stderr)。"""
+    """跑 git 命令，返回 (rc, stdout, stderr)。**Deprecated** —— 新代码走
+    git_* 高层 helper（dulwich 后端）。此函数保留仅作"系统装了 git"时的
+    应急 fallback / 旧测试兼容；不要直接调。"""
     try:
         proc = subprocess.run(
             ["git", *args],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
@@ -142,6 +160,377 @@ def _git(*args: str, timeout: float = 15.0) -> tuple[int, str, str]:
         return 1, "", "git not found on PATH"
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, "", str(exc)
+
+
+# ----- 高层 git 操作 helper（dulwich 实现）------------------------------
+# 所有 git 操作走 dulwich（纯 Python，requirements.txt 硬依赖），不依赖系统
+# 装 git。每个 helper 入口都封异常 + 返回 sentinel，保证调用方不需要 try。
+#
+# 仓库实例每次按需打开 —— dulwich Repo 打开 < 1ms，状态自带 ref 缓存，
+# 不需要全局 singleton（避免 ref / object 写入后状态过期）。
+
+
+@dataclass
+class GitCommitInfo:
+    """git log 一条 commit 的字段摘要。"""
+    sha: str
+    short_sha: str
+    msg: str       # subject line
+    time_iso: str  # author commit time
+    author: str    # author name
+
+
+def _open_repo() -> Optional[Any]:
+    """打开仓库；非 git / dulwich 不可用 → None。"""
+    if not _DULWICH_OK:
+        return None
+    try:
+        return _DulRepo(str(REPO_ROOT))
+    except (NotGitRepository, OSError, ValueError):
+        return None
+
+
+def _peel_tag(repo: Any, obj: Any) -> Any:
+    """如果是 annotated tag object，剥到指向的 commit；非 tag 原样返回。"""
+    while obj.type_name == b"tag":
+        obj = repo[obj.object[1]]
+    return obj
+
+
+def _resolve_ref(repo: Any, ref: str) -> Optional[bytes]:
+    """统一 ref 解析：HEAD / branch / origin/x / tag / 完整 sha 都试一遍。
+    返回 commit-peeled sha (bytes)，找不到返回 None。"""
+    if not ref:
+        return None
+    try:
+        if ref == "HEAD":
+            return repo.head()
+    except KeyError:
+        return None
+    # 完整 40 位 sha 直接当 object 查
+    if len(ref) == 40 and all(c in "0123456789abcdef" for c in ref.lower()):
+        try:
+            obj = _peel_tag(repo, repo[ref.encode()])
+            return obj.id
+        except (KeyError, AssertionError):
+            return None
+    # ref 形式
+    candidates = [
+        ref.encode(),
+        f"refs/heads/{ref}".encode(),
+        f"refs/remotes/{ref}".encode(),
+        f"refs/tags/{ref}".encode(),
+    ]
+    for c in candidates:
+        try:
+            sha = repo.refs[c]
+            obj = _peel_tag(repo, repo[sha])
+            return obj.id
+        except KeyError:
+            continue
+    return None
+
+
+def git_head_sha() -> Optional[str]:
+    """HEAD 的 commit sha；仓库无效 → None。"""
+    repo = _open_repo()
+    if repo is None:
+        return None
+    try:
+        return repo.head().decode()
+    except (KeyError, AttributeError):
+        return None
+
+
+def git_head_branch() -> str:
+    """HEAD 指向的 branch 名 / "detached"。debug 用，产品 UI 应看 installed_kind。"""
+    repo = _open_repo()
+    if repo is None:
+        return "detached"
+    try:
+        refs_chain, _ = repo.refs.follow(b"HEAD")
+    except (KeyError, ValueError):
+        return "detached"
+    # follow 返回的 chain：[b"HEAD", b"refs/heads/master", ...] —— HEAD 是
+    # symbolic ref 时第二项是 branch；detached 时 chain 只有 [b"HEAD"]
+    for ref in refs_chain:
+        if ref and ref.startswith(b"refs/heads/"):
+            return ref[len(b"refs/heads/"):].decode()
+    return "detached"
+
+
+def git_head_commit_time() -> str:
+    """HEAD commit 的 ISO8601 author time；失败返回空串。"""
+    repo = _open_repo()
+    if repo is None:
+        return ""
+    try:
+        commit = repo[repo.head()]
+        tz = datetime.timezone(datetime.timedelta(seconds=commit.commit_timezone))
+        dt = datetime.datetime.fromtimestamp(commit.commit_time, tz=tz)
+        return dt.isoformat()
+    except (KeyError, AttributeError, OSError, ValueError):
+        return ""
+
+
+def git_rev_parse(ref: str) -> Optional[str]:
+    """统一 ref → commit sha 解析（HEAD / branch / origin/x / tag / sha 都行）。"""
+    repo = _open_repo()
+    if repo is None:
+        return None
+    sha_b = _resolve_ref(repo, ref)
+    return sha_b.decode() if sha_b else None
+
+
+def git_rev_parse_commit(tag_or_ref: str) -> Optional[str]:
+    """同 git_rev_parse；annotated tag 自动 peel 到 commit。"""
+    return git_rev_parse(tag_or_ref)
+
+
+def git_exact_tag(sha_or_ref: str = "HEAD") -> Optional[str]:
+    """目标 commit 是否被某 tag 精确指向；返回 tag 名 / None。"""
+    if not sha_or_ref:
+        return None
+    repo = _open_repo()
+    if repo is None:
+        return None
+    target_sha = _resolve_ref(repo, sha_or_ref)
+    if target_sha is None:
+        return None
+    for ref in list(repo.refs.allkeys()):
+        if not ref.startswith(b"refs/tags/"):
+            continue
+        try:
+            commit_sha = _peel_tag(repo, repo[repo.refs[ref]]).id
+        except (KeyError, AssertionError):
+            continue
+        if commit_sha == target_sha:
+            return ref[len(b"refs/tags/"):].decode()
+    return None
+
+
+def git_nearest_tag(sha_or_ref: str) -> Optional[str]:
+    """从目标 commit 反向 walk 找最近可达 tag（git describe --abbrev=0 语义）。"""
+    repo = _open_repo()
+    if repo is None:
+        return None
+    target_sha = _resolve_ref(repo, sha_or_ref)
+    if target_sha is None:
+        return None
+    tag_map: dict[bytes, str] = {}
+    for ref in list(repo.refs.allkeys()):
+        if not ref.startswith(b"refs/tags/"):
+            continue
+        try:
+            commit_sha = _peel_tag(repo, repo[repo.refs[ref]]).id
+        except (KeyError, AssertionError):
+            continue
+        tag_map[commit_sha] = ref[len(b"refs/tags/"):].decode()
+    if not tag_map:
+        return None
+    try:
+        walker = repo.get_walker(include=[target_sha], max_entries=5000)
+        for entry in walker:
+            if entry.commit.id in tag_map:
+                return tag_map[entry.commit.id]
+    except (KeyError, ValueError):
+        return None
+    return None
+
+
+def git_is_dirty() -> bool:
+    """工作树是否 dirty（不含 untracked，对应 reset --hard 视角）。"""
+    repo = _open_repo()
+    if repo is None:
+        return False
+    try:
+        st = _dul_porcelain.status(repo, untracked_files="no")
+    except (KeyError, ValueError, OSError):
+        return False
+    staged = getattr(st, "staged", {}) or {}
+    has_staged = any(staged.values()) if isinstance(staged, dict) else bool(staged)
+    has_unstaged = bool(getattr(st, "unstaged", None))
+    return has_staged or has_unstaged
+
+
+def git_trees_equal(sha_a: str, sha_b: str) -> bool:
+    """两个 commit 的 tree sha 相同（merge / cherry-pick 后常见）。"""
+    repo = _open_repo()
+    if repo is None:
+        return False
+    try:
+        obj_a = _peel_tag(repo, repo[sha_a.encode()])
+        obj_b = _peel_tag(repo, repo[sha_b.encode()])
+        return obj_a.tree == obj_b.tree
+    except (KeyError, AssertionError, AttributeError):
+        return False
+
+
+def git_object_exists(sha_or_ref: str) -> bool:
+    """对象（commit / tag / blob / tree）在仓库里是否存在。"""
+    if not sha_or_ref:
+        return False
+    repo = _open_repo()
+    if repo is None:
+        return False
+    if _resolve_ref(repo, sha_or_ref) is not None:
+        return True
+    try:
+        return sha_or_ref.encode() in repo.object_store
+    except (ValueError, KeyError):
+        return False
+
+
+def _tree_lookup(repo: Any, commit_sha: bytes, path: str) -> Optional[Any]:
+    """走 path 各级在 commit 的 tree 里找；返回 leaf entry 或 None。"""
+    try:
+        commit = _peel_tag(repo, repo[commit_sha])
+        tree = repo[commit.tree]
+    except (KeyError, AssertionError):
+        return None
+    parts = path.split("/")
+    for i, part in enumerate(parts):
+        part_b = part.encode()
+        found = None
+        for entry in tree.items():
+            if entry.path == part_b:
+                found = entry
+                break
+        if not found:
+            return None
+        if i == len(parts) - 1:
+            return found
+        try:
+            tree = repo[found.sha]
+        except KeyError:
+            return None
+    return None
+
+
+def git_path_exists_in_ref(ref: str, path: str) -> bool:
+    """目标 ref 上是否包含某 path（不读内容）。"""
+    repo = _open_repo()
+    if repo is None:
+        return False
+    commit_sha = _resolve_ref(repo, ref)
+    if not commit_sha:
+        return False
+    return _tree_lookup(repo, commit_sha, path) is not None
+
+
+def git_show_file(ref: str, path: str) -> Optional[str]:
+    """读 ref 上 path 文件的内容；失败返 None。"""
+    repo = _open_repo()
+    if repo is None:
+        return None
+    commit_sha = _resolve_ref(repo, ref)
+    if not commit_sha:
+        return None
+    entry = _tree_lookup(repo, commit_sha, path)
+    if entry is None:
+        return None
+    try:
+        blob = repo[entry.sha]
+        return blob.data.decode("utf-8", errors="replace")
+    except (KeyError, AttributeError):
+        return None
+
+
+def git_count_commits_between(from_ref: str, to_ref: str) -> int:
+    """`from..to` 范围内 commit 数量 = reachable from `to` but not from `from`。"""
+    repo = _open_repo()
+    if repo is None:
+        return 0
+    from_sha = _resolve_ref(repo, from_ref)
+    to_sha = _resolve_ref(repo, to_ref)
+    if not from_sha or not to_sha or from_sha == to_sha:
+        return 0
+    try:
+        walker = repo.get_walker(include=[to_sha], exclude=[from_sha])
+        return sum(1 for _ in walker)
+    except (KeyError, ValueError):
+        return 0
+
+
+def git_log(ref: str, limit: int) -> tuple[bool, list[GitCommitInfo], str]:
+    """log -<limit> <ref> 解析；返回 (ok, commits, err)。"""
+    repo = _open_repo()
+    if repo is None:
+        return False, [], "not a git repository or dulwich unavailable"
+    ref_sha = _resolve_ref(repo, ref)
+    if not ref_sha:
+        return False, [], f"ref not found: {ref}"
+    try:
+        walker = repo.get_walker(include=[ref_sha], max_entries=limit)
+    except (KeyError, ValueError) as e:
+        return False, [], str(e)
+    commits: list[GitCommitInfo] = []
+    for entry in walker:
+        c = entry.commit
+        try:
+            tz = datetime.timezone(datetime.timedelta(seconds=c.author_timezone))
+            dt = datetime.datetime.fromtimestamp(c.author_time, tz=tz)
+            time_iso = dt.isoformat()
+        except (OSError, ValueError):
+            time_iso = ""
+        msg = c.message.split(b"\n", 1)[0].decode("utf-8", errors="replace")
+        # author 形如 "Name <email@example.com>"，只取 name 部分
+        author_raw = c.author.split(b"<", 1)[0].strip()
+        author = author_raw.decode("utf-8", errors="replace")
+        commits.append(GitCommitInfo(
+            sha=c.id.decode(),
+            short_sha=c.id.decode()[:7],
+            msg=msg,
+            time_iso=time_iso,
+            author=author,
+        ))
+    return True, commits, ""
+
+
+def _origin_url(repo: Any) -> Optional[str]:
+    """读 .git/config 里 [remote "origin"] url；没有返 None。"""
+    try:
+        cfg = repo.get_config()
+        url = cfg.get((b"remote", b"origin"), b"url")
+        return url.decode() if isinstance(url, bytes) else url
+    except (KeyError, ValueError, AttributeError):
+        return None
+
+
+def git_fetch(branch: Optional[str] = None, timeout: float = 30.0) -> tuple[bool, str]:
+    """`fetch origin [<branch>]` → (ok, error_message)。branch 仅作语义提示；
+    dulwich porcelain.fetch 拉所有 refs（对 update logic 无影响）。"""
+    repo = _open_repo()
+    if repo is None:
+        return False, "not a git repository"
+    url = _origin_url(repo)
+    if not url:
+        return False, "origin remote not configured"
+    try:
+        # 把 dulwich 的进度输出导到 in-memory buffer，避免污染 server stdout
+        _dul_porcelain.fetch(
+            repo, url,
+            outstream=io.StringIO(),
+            errstream=io.BytesIO(),
+        )
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
+
+
+def git_reset_hard(target: str, timeout: float = 120.0) -> tuple[bool, str]:
+    """`reset --hard <target>` → (ok, error_message)。"""
+    repo = _open_repo()
+    if repo is None:
+        return False, "not a git repository"
+    target_sha = _resolve_ref(repo, target)
+    if not target_sha:
+        return False, f"target ref not found: {target}"
+    try:
+        _dul_porcelain.reset(repo, "hard", target_sha.decode())
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
 
 
 # 稳定版 tag 形如 v0.8.0。HEAD 命中这种 tag 就归类 stable。
@@ -152,24 +541,17 @@ _RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
 # ----- 公开 API -----------------------------------------------------------
 def current_version() -> VersionInfo:
     """读当前仓库状态。git 不可用时返回占位值（不抛）。"""
-    rc, head, _ = _git("rev-parse", "HEAD")
-    commit = head if rc == 0 else "unknown"
+    head = git_head_sha()
+    commit = head if head else "unknown"
     short = commit[:8] if commit != "unknown" else "?"
 
-    rc, branch, _ = _git("rev-parse", "--abbrev-ref", "HEAD")
-    if rc != 0 or branch == "HEAD":
-        branch = "detached"
-
-    rc, ctime, _ = _git("log", "-1", "--format=%cI", "HEAD")
-    ctime_iso = ctime if rc == 0 else ""
-
-    rc, tag, _ = _git("describe", "--tags", "--exact-match", "HEAD")
-    exact_tag = tag if rc == 0 else None
+    branch = git_head_branch()
+    ctime_iso = git_head_commit_time()
+    exact_tag = git_exact_tag("HEAD")
 
     # --untracked-files=no：untracked 文件（pr18_review.md / 临时笔记 / 没进 gitignore
     # 的草稿等）不影响 git reset --hard，它们会原地保留。dirty 仅指"修改了 tracked 文件"。
-    rc, status, _ = _git("status", "--porcelain", "--untracked-files=no")
-    is_dirty = rc == 0 and bool(status)
+    is_dirty = git_is_dirty()
 
     installed_kind, installed_label, stable_version = _classify_install(
         commit=commit,
@@ -229,19 +611,18 @@ def _classify_install(
         # 2. __version__ 字符串匹 release tag 且 tree 一致
         version_tag = f"v{__version__}"
         if _RELEASE_TAG_RE.match(version_tag):
-            rc, tag_commit, _ = _git("rev-parse", f"{version_tag}^{{commit}}")
-            if rc == 0 and tag_commit:
+            tag_commit = git_rev_parse_commit(version_tag)
+            if tag_commit:
                 if tag_commit == commit:
                     # 极少触发（exact_tag 应已捕获），保险起见
                     return "stable", f"{version_tag}{dirty_suffix}", version_tag
                 # tree 一致 = 文件内容完全相同（merge / cherry-pick 常见）
-                rc_diff, _, _ = _git("diff", "--quiet", commit, tag_commit)
-                if rc_diff == 0:
+                if git_trees_equal(commit, tag_commit):
                     return "stable", f"{version_tag}{dirty_suffix}", version_tag
 
         # 3. commit == origin/dev HEAD
-        rc, dev_head, _ = _git("rev-parse", "origin/dev")
-        if rc == 0 and dev_head and commit == dev_head:
+        dev_head = git_rev_parse("origin/dev")
+        if dev_head and commit == dev_head:
             date_part = ""
             if commit_time_iso:
                 date_part = f" · {commit_time_iso[:16].replace('T', ' ')}"
@@ -277,8 +658,8 @@ def check_update(channel: str = "master", use_cache: bool = True) -> UpdateCheck
     cur = current_version()
     checked_at = time.time()
 
-    rc, _, stderr = _git("fetch", "origin", channel, timeout=GIT_FETCH_TIMEOUT)
-    if rc != 0:
+    ok, stderr = git_fetch(channel, timeout=GIT_FETCH_TIMEOUT)
+    if not ok:
         return UpdateCheckResult(
             channel=channel, current_commit=cur.commit, latest_commit="",
             commits_ahead=0, has_update=False, latest_tag=None,
@@ -287,8 +668,8 @@ def check_update(channel: str = "master", use_cache: bool = True) -> UpdateCheck
             error=f"git fetch failed: {stderr[:200]}",
         )
 
-    rc, latest, _ = _git("rev-parse", f"origin/{channel}")
-    if rc != 0:
+    latest = git_rev_parse(f"origin/{channel}")
+    if not latest:
         return UpdateCheckResult(
             channel=channel, current_commit=cur.commit, latest_commit="",
             commits_ahead=0, has_update=False, latest_tag=None,
@@ -298,22 +679,20 @@ def check_update(channel: str = "master", use_cache: bool = True) -> UpdateCheck
         )
 
     # commit 计数 —— behind = origin 比本地多多少；ahead = 本地比 origin 多多少
-    rc, behind_str, _ = _git("rev-list", "--count", f"HEAD..origin/{channel}")
-    behind = int(behind_str) if rc == 0 and behind_str.isdigit() else 0
-    rc, ahead_str, _ = _git("rev-list", "--count", f"origin/{channel}..HEAD")
-    ahead = int(ahead_str) if rc == 0 and ahead_str.isdigit() else 0
+    behind = git_count_commits_between("HEAD", f"origin/{channel}")
+    ahead = git_count_commits_between(f"origin/{channel}", "HEAD")
 
     latest_tag: Optional[str] = None
     latest_version: Optional[str] = None
-    rc, tag_at_remote, _ = _git("describe", "--tags", "--exact-match", latest)
-    if rc == 0:
+    tag_at_remote = git_exact_tag(latest)
+    if tag_at_remote:
         latest_tag = tag_at_remote
         if _RELEASE_TAG_RE.match(tag_at_remote):
             latest_version = tag_at_remote
     if not latest_tag:
-        # describe 精确匹配失败 → fallback：取最近 reachable tag（保留兼容）
-        rc, tag_near, _ = _git("describe", "--tags", "--abbrev=0", latest)
-        if rc == 0:
+        # exact-match 失败 → fallback：取最近 reachable tag（保留兼容）
+        tag_near = git_nearest_tag(latest)
+        if tag_near:
             latest_tag = tag_near
             if channel == "master" and _RELEASE_TAG_RE.match(tag_near):
                 latest_version = tag_near
@@ -369,19 +748,16 @@ def check_update(channel: str = "master", use_cache: bool = True) -> UpdateCheck
 
 def resolve_ref(ref: str) -> Optional[str]:
     """`git rev-parse <ref>` → 完整 sha；ref 不存在 → None。"""
-    rc, out, _ = _git("rev-parse", ref)
-    return out if rc == 0 else None
+    return git_rev_parse(ref)
 
 
 def exact_tag_for(sha: str) -> Optional[str]:
-    """`git describe --tags --exact-match <sha>` → tag 字符串；commit 上没打
-    tag → None。给 UI 用：rollback 按钮文案优先显示 tag（v0.6.0）而非
-    裸 sha；没 tag 时 caller fallback 到 sha[:8]。
+    """HEAD 上的 exact tag；commit 上没打 tag → None。给 UI 用：rollback
+    按钮文案优先显示 tag（v0.6.0）而非裸 sha；没 tag 时 caller fallback。
     """
     if not sha:
         return None
-    rc, out, _ = _git("describe", "--tags", "--exact-match", sha)
-    return out if rc == 0 and out else None
+    return git_exact_tag(sha)
 
 
 # Self-update feature 引入的 marker 文件。target 上不存在 → 切过去就丢失
@@ -390,13 +766,8 @@ _SELF_UPDATE_MARKER = "studio/services/updater.py"
 
 
 def target_has_self_update(target_ref: str) -> bool:
-    """目标 ref 上是否带 webui 自更新 feature。
-
-    用 `git cat-file -e <ref>:<path>` 测文件存在性（不读内容，效率比 git
-    show 高且无 stdout 输出污染）。失败 / ref 无效 → False（保守）。
-    """
-    rc, _, _ = _git("cat-file", "-e", f"{target_ref}:{_SELF_UPDATE_MARKER}")
-    return rc == 0
+    """目标 ref 上是否带 webui 自更新 feature。失败 / ref 无效 → False（保守）。"""
+    return git_path_exists_in_ref(target_ref, _SELF_UPDATE_MARKER)
 
 
 _REQ_NAME_RE = re.compile(r"^([A-Za-z0-9_\-\.\[\]]+)")
@@ -438,8 +809,8 @@ def requirements_diff(target_ref: str) -> RequirementsDiff:
     target_resolved = resolve_ref(target_ref)
     if target_resolved is None:
         return RequirementsDiff()
-    rc, target_text, _ = _git("show", f"{target_resolved}:requirements.txt")
-    if rc != 0:
+    target_text = git_show_file(target_resolved, "requirements.txt")
+    if target_text is None:
         return RequirementsDiff()
 
     cur_path = REPO_ROOT / "requirements.txt"
@@ -473,14 +844,11 @@ def dev_commits(limit: int = 10) -> DevCommitsResult:
     """
     limit = max(1, min(50, int(limit)))
 
-    rc_fetch, _, fetch_err = _git("fetch", "origin", "dev", timeout=GIT_FETCH_TIMEOUT)
-    fetched = rc_fetch == 0
+    fetched, fetch_err = git_fetch("dev", timeout=GIT_FETCH_TIMEOUT)
     fetch_error_msg: Optional[str] = None if fetched else f"git fetch dev: {fetch_err[:200]}"
 
-    # NUL-separated 字段格式：%H sha · %h short · %s subject · %cI iso time · %an author
-    fmt = "%H%x00%h%x00%s%x00%cI%x00%an"
-    rc, out, log_err = _git("log", f"-{limit}", f"--format={fmt}", "origin/dev")
-    if rc != 0:
+    ok, log_commits, log_err = git_log("origin/dev", limit)
+    if not ok:
         # 没 origin/dev ref（首次 clone 未跟 dev / 远端被删等）
         return DevCommitsResult(
             commits=[],
@@ -488,19 +856,13 @@ def dev_commits(limit: int = 10) -> DevCommitsResult:
             error=fetch_error_msg or f"git log origin/dev: {log_err[:200]}",
         )
 
-    commits: list[DevCommit] = []
-    for line in out.splitlines():
-        parts = line.split("\x00")
-        if len(parts) < 5:
-            continue
-        commits.append(DevCommit(
-            sha=parts[0],
-            short_sha=parts[1],
-            msg=parts[2],
-            time_iso=parts[3],
-            author=parts[4],
-        ))
-
+    commits: list[DevCommit] = [
+        DevCommit(
+            sha=c.sha, short_sha=c.short_sha, msg=c.msg,
+            time_iso=c.time_iso, author=c.author,
+        )
+        for c in log_commits
+    ]
     return DevCommitsResult(commits=commits, fetched=fetched, error=fetch_error_msg)
 
 
@@ -588,17 +950,17 @@ def apply_pending(emit: Callable[[str], None] = print) -> bool:
 
     # 2. git fetch
     log_lines.append("[git] fetch origin")
-    rc, _, stderr = _git("fetch", "origin", timeout=GIT_FETCH_TIMEOUT)
-    if rc != 0:
-        log_lines.append(f"[git fetch] FAILED rc={rc} stderr={stderr}")
+    ok, stderr = git_fetch(None, timeout=GIT_FETCH_TIMEOUT)
+    if not ok:
+        log_lines.append(f"[git fetch] FAILED stderr={stderr}")
         emit(f"[updater] git fetch failed: {stderr[:200]}")
         return _done("failed", f"git fetch: {stderr[:120]}", cur.commit, False)
 
     # 3. git reset --hard target（避免 merge conflict；working tree 干净已验过）
     log_lines.append(f"[git] reset --hard {target}")
-    rc, _, stderr = _git("reset", "--hard", target, timeout=GIT_PULL_TIMEOUT)
-    if rc != 0:
-        log_lines.append(f"[git reset] FAILED rc={rc} stderr={stderr}")
+    ok, stderr = git_reset_hard(target, timeout=GIT_PULL_TIMEOUT)
+    if not ok:
+        log_lines.append(f"[git reset] FAILED stderr={stderr}")
         emit(f"[updater] git reset failed: {stderr[:200]}")
         return _done("failed", f"git reset: {stderr[:120]}", cur.commit, False)
 
@@ -688,8 +1050,7 @@ def rollback_target() -> Optional[str]:
         return None
     if not sha:
         return None
-    rc, _, _ = _git("cat-file", "-e", sha)
-    return sha if rc == 0 else None
+    return sha if git_object_exists(sha) else None
 
 
 def request_rollback() -> Optional[str]:

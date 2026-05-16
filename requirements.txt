@@ -41,6 +41,9 @@ python-multipart>=0.0.6
 pydantic>=2.5.0
 pyyaml>=6.0.1
 psutil>=5.9.0
+# 纯 Python git 实现，给 webui self-update 用（ADR 0005）。脱离系统 git
+# 依赖，覆盖 git clone / zip 解压 / 系统没装 git 三种安装场景。
+dulwich>=0.21
 # topbar 系统监控小组件用：拿 GPU/VRAM。非 NVIDIA / 无驱动时 services/system_stats.py
 # 会 try/except 兜底，前端只显示 CPU/RAM；安装本身在所有平台都能 succeed (纯 Python wrapper)。
 # 用 nvidia-ml-py (NVIDIA 官方维护、新版 PyTorch 也是切到它) 而不是老的 pynvml；
