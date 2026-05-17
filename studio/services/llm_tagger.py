@@ -7,16 +7,19 @@ caption files or rendered TXT captions.
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import io
 import json
 import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Iterator, Optional
 from urllib.parse import urlparse
 
 import requests
+from requests.adapters import HTTPAdapter
 from PIL import Image, ImageOps
 
 from .. import secrets
@@ -54,6 +57,26 @@ Please return JSON only, no Markdown:
 To make this a real generation test rather than a tiny ping, include 8 to 12
 short English words in the summary and keep every item as a complete phrase.
 """
+
+
+class _RequestRateLimiter:
+    def __init__(self, requests_per_second: float) -> None:
+        self._interval = 0.0
+        if requests_per_second > 0:
+            self._interval = 1.0 / requests_per_second
+        self._lock = threading.Lock()
+        self._next_at = 0.0
+
+    def wait(self) -> None:
+        if self._interval <= 0:
+            return
+        with self._lock:
+            now = time.monotonic()
+            sleep_for = max(0.0, self._next_at - now)
+            base = max(now, self._next_at)
+            self._next_at = base + self._interval
+        if sleep_for > 0:
+            time.sleep(sleep_for)
 
 
 def _openai_compatible_endpoint(base_url: str, *, kind: str) -> str:
@@ -370,6 +393,7 @@ class LLMTagger:
             for k, v in (overrides or {}).items()
             if v is not None and k != "api_key"
         }
+        self._external_session = session is not None
         self._session = session or requests.Session()
 
     def _cfg(self) -> "secrets.LLMPresetConfig":
@@ -409,33 +433,78 @@ class LLMTagger:
     ) -> Iterator[TagResult]:
         cfg = self._cfg()
         total = len(image_paths)
-        for i, p in enumerate(image_paths):
-            try:
-                on_progress(i, total)
-                data_url = self._image_to_data_url(
-                    p,
-                    max_side=cfg.max_side,
-                    quality=cfg.jpeg_quality,
-                    max_image_mb=cfg.max_image_mb,
-                )
-                content = self._call_with_retry(cfg, data_url, p)
-                if cfg.output_format == "text":
-                    text = content.strip()
-                    if not text:
-                        raise RuntimeError("LLM 返回空内容")
-                    yield {"image": p, "tags": [text], "caption": text}
-                else:
-                    parsed = self._parse_json_text(content)
-                    caption_json = self._normalize_llm_payload(parsed)
-                    yield {
-                        "image": p,
-                        "tags": caption_json_to_tags(caption_json),
-                        "caption": caption_json_to_text(caption_json),
-                        "caption_json": caption_json,
-                    }
-            except Exception as exc:  # noqa: BLE001
-                yield {"image": p, "tags": [], "error": str(exc)}
-            on_progress(i + 1, total)
+        on_progress(0, total)
+        workers = min(max(1, int(cfg.concurrency or 1)), max(1, total))
+        if workers <= 1 or total <= 1:
+            done = 0
+            rate_limiter = _RequestRateLimiter(cfg.requests_per_second)
+            for p in image_paths:
+                yield self._tag_one(cfg, p, rate_limiter=rate_limiter)
+                done += 1
+                on_progress(done, total)
+            return
+
+        self._ensure_session_pool(workers)
+        rate_limiter = _RequestRateLimiter(cfg.requests_per_second)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(self._tag_one, cfg, p, rate_limiter=rate_limiter): p
+                for p in image_paths
+            }
+            done = 0
+            for future in concurrent.futures.as_completed(futures):
+                p = futures[future]
+                try:
+                    result = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    result = {"image": p, "tags": [], "error": str(exc)}
+                yield result
+                done += 1
+                on_progress(done, total)
+
+    def _tag_one(
+        self,
+        cfg: "secrets.LLMPresetConfig",
+        image_path: Path,
+        *,
+        rate_limiter: _RequestRateLimiter,
+    ) -> TagResult:
+        try:
+            data_url = self._image_to_data_url(
+                image_path,
+                max_side=cfg.max_side,
+                quality=cfg.jpeg_quality,
+                max_image_mb=cfg.max_image_mb,
+            )
+            content = self._call_with_retry(
+                cfg,
+                data_url,
+                image_path,
+                rate_limiter=rate_limiter,
+            )
+            if cfg.output_format == "text":
+                text = content.strip()
+                if not text:
+                    raise RuntimeError("LLM 返回空内容")
+                return {"image": image_path, "tags": [text], "caption": text}
+            parsed = self._parse_json_text(content)
+            caption_json = self._normalize_llm_payload(parsed)
+            return {
+                "image": image_path,
+                "tags": caption_json_to_tags(caption_json),
+                "caption": caption_json_to_text(caption_json),
+                "caption_json": caption_json,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"image": image_path, "tags": [], "error": str(exc)}
+
+    def _ensure_session_pool(self, workers: int) -> None:
+        if self._external_session:
+            return
+        pool_size = max(1, int(workers))
+        adapter = HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
+        self._session.mount("http://", adapter)
+        self._session.mount("https://", adapter)
 
     def _headers(self, cfg: "secrets.LLMPresetConfig") -> dict[str, str]:
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
@@ -448,6 +517,8 @@ class LLMTagger:
         cfg: "secrets.LLMPresetConfig",
         data_url: str,
         image_path: Path,
+        *,
+        rate_limiter: _RequestRateLimiter | None = None,
     ) -> str:
         last_exc: Optional[Exception] = None
         for attempt in range(1, cfg.max_retries + 1):
@@ -460,6 +531,8 @@ class LLMTagger:
                         cfg.base_url, kind="chat/completions"
                     )
                     body = self._chat_payload(cfg, data_url, image_path)
+                if rate_limiter is not None:
+                    rate_limiter.wait()
                 started = time.monotonic()
                 logger.info(
                     "LLM tagger POST %s model=%s endpoint=%s image=%s timeout=%ss",

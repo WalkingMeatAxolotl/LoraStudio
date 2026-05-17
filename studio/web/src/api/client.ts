@@ -162,6 +162,8 @@ export interface LLMPreset {
   max_image_mb: number
   timeout: number
   max_retries: number
+  concurrency: number
+  requests_per_second: number
 }
 
 export interface LLMTaggerConfig {

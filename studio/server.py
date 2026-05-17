@@ -1568,6 +1568,8 @@ class LLMTaggerOverrides(BaseModel):
     max_tokens: Optional[int] = None
     timeout: Optional[int] = None
     max_retries: Optional[int] = None
+    concurrency: Optional[int] = None
+    requests_per_second: Optional[float] = None
     max_side: Optional[int] = None
     jpeg_quality: Optional[int] = None
     max_image_mb: Optional[float] = None

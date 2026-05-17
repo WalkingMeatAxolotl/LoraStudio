@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -74,6 +76,27 @@ def _sse_response(*payloads: dict):
     return r
 
 
+class _SlowSession:
+    def __init__(self, delay: float = 0.05) -> None:
+        self.delay = delay
+        self.active = 0
+        self.max_active = 0
+        self.calls = 0
+        self.lock = threading.Lock()
+
+    def post(self, *args, **kwargs):
+        with self.lock:
+            self.calls += 1
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        try:
+            time.sleep(self.delay)
+            return _chat_response('{"tags":["ink"]}')
+        finally:
+            with self.lock:
+                self.active -= 1
+
+
 def test_is_available_requires_model(isolated_secrets) -> None:
     secrets.update(
         {"llm_tagger": {"presets": [{"id": "style_json", "model": ""}]}}
@@ -140,6 +163,27 @@ def test_chat_completions_tag_accepts_sse_delta_stream(
 
     assert result["tags"] == ["ink"]
     assert result["caption"] == "ink"
+
+
+def test_tag_uses_configured_concurrency(
+    isolated_secrets, tmp_path: Path
+) -> None:
+    secrets.update(
+        {"llm_tagger": {"presets": [{"id": "style_json", "concurrency": 3}]}}
+    )
+    sess = _SlowSession()
+    tagger = llm_tagger.LLMTagger(session=sess)
+    imgs = [_png(tmp_path / f"{i}.png") for i in range(4)]
+    progress: list[tuple[int, int]] = []
+
+    results = list(tagger.tag(imgs, on_progress=lambda d, t: progress.append((d, t))))
+
+    assert len(results) == 4
+    assert all(r["tags"] == ["ink"] for r in results)
+    assert sess.calls == 4
+    assert sess.max_active >= 2
+    assert progress[0] == (0, 4)
+    assert progress[-1] == (4, 4)
 
 
 def test_uses_editable_prompt_preset(isolated_secrets, tmp_path: Path) -> None:
