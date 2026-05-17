@@ -124,10 +124,12 @@ def run(ctx: TrainingContext) -> None:
                 # 自适应采样器（如 InfoNoise）记录原始 per-sample MSE（不受 huber/loss_weighting 等
                 # 加工影响）；跟训练 loss 解耦保证 InfoNoise 论文一致性。
                 # baseline 采样器是 no-op，无需 if 守卫。
-                _raw_mse_per_sample = F.mse_loss(pred.float(), target.float(), reduction="none").detach()
-                _raw_mse = _raw_mse_per_sample.mean(
-                    dim=list(range(1, _raw_mse_per_sample.dim()))
-                )
+                # 用 no_grad 避免构造 autograd 元数据（比 .detach() 少一份 grad_fn 开销）。
+                with torch.no_grad():
+                    _raw_mse_per_sample = F.mse_loss(pred.float(), target.float(), reduction="none")
+                    _raw_mse = _raw_mse_per_sample.mean(
+                        dim=list(range(1, _raw_mse_per_sample.dim()))
+                    )
                 ctx.timestep_sampler.record(t.detach(), _raw_mse)
                 # 按样本加权（正则集可降低权重）
                 if "loss_weight" in batch:

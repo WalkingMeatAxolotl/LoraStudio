@@ -26,7 +26,13 @@ from training.losses.protocol import LossProtocol
 
 
 def test_mse_matches_f_mse_loss_bitwise():
-    """MseLoss.compute 必须等价于历史 F.mse_loss(reduction='none')。"""
+    """MseLoss.compute 必须 bit-for-bit 等价于历史 F.mse_loss(reduction='none')。
+
+    用 torch.equal（严格逐 byte 比较）而不是 assert_close（默认 rtol=1.3e-6）——
+    PR #75 docstring 反复声明 "bit-for-bit" 语义，必须 codify 这条不变式。
+    若未来 MseLoss 内部重排 ops 引入 numerically equivalent 但 byte-different 实现，
+    本测试会失败，提醒重新评估 "bit-for-bit" 承诺。
+    """
     torch.manual_seed(0)
     pred = torch.randn(2, 3, 4, 4)
     target = torch.randn(2, 3, 4, 4)
@@ -34,7 +40,7 @@ def test_mse_matches_f_mse_loss_bitwise():
 
     expected = F.mse_loss(pred, target, reduction="none")
     actual = MseLoss().compute(pred, target, t)
-    torch.testing.assert_close(actual, expected)
+    assert torch.equal(actual, expected)
 
 
 def test_mse_ignores_t():
@@ -213,6 +219,82 @@ def test_compute_shape_and_finite_on_latent_like_input(loss):
 # ---------------------------------------------------------------------------
 # InfoNoise × loss_type 解耦集成测试
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# HuberLoss dtype / shape edge cases
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+def test_huber_handles_low_precision_dtypes(dtype):
+    """bf16 / fp16 下 huber 必须不崩溃、输出 dtype 一致、数值合法。
+
+    huber.py:50 用 `torch.where(abs_diff < delta_b, quad, lin)`，要求 abs_diff /
+    delta_b 跟 pred 同 dtype。若未来重构把 delta cast 写错（如保留 fp32 比较），
+    autocast 下会出现 dtype mismatch 或 silent 截断。
+    """
+    torch.manual_seed(0)
+    pred = torch.randn(2, 3, 4, 4, dtype=dtype)
+    target = torch.randn(2, 3, 4, 4, dtype=dtype)
+    t = torch.rand(2)
+    huber = HuberLoss(c=0.15)
+    out = huber.compute(pred, target, t)
+    assert out.dtype == dtype
+    assert torch.isfinite(out).all()
+    assert (out >= 0).all()
+
+
+def test_huber_handles_5d_input_shape():
+    """huber.py:43 `delta.view(-1, *([1] * (pred.dim() - 1)))` 应能处理任意 pred.dim()。
+
+    复现 video latent 场景：pred shape (B, C, T, H, W) 是 5D。delta_b 必须能广播到 5D。
+    """
+    torch.manual_seed(0)
+    pred = torch.randn(2, 4, 3, 8, 8)  # (B, C, T, H, W) 5D
+    target = torch.randn(2, 4, 3, 8, 8)
+    t = torch.rand(2)
+    huber = HuberLoss(c=0.15)
+    out = huber.compute(pred, target, t)
+    assert out.shape == pred.shape
+    assert torch.isfinite(out).all()
+
+
+def test_huber_handles_3d_input_shape():
+    """3D 输入（如 sequence-style latent）也应工作。"""
+    torch.manual_seed(0)
+    pred = torch.randn(4, 16, 32)
+    target = torch.randn(4, 16, 32)
+    t = torch.rand(4)
+    huber = HuberLoss(c=0.15)
+    out = huber.compute(pred, target, t)
+    assert out.shape == pred.shape
+
+
+# ---------------------------------------------------------------------------
+# validate_schema_consistency 失配检测
+# ---------------------------------------------------------------------------
+
+
+def test_validate_schema_consistency_detects_extra_builder(monkeypatch):
+    """BUILDERS 多了个 schema 没列的 key 时，consistency check 必须抛错。"""
+    from training.losses import BUILDERS as ORIG_BUILDERS
+
+    fake_builders = dict(ORIG_BUILDERS)
+    fake_builders["ghost"] = lambda args: None  # schema 没这选项
+    monkeypatch.setattr("training.losses.BUILDERS", fake_builders)
+    with pytest.raises(RuntimeError, match="loss 注册与 schema 不同步"):
+        validate_schema_consistency()
+
+
+def test_validate_schema_consistency_detects_missing_builder(monkeypatch):
+    """BUILDERS 少了 schema Literal 里的 key 时，consistency check 必须抛错。"""
+    from training.losses import BUILDERS as ORIG_BUILDERS
+
+    fake_builders = {k: v for k, v in ORIG_BUILDERS.items() if k != "huber"}
+    monkeypatch.setattr("training.losses.BUILDERS", fake_builders)
+    with pytest.raises(RuntimeError, match="loss 注册与 schema 不同步"):
+        validate_schema_consistency()
 
 
 def test_infonoise_raw_mse_decoupled_from_loss_type():

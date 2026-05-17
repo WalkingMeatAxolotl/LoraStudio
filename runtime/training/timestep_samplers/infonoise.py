@@ -226,6 +226,8 @@ def build(args, total_steps: Optional[int]) -> InfoNoiseScheduler:
     logger.info(
         f"InfoNoise 已启用：K={scheduler.K}, N_warm={scheduler.N_warm}, "
         f"M={scheduler.M}, B={scheduler.B}, beta={scheduler.beta}, "
-        f"baseline={scheduler.baseline_mode}(shift={scheduler.baseline_shift})"
+        f"baseline={scheduler.baseline_mode}(shift={scheduler.baseline_shift}, "
+        f"mix_low_prob={scheduler.baseline_mix_low_prob}, "
+        f"timestep_schedule_shift={scheduler.baseline_timestep_schedule_shift})"
     )
     return scheduler

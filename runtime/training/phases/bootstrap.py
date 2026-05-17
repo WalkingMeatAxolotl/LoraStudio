@@ -80,6 +80,12 @@ def run(ctx: TrainingContext) -> None:
     ctx.sample_dir.mkdir(exist_ok=True)
     ctx.wandb_monitor = init_wandb_monitor(args, ctx.output_dir, ctx.config_path)
 
+    # Loss 函数（mse / huber；通过 losses/ plugin registry 派发）
+    # 不依赖 total_steps，跟 timestep_sampler/scheduler 不同；放 bootstrap 而非
+    # optimizer phase 避免架构错位。
+    from training.losses import build_loss
+    ctx.loss_fn = build_loss(args)
+
     # 训练监控状态写入（PP6.1）：永远开启，文件路径优先来自 --monitor-state-file，
     # 否则落到 output_dir/monitor_state.json。Studio 前端通过 /api/state?task_id=
     # 读这个文件，不再启动训练侧 HTTP server（Studio 自己是 monitor）。

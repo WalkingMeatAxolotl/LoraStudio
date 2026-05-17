@@ -388,7 +388,7 @@ class TrainingConfig(BaseModel):
     )
     timestep_mix_low_prob: float = Field(
         0.0, ge=0.0, le=1.0,
-        description="【时间步采样】mixed_* 模式下走偏置端的样本比例（0 = 全 uniform；典型 0.15-0.30）",
+        description="【时间步采样】mixed_* 模式下走偏置端的样本比例（0 = 全 uniform；典型 0.15-0.30；仅 mixed_uniform_low / mixed_uniform_logit 生效，其他 mode 忽略）",
         json_schema_extra=_meta(
             "noise_schedule",
             show_when="timestep_sampling!=uniform",
@@ -512,6 +512,16 @@ class TrainingConfig(BaseModel):
             raise ValueError(
                 "optimizer_type=prodigy_plus_schedulefree requires lr_scheduler=none "
                 "(Schedule-Free 不需要 scheduler；强行叠加会破坏 averaged weights)."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_detail_inv_t_range(self) -> "TrainingConfig":
+        """detail_inv_t 加权曲线的 min 必须 <= max；fail-fast 取代历史的静默 swap。"""
+        if self.detail_inv_t_min > self.detail_inv_t_max:
+            raise ValueError(
+                f"detail_inv_t_min ({self.detail_inv_t_min}) 不能大于 "
+                f"detail_inv_t_max ({self.detail_inv_t_max})。"
             )
         return self
 

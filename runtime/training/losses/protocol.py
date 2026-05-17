@@ -23,6 +23,12 @@ class LossProtocol(Protocol):
 
     用 Protocol 而不是 ABC：mse 用纯函数包装 / huber 用 class 实现，
     不想强制继承。runtime_checkable 让单测 `isinstance` 校验仍能用。
+
+    **签名稳定性约定**：当前 compute(pred, target, t) 是 v1 签名。未来若引入
+    LPIPS / SNR-aware / classifier-free guidance 等需要额外上下文的 loss，
+    会以 keyword-only `*, ctx=None` 形式追加（向后兼容；不传时旧实现继续工作）。
+    新写的 loss 实现建议提前预留 `def compute(self, pred, target, t, *, ctx=None)`
+    签名以避免未来 break；调用方（loop.py）目前不传 ctx，传时机另行公告。
     """
 
     def compute(
@@ -34,7 +40,7 @@ class LossProtocol(Protocol):
         """返回 per-element loss tensor，shape 与 pred/target 一致（不做 reduction）。
 
         pred / target — Flow Matching velocity 预测 vs 目标，shape (B, C, *spatial)
-        t              — 当前 batch 的时间步 (B,)，仅 schedule 依赖 t 的 loss
-                         （如 huber_schedule=snr）需要；mse 等可忽略
+        t              — 当前 batch 的时间步 (B,)，仅 t-dependent loss 需要；
+                         mse / constant-δ huber 可忽略
         """
         ...

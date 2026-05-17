@@ -17,9 +17,12 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import torch
+
+if TYPE_CHECKING:
+    from training.losses.protocol import LossProtocol
 
 
 @dataclass
@@ -62,7 +65,7 @@ class TrainingContext:
     total_steps: Optional[int] = None
     scheduler: Any = None
     timestep_sampler: Any = None    # training.timestep_samplers.TimestepSamplerProtocol
-    loss_fn: Any = None             # training.losses.LossProtocol
+    loss_fn: Optional["LossProtocol"] = None
 
     # ─── resume_phase 填充 ───
     global_step: int = 0

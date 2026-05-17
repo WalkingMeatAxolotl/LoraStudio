@@ -49,11 +49,8 @@ def compute_loss_weight(
         snr = ((1 - t_c) / t_c) ** 2
         w = torch.minimum(torch.tensor(float(min_snr_gamma), device=t.device) / snr, torch.ones_like(t_c))
     elif scheme == "detail_inv_t":
-        lo = float(detail_inv_t_min)
-        hi = float(detail_inv_t_max)
-        if lo > hi:
-            lo, hi = hi, lo
-        w = (1.0 / t_c).clamp(min=lo, max=hi)
+        # min/max 已由 TrainingConfig.model_validator 校验过 min <= max，此处直接用
+        w = (1.0 / t_c).clamp(min=float(detail_inv_t_min), max=float(detail_inv_t_max))
     elif scheme == "cosmap":
         bot = (1 - 2 * t_c + 2 * t_c ** 2).clamp(min=eps)
         w = 2.0 / (math.pi * bot)

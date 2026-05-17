@@ -257,3 +257,52 @@ def test_infonoise_default_baseline_params_unchanged():
     s = InfoNoiseScheduler(K=32, N_warm=100, M=10, B=10, N_min=1)
     assert s.baseline_mix_low_prob == 0.0
     assert s.baseline_timestep_schedule_shift == 1.0
+
+
+def test_infonoise_cdf_path_ignores_baseline_timestep_schedule_shift():
+    """codify PR #73 核心声明：CDF 就绪后正式阶段不读 baseline_timestep_schedule_shift。
+
+    InfoNoise 是 paper-sensitive 区（I-MMSE 假设依赖自适应 CDF）。baseline shift
+    只在 warmup 路径 (_cdf_values is None) 生效；正式阶段必须无视该字段，否则
+    违反论文采样分布。若未来重构把 baseline shift 误用到 CDF 路径，本测试 detect。
+
+    参考 [[feedback_verify_paper_before_fixing_algo]]——P0-2 EMA 翻转事故同根。
+    """
+    import numpy as np
+
+    # 两个 scheduler 用极端不同的 baseline shift（1.0 vs 5.0）
+    s1 = InfoNoiseScheduler(K=16, N_warm=100, M=5, B=10, N_min=1,
+                            baseline_timestep_schedule_shift=1.0)
+    s2 = InfoNoiseScheduler(K=16, N_warm=100, M=5, B=10, N_min=1,
+                            baseline_timestep_schedule_shift=5.0)
+    # 手动 set 完全相同的 CDF（强制走正式阶段路径）
+    cdf = np.linspace(0.0, 1.0, 17)
+    s1._cdf_values = cdf
+    s2._cdf_values = cdf
+    # 正式阶段采样：CDF 路径用 np.interp + torch.rand，跟 baseline shift 无关
+    # 同种子 + 同 CDF → 输出 bit-for-bit 一致
+    torch.manual_seed(42)
+    t1 = s1.sample(2048, "cpu")
+    torch.manual_seed(42)
+    t2 = s2.sample(2048, "cpu")
+    torch.testing.assert_close(t1, t2, rtol=0, atol=0)
+
+
+def test_infonoise_warmup_path_respects_baseline_timestep_schedule_shift():
+    """对偶检查：warmup 路径（_cdf_values is None）确实读 baseline shift，统计上有差异。
+
+    跟上面 test_infonoise_cdf_path_ignores_* 配对——保两条路径各司其职。
+    """
+    s1 = InfoNoiseScheduler(K=16, N_warm=100, M=5, B=10, N_min=1,
+                            baseline_mode="uniform",
+                            baseline_timestep_schedule_shift=1.0)
+    s2 = InfoNoiseScheduler(K=16, N_warm=100, M=5, B=10, N_min=1,
+                            baseline_mode="uniform",
+                            baseline_timestep_schedule_shift=5.0)
+    assert s1._cdf_values is None and s2._cdf_values is None
+    torch.manual_seed(0)
+    t1 = s1.sample(4096, "cpu")
+    torch.manual_seed(0)
+    t2 = s2.sample(4096, "cpu")
+    # baseline_uniform + shift=5 应推高均值（Möbius 变换 s>1 推向高噪声端）
+    assert t2.mean().item() > t1.mean().item() + 0.1
