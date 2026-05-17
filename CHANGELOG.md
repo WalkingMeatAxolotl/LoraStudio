@@ -6,6 +6,60 @@
 
 ---
 
+## [0.8.1] — 2026-05-16
+
+版本面板单视图 + 通道偏好与 git 解耦（ADR 0005）+ zip 用户一键启用自动更新
+
+### 新增
+
+- **zip 解压安装用户一键初始化 git 仓库（启用自动更新）**
+  ADR 0002 当时只支持 git clone 部署；zip 解压用户因为没有 `.git/`，
+  版本面板全员 unknown、自更新功能完全用不了。这版加自动 normalize：
+
+  - **版本面板顶部 banner**：检测到 zip 模式时显示「启用自动更新」按钮
+    + 文案；没装 git 时改文案为「先安装 git」+ 官网链接
+  - **bootstrap 流程**：`git init` → `git remote add origin <URL>` →
+    `git fetch origin master --tags` → 优先 anchor 在 `v{__version__}`
+    tag（让 working tree 看上去干净）；reset `--mixed` 不动 working
+    tree，原 zip 文件原样保留
+  - **可配置上游 URL**：fork 维护者可通过 env var
+    `ANIMA_STUDIO_ORIGIN_URL` 覆盖默认值
+  - 不支持「dev 分支 zip」场景（端用户走的是 master zip，这是开发者
+    自测场景）
+
+### 变更
+
+- **版本面板单视图 + 通道（master/dev）作为偏好与 git 状态解耦（#81）**
+  ADR 0005：之前「通道」绑死在 git 工作树状态上（branch 名 + `git reset
+  --hard`），release 直后会出现「装的 v0.8.0」+「↑落后 2 commits」+
+  「切到 dev 没反应」的矛盾解读。新模型把通道理解为**用户视图偏好**：
+
+  - **同屏只显示当前通道**（不再 master + dev 并排），避免"两个通道
+    都活着"的视觉混乱
+  - **切 toggle 不动 git**，纯写 `system.update_channel` 到
+    `secrets.json`；真正"切到 dev HEAD" / "更新到 vX.Y.Z" 是独立按钮
+  - **后端新「装了什么」分类** `installed_kind`（stable / dev / custom），
+    按 commit hash + tree 比对推断，取代前端读 `branch` 做判断
+  - **文案脱离 git 词汇**：「↑落后 N commits」→「有新稳定版 vX.Y.Z」/
+    「已是最新」；不再出现 commits / sha / branch
+  - 旧 `show_dev_channel` 一次性迁移到 `update_channel`，写时双写
+    保持向下兼容
+
+### 修复
+
+- **版本面板 E2E 回归 3 项（rollback 文案 / preflight / dev 卡 fetch race）（#82）**
+  ADR 0005 重做后续：
+
+  - rollback 文案在 stable / dev 两种 installed_kind 下分流，不再
+    一律显示「回滚到 vX.Y.Z」
+  - preflight panel 在通道偏好与 git 状态不一致时不再展示矛盾的
+    切换目标
+  - dev 卡 fetch race：`devCommits` 和 `devCheck` 拆独立 useEffect，
+    避免一个先 resolve 触发 re-render 跳过另一个的 fetch（症状：
+    "切到 dev HEAD"按钮看上去 enabled 但点了 no-op）
+
+---
+
 ## [0.8.0] — 2026-05-16
 
 预处理流水线 + InfoNoise 训练 + Generate/Preset UX 大改（ADR 0004）

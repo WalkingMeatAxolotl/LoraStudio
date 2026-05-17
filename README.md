@@ -1,6 +1,6 @@
 # AnimaLoraStudio
 
-[![Version](https://img.shields.io/badge/version-0.8.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.1-blue)](CHANGELOG.md)
 
 **端到端流水线**：从 Booru 抓图 → 筛选 → 打标 → 正则集 → 训练 → 出图测试，全流程在一个浏览器面板里推进。专为 [Anima](https://huggingface.co/circlestone-labs/Anima)（Cosmos DiT 二次元特调）训练优化。
 

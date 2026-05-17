@@ -3646,6 +3646,32 @@ def system_dev_commits(limit: int = 10) -> dict[str, Any]:
     }
 
 
+@app.post("/api/system/init_git")
+def system_init_git() -> dict[str, Any]:
+    """zip 解压用户一键初始化 git 仓库（0.8.1 hotfix）。
+
+    幂等：调用前 / 调用后都跑 `git_repo_status()`，如已是仓库直接返 ok=true。
+    流程见 `updater.bootstrap_git_repo()`：init + remote add origin + fetch master
+    + reset --mixed 到对应 release tag。
+
+    失败状态码：
+    - 500 + error 字符串：git binary 缺失 / fetch 网络问题 / 磁盘问题
+    """
+    from dataclasses import asdict
+    pre = updater.git_repo_status()
+    if pre.is_repo:
+        return {"ok": True, "already_initialized": True}
+
+    result = updater.bootstrap_git_repo()
+    if not result.ok:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "bootstrap_failed", "message": result.error or "未知错误"},
+        )
+
+    return {"ok": True, "already_initialized": False, **asdict(result)}
+
+
 @app.get("/api/system/release_notes")
 def system_release_notes(tag: str) -> dict[str, Any]:
     """读 release_notes.yaml，返回指定 tag 的结构化 release notes。

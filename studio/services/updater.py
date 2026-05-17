@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -49,30 +50,58 @@ UPDATE_CACHE_TTL_SECONDS = 24 * 3600
 GIT_FETCH_TIMEOUT = 30.0
 GIT_PULL_TIMEOUT = 120.0
 
+# zip 解压用户没有 .git/，自更新功能完全失效。bootstrap_git_repo() 一次性
+# 在本地 init + remote add origin + fetch master，之后走正常 self-update 路径。
+# fork 维护者通过 env var ANIMA_STUDIO_ORIGIN_URL 覆盖默认上游 URL。
+DEFAULT_ORIGIN_URL = "https://github.com/WalkingMeatAxolotl/AnimaLoraStudio.git"
+ORIGIN_URL = os.environ.get("ANIMA_STUDIO_ORIGIN_URL", "").strip() or DEFAULT_ORIGIN_URL
+
 
 # ----- 数据类型 -----------------------------------------------------------
 @dataclass
 class VersionInfo:
-    """当前仓库 git 状态。"""
+    """当前仓库 git 状态 + 产品视角的"装了什么"分类。
+
+    产品 UI 应使用 `installed_kind` / `installed_label`，不要依赖 `branch`。
+    切换通道走 `git reset --hard`，不改 branch 名 —— branch 字段只做 debug。
+    """
     version: str               # studio.__version__ (0.6.0)
     commit: str                # 完整 sha
     commit_short: str          # 前 8 位
     commit_time_iso: str       # ISO8601
-    branch: str                # master / dev / detached
+    branch: str                # master / dev / detached / feature-name（debug 用）
     tag: Optional[str]         # HEAD 上的 tag（仅 exact match），无则 None
     is_dirty: bool             # working tree 有未提交改动
+    # ---- 产品 UI 用的「装了什么」分类（前端唯一应该看的字段）----
+    # 真实生产路径里这三个永远由 _classify_install 派生；给默认值只是让单测
+    # 构造 fake VersionInfo 时不用每次都写满（ADR 0005 漏改的 hotfix 同步）。
+    installed_kind: str = "custom"  # "stable" / "dev" / "custom" / "zip"
+    installed_label: str = ""       # 用户可读："v0.8.0" / "dev @ f6f202b · 2026-05-16" / "自定义（feat/foo @ a1b2c3d）" / "v0.8.0（zip 安装）"
+    stable_version: Optional[str] = None  # "vX.Y.Z" 形式，仅 installed_kind=stable 时填；用于版本号比对
+    # ---- zip 模式探测（0.8.1 hotfix）----
+    is_git_repo: bool = True   # False = REPO_ROOT/.git 缺失 / 没有 origin remote（zip 解压用户）
+    git_available: bool = True # False = git binary 不在 PATH
 
 
 @dataclass
 class UpdateCheckResult:
-    """git fetch + 比对结果。"""
+    """git fetch + 比对结果。
+
+    前端应使用 `state` + `installed_version` / `latest_version` / `behind_count`，
+    不要依赖 `commits_ahead`（git 词汇）/ `has_update`（兼容字段）。
+    """
     channel: str               # master / dev
     current_commit: str
     latest_commit: str
-    commits_ahead: int         # local 落后 remote 多少 commit
-    has_update: bool
+    commits_ahead: int         # 内部 debug：local 落后 remote 多少 commit
+    has_update: bool           # 兼容字段 = (state == "update_available")
     latest_tag: Optional[str]  # remote 最新 tag（仅 master 通道有）
     checked_at: float          # epoch
+    # ---- 产品 UI 用的状态机 ----
+    state: str = "up_to_date"  # "up_to_date" / "update_available" / "ahead" / "detached"
+    installed_version: Optional[str] = None  # 当前装的稳定版 tag (vX.Y.Z)，仅 stable 时填
+    latest_version: Optional[str] = None     # 远端最新稳定版 tag（master 通道）
+    behind_count: int = 0      # 前端文案"N 项更新"用（= commits_ahead，但语义更清楚）
     error: Optional[str] = None  # fetch 失败时填
 
 
@@ -127,9 +156,153 @@ def _git(*args: str, timeout: float = 15.0) -> tuple[int, str, str]:
         return 1, "", str(exc)
 
 
+# 稳定版 tag 形如 v0.8.0。HEAD 命中这种 tag 就归类 stable。
+# 第四段（如 v0.8.0-rc1）暂时不在版本面板的"稳定版"语义里，先归 custom。
+_RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
+
+
+# ----- zip 用户检测 + 一键 init（0.8.1 hotfix）---------------------------
+@dataclass
+class GitRepoStatus:
+    """REPO_ROOT 的 git 可用性快照。版本面板用这个决定显示哪类 banner。"""
+    git_available: bool   # git binary 在 PATH（不依赖 .git 存在）
+    has_dot_git: bool     # REPO_ROOT/.git 目录存在
+    has_origin: bool      # origin remote 已配置（蕴含 has_dot_git）
+    @property
+    def is_repo(self) -> bool:
+        """版本面板视角的"可以走自更新"= 三者全 True。"""
+        return self.git_available and self.has_dot_git and self.has_origin
+
+
+def git_repo_status() -> GitRepoStatus:
+    """三态检测：① git binary？② .git/？③ origin remote？
+
+    顺序固定：git binary 不在 PATH → 后两步无意义直接 False（避免误判）。
+    """
+    rc, _, _ = _git("--version")
+    git_available = rc == 0
+    if not git_available:
+        return GitRepoStatus(False, False, False)
+    has_dot_git = (REPO_ROOT / ".git").exists()
+    if not has_dot_git:
+        return GitRepoStatus(True, False, False)
+    rc, _, _ = _git("remote", "get-url", "origin")
+    return GitRepoStatus(True, True, rc == 0)
+
+
+@dataclass
+class BootstrapResult:
+    """bootstrap_git_repo() 结果。anchor = HEAD 最终指向的 ref（vX.Y.Z tag 或 FETCH_HEAD sha）。"""
+    ok: bool
+    anchor: Optional[str] = None
+    anchor_kind: str = ""      # "version_tag" / "master_head"；ok=False 时空
+    error: Optional[str] = None
+
+
+def bootstrap_git_repo() -> BootstrapResult:
+    """zip 解压用户首次启用自更新功能：在 REPO_ROOT 上 init git 仓库。
+
+    流程：
+    1. precondition：git binary 在 PATH（否则返 error，提示用户先装 git）
+    2. .git/ 不存在 → `git init` + `git symbolic-ref HEAD refs/heads/master`
+       （强制 master 默认 branch，避免不同 git 版本 main/master 默认差异）
+    3. origin remote 不存在 → `git remote add origin {ORIGIN_URL}`
+       （ORIGIN_URL 走 env var 覆盖，fork 维护者可配）
+    4. `git fetch origin master --tags`（拉完整 master 历史 + 全部 tag；
+       不带 --depth 保证 dev 通道时间线 / 回滚到任意 commit 可用）
+    5. 找 `v{__version__}` tag：存在则用作 anchor（让 HEAD 指向用户当前装
+       的版本对应的 tag commit，working tree 看上去就"干净"）；不存在则
+       fallback 到 FETCH_HEAD（master HEAD）
+    6. `git reset --mixed {anchor}` —— 更新 HEAD + index，**不动 working
+       tree**。zip 解压的源文件保留原样，不覆盖用户可能的本地修改
+
+    bootstrap 后 _classify_install 大概率回 "stable"（zip 用户的 __version__
+    匹 release tag 且 tree 一致），版本面板正常显示「v0.8.0」+「检查更新」可用。
+
+    不在范围：fetch dev / 拉 dev_commits。用户切到 dev 通道时由 check_update
+    / dev_commits 自己触发首次 fetch dev（多等几秒，可接受）。
+    """
+    status = git_repo_status()
+    if not status.git_available:
+        return BootstrapResult(
+            ok=False,
+            error="git binary 不在 PATH。请先安装 git（https://git-scm.com/downloads）后重启 Studio。",
+        )
+
+    # 1. git init（仅当 .git/ 不存在）
+    if not status.has_dot_git:
+        rc, _, err = _git("init", str(REPO_ROOT))
+        if rc != 0:
+            return BootstrapResult(ok=False, error=f"git init 失败: {err[:200]}")
+        # 强制 default branch = master（git 2.28+ 起 init.defaultBranch 默认可能是 main）
+        rc, _, err = _git("symbolic-ref", "HEAD", "refs/heads/master")
+        if rc != 0:
+            return BootstrapResult(ok=False, error=f"git symbolic-ref 失败: {err[:200]}")
+
+    # 2. origin remote
+    rc, _, _ = _git("remote", "get-url", "origin")
+    if rc != 0:
+        rc, _, err = _git("remote", "add", "origin", ORIGIN_URL)
+        if rc != 0:
+            return BootstrapResult(ok=False, error=f"git remote add 失败: {err[:200]}")
+
+    # 3. fetch master + tags（这一步是大头，30-60 MB）
+    rc, _, err = _git("fetch", "origin", "master", "--tags", timeout=GIT_FETCH_TIMEOUT * 4)
+    if rc != 0:
+        return BootstrapResult(ok=False, error=f"git fetch 失败: {err[:200]}")
+
+    # 4. 选 anchor：优先匹 __version__ 的 release tag
+    anchor_ref: str
+    anchor_kind: str
+    version_tag = f"v{__version__}"
+    if _RELEASE_TAG_RE.match(version_tag):
+        rc, _, _ = _git("rev-parse", "--verify", f"refs/tags/{version_tag}^{{commit}}")
+        if rc == 0:
+            anchor_ref = version_tag
+            anchor_kind = "version_tag"
+        else:
+            anchor_ref = "FETCH_HEAD"
+            anchor_kind = "master_head"
+    else:
+        anchor_ref = "FETCH_HEAD"
+        anchor_kind = "master_head"
+
+    # 5. reset --mixed：更新 HEAD + index，不动 working tree（保留用户文件）
+    rc, _, err = _git("reset", "--mixed", anchor_ref, timeout=GIT_PULL_TIMEOUT)
+    if rc != 0:
+        return BootstrapResult(ok=False, error=f"git reset 失败: {err[:200]}")
+
+    # 解析 anchor sha 给前端 / 日志用
+    rc, anchor_sha, _ = _git("rev-parse", anchor_ref)
+    return BootstrapResult(
+        ok=True,
+        anchor=anchor_sha if rc == 0 else anchor_ref,
+        anchor_kind=anchor_kind,
+    )
+
+
 # ----- 公开 API -----------------------------------------------------------
 def current_version() -> VersionInfo:
-    """读当前仓库状态。git 不可用时返回占位值（不抛）。"""
+    """读当前仓库状态。git 不可用 / zip 解压模式时返回占位值（不抛）。"""
+    repo = git_repo_status()
+    if not repo.is_repo:
+        # zip 模式：没有 .git/ 或 origin remote。版本面板看 is_git_repo
+        # 决定显示 init banner，不再依赖 commit/branch 字段。
+        return VersionInfo(
+            version=__version__,
+            commit="unknown",
+            commit_short="?",
+            commit_time_iso="",
+            branch="detached",
+            tag=None,
+            is_dirty=False,
+            installed_kind="zip",
+            installed_label=f"v{__version__}（zip 安装）",
+            stable_version=None,
+            is_git_repo=False,
+            git_available=repo.git_available,
+        )
+
     rc, head, _ = _git("rev-parse", "HEAD")
     commit = head if rc == 0 else "unknown"
     short = commit[:8] if commit != "unknown" else "?"
@@ -149,6 +322,15 @@ def current_version() -> VersionInfo:
     rc, status, _ = _git("status", "--porcelain", "--untracked-files=no")
     is_dirty = rc == 0 and bool(status)
 
+    installed_kind, installed_label, stable_version = _classify_install(
+        commit=commit,
+        exact_tag=exact_tag,
+        branch=branch,
+        short=short,
+        commit_time_iso=ctime_iso,
+        is_dirty=is_dirty,
+    )
+
     return VersionInfo(
         version=__version__,
         commit=commit,
@@ -157,7 +339,71 @@ def current_version() -> VersionInfo:
         branch=branch,
         tag=exact_tag,
         is_dirty=is_dirty,
+        installed_kind=installed_kind,
+        installed_label=installed_label,
+        stable_version=stable_version,
+        is_git_repo=True,
+        git_available=True,
     )
+
+
+def _classify_install(
+    *,
+    commit: str,
+    exact_tag: Optional[str],
+    branch: str,
+    short: str,
+    commit_time_iso: str,
+    is_dirty: bool,
+) -> tuple[str, str, Optional[str]]:
+    """推断 (installed_kind, installed_label, stable_version)。
+
+    优先级：
+    1. HEAD 命中 vX.Y.Z release tag → stable（最常见的稳定版情形）
+    2. `__version__` 匹 vX.Y.Z tag 且当前 commit 与 tag commit 的 tree 一致 → stable
+       覆盖 "release commit 在 dev 上，tag 打在 master 的 merge commit 上" 这种
+       release 直后场景（两个 commit 内容相同，用户语义上装的就是稳定版）
+    3. commit == origin/dev HEAD → dev
+    4. else → custom（feature branch / detached / 任意 commit）
+
+    返回三元组：
+    - installed_kind / installed_label：给前端做 UI 文案的
+    - stable_version：仅 stable 时为 "vX.Y.Z"，否则 None；后端做版本号比对用
+
+    label 是给用户看的字符串；dirty 时追加"· 未提交修改"。
+    """
+    dirty_suffix = " · 未提交修改" if is_dirty else ""
+
+    # 1. HEAD 命中 release tag
+    if exact_tag and _RELEASE_TAG_RE.match(exact_tag):
+        return "stable", f"{exact_tag}{dirty_suffix}", exact_tag
+
+    if commit and commit != "unknown":
+        # 2. __version__ 字符串匹 release tag 且 tree 一致
+        version_tag = f"v{__version__}"
+        if _RELEASE_TAG_RE.match(version_tag):
+            rc, tag_commit, _ = _git("rev-parse", f"{version_tag}^{{commit}}")
+            if rc == 0 and tag_commit:
+                if tag_commit == commit:
+                    # 极少触发（exact_tag 应已捕获），保险起见
+                    return "stable", f"{version_tag}{dirty_suffix}", version_tag
+                # tree 一致 = 文件内容完全相同（merge / cherry-pick 常见）
+                rc_diff, _, _ = _git("diff", "--quiet", commit, tag_commit)
+                if rc_diff == 0:
+                    return "stable", f"{version_tag}{dirty_suffix}", version_tag
+
+        # 3. commit == origin/dev HEAD
+        rc, dev_head, _ = _git("rev-parse", "origin/dev")
+        if rc == 0 and dev_head and commit == dev_head:
+            date_part = ""
+            if commit_time_iso:
+                date_part = f" · {commit_time_iso[:16].replace('T', ' ')}"
+            return "dev", f"dev @ {short}{date_part}{dirty_suffix}", None
+
+    # 4. custom
+    if not branch or branch == "detached":
+        return "custom", f"自定义（@ {short}）{dirty_suffix}", None
+    return "custom", f"自定义（{branch} @ {short}）{dirty_suffix}", None
 
 
 def check_update(channel: str = "master", use_cache: bool = True) -> UpdateCheckResult:
@@ -165,6 +411,13 @@ def check_update(channel: str = "master", use_cache: bool = True) -> UpdateCheck
 
     channel 仅接受 'master' / 'dev'。Master 走 24h 缓存（cache 写到磁盘）；
     dev 不写缓存（开发者主动检查，避免污染 master 的"有更新"信号）。
+
+    输出走 state 状态机（up_to_date / update_available / ahead / detached）。
+    state 推断：
+    - master 通道：优先比较 installed_version vs latest_version（版本号语义），
+      没有版本号（installed_kind != stable）时回落到 commit 比较
+    - dev 通道：直接比较 commit hash；commits_ahead>0 → update_available；
+      =0 但 sha 不一致 → ahead（你超前）或 detached
     """
     if channel not in ("master", "dev"):
         raise ValueError(f"invalid channel: {channel}")
@@ -175,13 +428,16 @@ def check_update(channel: str = "master", use_cache: bool = True) -> UpdateCheck
             return cached
 
     cur = current_version()
+    checked_at = time.time()
 
     rc, _, stderr = _git("fetch", "origin", channel, timeout=GIT_FETCH_TIMEOUT)
     if rc != 0:
         return UpdateCheckResult(
             channel=channel, current_commit=cur.commit, latest_commit="",
             commits_ahead=0, has_update=False, latest_tag=None,
-            checked_at=time.time(), error=f"git fetch failed: {stderr[:200]}",
+            checked_at=checked_at, state="detached", behind_count=0,
+            installed_version=None, latest_version=None,
+            error=f"git fetch failed: {stderr[:200]}",
         )
 
     rc, latest, _ = _git("rev-parse", f"origin/{channel}")
@@ -189,27 +445,73 @@ def check_update(channel: str = "master", use_cache: bool = True) -> UpdateCheck
         return UpdateCheckResult(
             channel=channel, current_commit=cur.commit, latest_commit="",
             commits_ahead=0, has_update=False, latest_tag=None,
-            checked_at=time.time(), error=f"git rev-parse origin/{channel} failed",
+            checked_at=checked_at, state="detached", behind_count=0,
+            installed_version=None, latest_version=None,
+            error=f"git rev-parse origin/{channel} failed",
         )
 
-    rc, ahead_str, _ = _git("rev-list", "--count", f"HEAD..origin/{channel}")
-    commits_ahead = int(ahead_str) if rc == 0 and ahead_str.isdigit() else 0
-    has_update = commits_ahead > 0 and cur.commit != latest
+    # commit 计数 —— behind = origin 比本地多多少；ahead = 本地比 origin 多多少
+    rc, behind_str, _ = _git("rev-list", "--count", f"HEAD..origin/{channel}")
+    behind = int(behind_str) if rc == 0 and behind_str.isdigit() else 0
+    rc, ahead_str, _ = _git("rev-list", "--count", f"origin/{channel}..HEAD")
+    ahead = int(ahead_str) if rc == 0 and ahead_str.isdigit() else 0
 
     latest_tag: Optional[str] = None
-    if channel == "master" and has_update:
-        rc, tag, _ = _git("describe", "--tags", "--abbrev=0", latest)
+    latest_version: Optional[str] = None
+    rc, tag_at_remote, _ = _git("describe", "--tags", "--exact-match", latest)
+    if rc == 0:
+        latest_tag = tag_at_remote
+        if _RELEASE_TAG_RE.match(tag_at_remote):
+            latest_version = tag_at_remote
+    if not latest_tag:
+        # describe 精确匹配失败 → fallback：取最近 reachable tag（保留兼容）
+        rc, tag_near, _ = _git("describe", "--tags", "--abbrev=0", latest)
         if rc == 0:
-            latest_tag = tag
+            latest_tag = tag_near
+            if channel == "master" and _RELEASE_TAG_RE.match(tag_near):
+                latest_version = tag_near
+
+    installed_version = cur.stable_version
+
+    # ---- 状态机推断 ----
+    if channel == "master":
+        # 版本号优先：版本号相同（已是最新稳定版）→ up_to_date
+        if installed_version and latest_version and installed_version == latest_version:
+            state = "up_to_date"
+        elif installed_version and latest_version and installed_version != latest_version:
+            # 装了稳定版且远端有更新稳定版 → 提示更新
+            state = "update_available"
+        elif cur.commit == latest:
+            # 没装 stable（custom / dev）但 commit 与 origin/master 完全一致
+            state = "up_to_date"
+        elif behind > 0:
+            state = "update_available"
+        elif ahead > 0:
+            state = "ahead"
+        else:
+            state = "detached"
+    else:  # dev
+        if cur.commit == latest:
+            state = "up_to_date"
+        elif behind > 0:
+            state = "update_available"
+        elif ahead > 0:
+            state = "ahead"
+        else:
+            state = "detached"
 
     result = UpdateCheckResult(
         channel=channel,
         current_commit=cur.commit,
         latest_commit=latest,
-        commits_ahead=commits_ahead,
-        has_update=has_update,
+        commits_ahead=behind,
+        has_update=(state == "update_available"),
         latest_tag=latest_tag,
-        checked_at=time.time(),
+        checked_at=checked_at,
+        state=state,
+        installed_version=installed_version,
+        latest_version=latest_version,
+        behind_count=behind,
     )
 
     if channel == "master":
