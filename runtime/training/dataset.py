@@ -425,6 +425,7 @@ class CachedLatentDataset(Dataset):
     def __init__(self, base_dataset, vae, device, dtype, cache_dir=None):
         import numpy as np
         self.base_dataset = base_dataset
+        self.base_image_dataset = self._get_base_image_dataset(base_dataset)
         self.np = np
         # 获取原始数据集的 samples 列表
         self.samples = self._get_base_samples(base_dataset)
@@ -440,6 +441,27 @@ class CachedLatentDataset(Dataset):
             return self._get_base_samples(dataset.dataset)
         return []
 
+    def _get_base_image_dataset(self, dataset):
+        if hasattr(dataset, "samples") and hasattr(dataset, "bucket_mgr"):
+            return dataset
+        if hasattr(dataset, "dataset"):
+            return self._get_base_image_dataset(dataset.dataset)
+        return None
+
+    def _expected_bucket_size(self, img_path):
+        base = self.base_image_dataset
+        if base is None:
+            return None
+        try:
+            from PIL import Image
+            with Image.open(img_path) as img:
+                if getattr(base, "bucket_mgr", None):
+                    return base.bucket_mgr.get_bucket(img.width, img.height)
+                resolution = int(getattr(base, "resolution"))
+                return (resolution, resolution)
+        except Exception:
+            return None
+
     def _get_npz_path(self, img_path):
         """获取图像对应的 npz 缓存路径"""
         img_path = Path(img_path)
@@ -453,11 +475,17 @@ class CachedLatentDataset(Dataset):
         if npz_path.stat().st_mtime < img_path.stat().st_mtime:
             return False
         try:
-            data = self.np.load(npz_path)
-            if "latent" not in data.files:
-                npz_path.unlink()
-                logger.debug(f"已删除不兼容缓存: {npz_path.name}")
-                return False
+            with self.np.load(npz_path) as data:
+                if "latent" not in data.files:
+                    npz_path.unlink()
+                    logger.debug(f"已删除不兼容缓存: {npz_path.name}")
+                    return False
+                expected_bucket = self._expected_bucket_size(img_path)
+                if expected_bucket is not None:
+                    if "bucket_w" not in data.files or "bucket_h" not in data.files:
+                        return False
+                    if (int(data["bucket_w"]), int(data["bucket_h"])) != expected_bucket:
+                        return False
         except Exception:
             try:
                 npz_path.unlink()
@@ -492,9 +520,9 @@ class CachedLatentDataset(Dataset):
             npz_path = self._get_npz_path(self.samples[i]["image"])
             if not npz_path.exists():
                 continue
-            data = self.np.load(npz_path)
-            latent = data["latent"]
-            s = latent.shape
+            with self.np.load(npz_path) as data:
+                latent = data["latent"]
+                s = latent.shape
             if len(s) == 5:
                 _, _, _, h, w = s
             else:
