@@ -254,11 +254,12 @@ class TrainingConfig(BaseModel):
     )
     lr_scheduler: Literal["none", "cosine", "cosine_with_restart"] = Field(
         "none",
-        description="学习率调度（选 prodigy_plus_schedulefree 时必须 none）",
+        description="学习率调度（none = 常数；Prodigy / PPSF 固定为 none）",
         json_schema_extra=_meta(
             "training",
-            disable_when="optimizer_type==prodigy_plus_schedulefree",
-            disable_hint="Schedule-Free 自带调度",
+            disable_when="optimizer_type==prodigy||optimizer_type==prodigy_plus_schedulefree",
+            disable_value="none",
+            disable_hint="Prodigy 固定为常数学习率",
         ),
     )
     lr_scheduler_t0: int = Field(
@@ -520,13 +521,12 @@ class TrainingConfig(BaseModel):
         return migrate_legacy_attention(data)
 
     @model_validator(mode="after")
-    def _validate_ppsf_scheduler(self) -> "TrainingConfig":
-        """ProdigyPlusScheduleFree 内置 Schedule-Free，外面再叠 scheduler 会破坏
-        averaged weights 的收敛保证。UI/CLI/YAML 三个入口在这里统一拦下来。"""
-        if self.optimizer_type == "prodigy_plus_schedulefree" and self.lr_scheduler != "none":
+    def _validate_prodigy_scheduler(self) -> "TrainingConfig":
+        """Prodigy 系列固定使用常数学习率，外部 scheduler 统一拦截。"""
+        if self.optimizer_type in {"prodigy", "prodigy_plus_schedulefree"} and self.lr_scheduler != "none":
             raise ValueError(
-                "optimizer_type=prodigy_plus_schedulefree requires lr_scheduler=none "
-                "(Schedule-Free 不需要 scheduler；强行叠加会破坏 averaged weights)."
+                f"optimizer_type={self.optimizer_type} requires lr_scheduler=none "
+                "(Prodigy 系列固定使用常数学习率)."
             )
         return self
 

@@ -264,7 +264,7 @@
         "loha": "LoHa"
       },
       "lrScheduler": {
-        "none": "无",
+        "none": "常数",
         "cosine": "Cosine",
         "cosineWithRestart": "Cosine 重启"
       },
@@ -298,7 +298,7 @@
     },
     "disableHints": {
       "learning_rate": "Prodigy 接管学习率",
-      "lr_scheduler": "Schedule-Free 自带调度",
+      "lr_scheduler": "Prodigy 固定为常数学习率",
       "timestep_sampling": "InfoNoise 接管时间步采样",
       "timestep_shift": "InfoNoise 接管时间步采样"
     },
@@ -333,7 +333,7 @@
       "grad_checkpoint": "梯度检查点（省显存，约增加 1/3 计算量）",
       "grad_accum": "梯度累积步数（有效 batch = batch_size × grad_accum）",
       "learning_rate": "学习率（Prodigy 必须为 1.0）",
-      "lr_scheduler": "学习率调度（选 prodigy_plus_schedulefree 时必须 none）",
+      "lr_scheduler": "学习率调度（none = 常数；Prodigy / PPSF 固定为 none）",
       "lr_scheduler_t0": "cosine_with_restart 首次周期",
       "lr_scheduler_t_mult": "cosine_with_restart 周期倍数",
       "lr_scheduler_eta_min": "最小学习率",

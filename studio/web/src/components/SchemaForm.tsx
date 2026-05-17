@@ -42,6 +42,15 @@ export default function SchemaForm({
     onChange({ ...values, [name]: v })
 
   const props = schema.schema.properties
+  const isProdigyOptimizer = values.optimizer_type === 'prodigy' || values.optimizer_type === 'prodigy_plus_schedulefree'
+  const shouldDisableField = (name: string, prop: typeof props[string]) => {
+    if (name === 'lr_scheduler' && isProdigyOptimizer) return true
+    return !!prop.disable_when && evalShowWhen(prop.disable_when, values)
+  }
+  const takeoverValueForField = (name: string, prop: typeof props[string]) => {
+    if (name === 'lr_scheduler' && isProdigyOptimizer) return 'none'
+    return prop.disable_value ?? prop.default
+  }
 
   // disable_when 触发时把字段值强制回到 default。避免「切换 optimizer 到
   // prodigy_plus_schedulefree 之后 lr_scheduler 还停在 cosine，保存时被 pydantic
@@ -50,9 +59,8 @@ export default function SchemaForm({
     let nextValues = values
     let changed = false
     for (const [name, prop] of Object.entries(props)) {
-      if (!prop.disable_when) continue
-      if (!evalShowWhen(prop.disable_when, values)) continue
-      const takeoverValue = prop.disable_value ?? prop.default
+      if (!shouldDisableField(name, prop)) continue
+      const takeoverValue = takeoverValueForField(name, prop)
       if (takeoverValue !== undefined && values[name] !== takeoverValue) {
         nextValues = { ...nextValues, [name]: takeoverValue }
         changed = true
@@ -104,11 +112,9 @@ export default function SchemaForm({
                 {fields.map((name) => {
                   const prop = props[name]
                   if (!evalShowWhen(prop.show_when, values)) return null
-                  // disable_when（schema 驱动条件 disable，如 PPSF → lr_scheduler）
+                  // disable_when（schema 驱动条件 disable，如 Prodigy → lr_scheduler）
                   // 优先级低于全局 disabledFields（项目预填）。
-                  const conditionallyDisabled =
-                    !!prop.disable_when &&
-                    evalShowWhen(prop.disable_when, values)
+                  const conditionallyDisabled = shouldDisableField(name, prop)
                   const isDisabled =
                     disabledSet.has(name) || conditionallyDisabled
                   const hint = disabledSet.has(name)

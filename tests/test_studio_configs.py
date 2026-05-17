@@ -101,6 +101,15 @@ def test_ppsf_accepts_none_scheduler() -> None:
     assert cfg.optimizer_type == "prodigy_plus_schedulefree"
 
 
+def test_prodigy_rejects_non_none_scheduler() -> None:
+    """普通 Prodigy 也固定常数学习率，不允许外部 scheduler。"""
+    payload = TrainingConfig().model_dump(mode="python")
+    payload["optimizer_type"] = "prodigy"
+    payload["lr_scheduler"] = "cosine"
+    with pytest.raises(Exception):
+        TrainingConfig.model_validate(payload)
+
+
 # ---------------------------------------------------------------------------
 # /api/presets HTTP
 # ---------------------------------------------------------------------------

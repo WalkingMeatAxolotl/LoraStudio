@@ -264,7 +264,7 @@
         "loha": "LoHa"
       },
       "lrScheduler": {
-        "none": "None",
+        "none": "Constant",
         "cosine": "Cosine",
         "cosineWithRestart": "Cosine with restart"
       },
@@ -298,7 +298,7 @@
     },
     "disableHints": {
       "learning_rate": "Prodigy controls the learning rate",
-      "lr_scheduler": "Schedule-Free has its own scheduler",
+      "lr_scheduler": "Prodigy uses a constant learning rate",
       "timestep_sampling": "InfoNoise controls timestep sampling",
       "timestep_shift": "InfoNoise controls timestep sampling"
     },
@@ -333,7 +333,7 @@
       "grad_checkpoint": "Gradient checkpointing (saves VRAM, roughly +1/3 compute)",
       "grad_accum": "Gradient accumulation steps (effective batch = batch_size × grad_accum)",
       "learning_rate": "Learning rate (Prodigy requires 1.0)",
-      "lr_scheduler": "Learning-rate scheduler (must be none when using prodigy_plus_schedulefree)",
+      "lr_scheduler": "Learning-rate scheduler (none = constant; Prodigy / PPSF lock this to none)",
       "lr_scheduler_t0": "First cosine_with_restart cycle",
       "lr_scheduler_t_mult": "cosine_with_restart cycle multiplier",
       "lr_scheduler_eta_min": "Minimum learning rate",
