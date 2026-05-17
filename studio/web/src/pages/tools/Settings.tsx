@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { TFunction } from 'i18next'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import {
   api,
   DEFAULT_WD14_MODELS,
@@ -39,6 +39,7 @@ import {
   isDevSwitchButtonDisabled,
 } from '../../lib/versionPanel'
 import { applyDensity, applyTheme, getStoredDensity, getStoredTheme, setStoredDensity, setStoredTheme, type Density, type Theme } from '../../lib/theme'
+import i18n, { getStoredLangWithDefault, setStoredLang } from '../../i18n'
 
 const MASK = '***'
 
@@ -58,54 +59,54 @@ type Section =
 
 type Tab = 'dataset' | 'tagging' | 'preprocess' | 'training' | 'monitor' | 'testing' | 'appearance' | 'system'
 
-const TAB_LIST: { id: Tab; label: string }[] = [
-  { id: 'dataset', label: '数据集' },
-  { id: 'preprocess', label: '预处理' },
-  { id: 'tagging', label: '打标' },
-  { id: 'training', label: '训练' },
-  { id: 'monitor', label: '监控' },
-  { id: 'testing', label: '测试' },
-  { id: 'appearance', label: '页面' },
-  { id: 'system', label: '系统' },
+const TAB_LIST: { id: Tab; labelKey: string }[] = [
+  { id: 'dataset', labelKey: 'settings.tabDataset' },
+  { id: 'preprocess', labelKey: 'settings.tabPreprocess' },
+  { id: 'tagging', labelKey: 'settings.tabTagging' },
+  { id: 'training', labelKey: 'settings.tabTraining' },
+  { id: 'monitor', labelKey: 'settings.tabMonitor' },
+  { id: 'testing', labelKey: 'settings.tabGenerate' },
+  { id: 'appearance', labelKey: 'settings.tabAppearance' },
+  { id: 'system', labelKey: 'settings.tabSystem' },
 ]
 
 // 每个 tab 的 section index — 用于右侧 sticky 导航。id 与各 section 的 DOM id
 // 对应；label 在导航里直接显示。修改 section 顺序时记得同步这里。
-const TAB_SECTIONS: Record<Tab, { id: string; label: string }[]> = {
+const TAB_SECTIONS: Record<Tab, { id: string; labelKey: string }[]> = {
   dataset: [
-    { id: 'gelbooru', label: 'Gelbooru' },
-    { id: 'danbooru', label: 'Danbooru' },
-    { id: 'download-global', label: '下载（全局）' },
+    { id: 'gelbooru', labelKey: 'settings.gelbooru' },
+    { id: 'danbooru', labelKey: 'settings.danbooru' },
+    { id: 'download-global', labelKey: 'settings.downloadGlobal' },
   ],
   preprocess: [
-    { id: 'upscalers', label: '放大器' },
+    { id: 'upscalers', labelKey: 'settings.upscalers' },
   ],
   tagging: [
-    { id: 'llm-tagger', label: 'LLM Tagger' },
-    { id: 'wd14', label: 'WD14' },
-    { id: 'cltagger', label: 'CLTagger' },
-    { id: 'onnxruntime', label: 'ONNX Runtime' },
+    { id: 'llm-tagger', labelKey: 'settings.llmTagger' },
+    { id: 'wd14', labelKey: 'settings.wd14' },
+    { id: 'cltagger', labelKey: 'settings.clTagger' },
+    { id: 'onnxruntime', labelKey: 'settings.onnxRuntime' },
   ],
   training: [
-    { id: 'download-source', label: '模型下载源' },
-    { id: 'queue', label: '队列调度' },
-    { id: 'pytorch', label: 'PyTorch' },
-    { id: 'flash-attn', label: 'Flash Attention' },
-    { id: 'xformers', label: 'xformers' },
-    { id: 'models', label: '训练模型' },
+    { id: 'download-source', labelKey: 'settings.modelSource' },
+    { id: 'queue', labelKey: 'settings.queueSchedule' },
+    { id: 'pytorch', labelKey: 'settings.torch' },
+    { id: 'flash-attn', labelKey: 'settings.flashAttn' },
+    { id: 'xformers', labelKey: 'settings.xformers' },
+    { id: 'models', labelKey: 'settings.trainingModels' },
   ],
   monitor: [
-    { id: 'wandb', label: 'Weights & Biases' },
+    { id: 'wandb', labelKey: 'settings.wandb' },
   ],
   testing: [
-    { id: 'preview', label: '中间步预览' },
+    { id: 'preview', labelKey: 'settings.intermediatePreview' },
   ],
   appearance: [
-    { id: 'display', label: '显示' },
+    { id: 'display', labelKey: 'settings.display' },
   ],
   system: [
-    { id: 'version', label: '版本' },
-    { id: 'service', label: '服务' },
+    { id: 'version', labelKey: 'settings.version' },
+    { id: 'service', labelKey: 'settings.service' },
   ],
 }
 
@@ -298,14 +299,14 @@ export default function SettingsPage() {
     setDownloadBusy((s) => new Set(s).add(key))
     try {
       await api.startModelDownload({ model_id, variant })
-      toast(`开始下载 ${key}`, 'success')
+      toast(t('settings.downloadStarted', { name: key }), 'success')
       await reloadCatalog()
     } catch (e) {
       toast(String(e), 'error')
     } finally {
       setDownloadBusy((s) => { const n = new Set(s); n.delete(key); return n })
     }
-  }, [reloadCatalog, toast])
+  }, [reloadCatalog, t, toast])
 
   useEffect(() => {
     api
@@ -349,10 +350,10 @@ export default function SettingsPage() {
       setDraft(next)
       // 候选 model_ids 改了之后，catalog 里的 wd14 variants 需要刷新
       void reloadCatalog()
-      toast('已保存', 'success')
+      toast(t('settings.saved'), 'success')
     } catch (e) {
       setError(String(e))
-      toast('保存失败', 'error')
+      toast(t('settings.saveFailed'), 'error')
     } finally {
       setSaving(false)
     }
@@ -384,7 +385,7 @@ export default function SettingsPage() {
       idx += 1
       id = `preset_${idx}`
     }
-    const next: LLMPreset = _makeFallbackPreset(id, `新预设 ${idx}`, 'json')
+    const next: LLMPreset = _makeFallbackPreset(id, t('settings.newPresetLabel', { n: idx }), 'json')
     next.builtin = false
     update('llm_tagger', 'presets', [...draft.llm_tagger.presets, next])
     update('llm_tagger', 'current_preset', id)
@@ -406,10 +407,10 @@ export default function SettingsPage() {
   }
 
   const saveAsNewPreset = async () => {
-    const label = await prompt('新预设名称', {
-      defaultValue: `${currentPreset.label} 副本`,
+    const label = await prompt(t('settings.newPresetName'), {
+      defaultValue: t('settings.presetCopy', { label: currentPreset.label }),
       placeholder: 'my-preset',
-      validate: (v) => (v.trim() ? null : '不能为空'),
+      validate: (v) => (v.trim() ? null : t('settings.nameRequired')),
     })
     if (!label) return
     const slug = label.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'preset'
@@ -455,10 +456,10 @@ export default function SettingsPage() {
       })
       setServer(result.secrets)
       setDraft(result.secrets)
-      toast(`已读取 ${result.items.length} 个模型`, 'success')
+      toast(t('settings.modelsLoaded', { n: result.items.length }), 'success')
     } catch (e) {
       setError(String(e))
-      toast(`读取模型列表失败：${e}`, 'error')
+      toast(t('settings.modelsLoadFailed', { error: String(e) }), 'error')
     } finally {
       setLlmModelsBusy(false)
     }
@@ -479,7 +480,7 @@ export default function SettingsPage() {
         temperature: currentPreset.temperature,
       })
       // 把延迟 / HTTP 状态 / 错误预览拼进 toast，避免移除 ConnBar 后用户拿不到详情。
-      const parts: string[] = [result.ok ? 'LLM 连接通过' : 'LLM 连接失败']
+      const parts: string[] = [result.ok ? t('settings.llmTestOk') : t('settings.llmTestNotOk')]
       if (result.elapsed_ms > 0) parts.push(`${result.elapsed_ms} ms`)
       if (result.status_code !== null) parts.push(`HTTP ${result.status_code}`)
       if (!result.ok) {
@@ -488,7 +489,7 @@ export default function SettingsPage() {
       }
       toast(parts.join(' · '), result.ok ? 'success' : 'error')
     } catch (e) {
-      toast(`LLM 连接测试失败：${String(e)}`, 'error')
+      toast(t('settings.llmTestFailed', { error: String(e) }), 'error')
     } finally {
       setLlmTestBusy(false)
     }
@@ -505,17 +506,17 @@ export default function SettingsPage() {
   // Tab nav 抽出来传给 PageHeader 的 tabs prop（取代旧的 subtitle 位置）。
   const tabNav = (
     <nav className="flex gap-1 -mb-4">
-      {TAB_LIST.map((t) => (
+      {TAB_LIST.map((item) => (
         <button
-          key={t.id}
-          onClick={() => switchTab(t.id)}
+          key={item.id}
+          onClick={() => switchTab(item.id)}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            tab === t.id
+            tab === item.id
               ? 'border-accent text-fg-primary'
               : 'border-transparent text-fg-tertiary hover:text-fg-secondary'
           }`}
         >
-          {t.label}
+          {t(item.labelKey)}
         </button>
       ))}
     </nav>
@@ -524,7 +525,7 @@ export default function SettingsPage() {
   return (
     <div className="flex flex-col h-full min-h-0">
       <PageHeader
-        title="设置"
+        title={t('settings.title')}
         tabs={tabNav}
         sticky
         actions={
@@ -533,7 +534,7 @@ export default function SettingsPage() {
             disabled={!dirty || saving}
             className="btn btn-primary btn-sm"
           >
-            {saving ? '保存中...' : '保存'}
+            {saving ? t('common.saving') : t('common.save')}
           </button>
         }
       />
@@ -581,7 +582,7 @@ export default function SettingsPage() {
             type="text"
             value={draft.danbooru.username}
             onChange={(e) => update('danbooru', 'username', e.target.value)}
-            placeholder="必填 — danbooru 挂了 Cloudflare 后不再支持匿名"
+            placeholder={t('settings.danbooruUsernamePlaceholder')}
             className={textInputClass}                                  />
         </SettingsField>
         <SettingsField label="api_key">
@@ -596,18 +597,18 @@ export default function SettingsPage() {
             value={draft.danbooru.account_type}
             onChange={(e) => update('danbooru', 'account_type', e.target.value as 'free' | 'gold' | 'platinum')}
             className={textInputClass}          >
-            <option value="free">free（max 2 tag）</option>
-            <option value="gold">gold（max 6 tag）</option>
-            <option value="platinum">platinum（max 12 tag）</option>
+            <option value="free">{t('settings.accountFree')}</option>
+            <option value="gold">{t('settings.accountGold')}</option>
+            <option value="platinum">{t('settings.accountPlatinum')}</option>
           </select>
         </SettingsField>
       </SettingsSection>
 
-      <SettingsSection id="download-global" title="下载（全局）">
+      <SettingsSection id="download-global" title={t('settings.downloadGlobal')}>
         <SettingsField
           label="exclude_tags"
-          desc="逗号分隔"
-          helpTooltip={<p>搜索时自动追加 <code>-tag</code>，Gelbooru / Danbooru 同样生效。</p>}
+          desc={t('settings.commaSeparated')}
+          helpTooltip={<p><Trans i18nKey="settings.excludeTagsHelp" components={{ code: <code /> }} /></p>}
         >
           <input
             type="text"
@@ -617,7 +618,7 @@ export default function SettingsPage() {
                 e.target.value.split(',').map((t) => t.trim().replace(/^-+/, '')).filter(Boolean)
               )
             }
-            placeholder="例：comic, monochrome, lowres"
+            placeholder={t('settings.excludeTagsPlaceholder')}
             className={textInputClass}                                  />
         </SettingsField>
 
@@ -684,7 +685,7 @@ export default function SettingsPage() {
           onCandidatesChange={(next) => update('wd14', 'model_ids', next)}
           t={t}
         />
-        <SettingsField label="local_dir" desc="留空 = 自动 HF 下载">
+        <SettingsField label="local_dir" desc={t('settings.blankAutoHfDownload')}>
           <input
             type="text"
             value={draft.wd14.local_dir ?? ''}
@@ -707,14 +708,14 @@ export default function SettingsPage() {
               className={`${textInputClass} max-w-32`}                              />
           </SettingsField>
         </div>
-        <SettingsField label="blacklist_tags" desc="逗号分隔">
+        <SettingsField label="blacklist_tags" desc={t('settings.commaSeparated')}>
           <input
             type="text"
             value={draft.wd14.blacklist_tags.join(', ')}
             onChange={(e) => update('wd14', 'blacklist_tags', e.target.value.split(',').map((t) => t.trim()).filter(Boolean))}
             className={textInputClass}                                  />
         </SettingsField>
-        <SettingsField label="batch_size" desc="GPU 推理一批塞几张；CPU 自动降到 1">
+        <SettingsField label="batch_size" desc={t('settings.batchSizeHint')}>
           <input
             type="number" min={1} max={64}
             value={draft.wd14.batch_size}
@@ -738,7 +739,7 @@ export default function SettingsPage() {
           onModelIdChange={(id) => update('cltagger', 'model_id', id)}
           t={t}
         />
-        <SettingsField label="local_dir" desc="留空 = 自动 HF 下载">
+        <SettingsField label="local_dir" desc={t('settings.blankAutoHfDownload')}>
           <input
             type="text"
             value={draft.cltagger.local_dir ?? ''}
@@ -769,14 +770,14 @@ export default function SettingsPage() {
             <Bool value={draft.cltagger.add_model_tag} onChange={(v) => update('cltagger', 'add_model_tag', v)} />
           </SettingsField>
         </div>
-        <SettingsField label="blacklist_tags" desc="逗号分隔">
+        <SettingsField label="blacklist_tags" desc={t('settings.commaSeparated')}>
           <input
             type="text"
             value={draft.cltagger.blacklist_tags.join(', ')}
             onChange={(e) => update('cltagger', 'blacklist_tags', e.target.value.split(',').map((t) => t.trim()).filter(Boolean))}
             className={textInputClass}                                  />
         </SettingsField>
-        <SettingsField label="batch_size" desc="GPU 推理一批塞几张；CPU 自动降到 1">
+        <SettingsField label="batch_size" desc={t('settings.batchSizeHint')}>
           <input
             type="number" min={1} max={64}
             value={draft.cltagger.batch_size}
@@ -789,11 +790,11 @@ export default function SettingsPage() {
       </>)}
 
       {tab === 'training' && (<>
-      <SettingsSection id="download-source" title="模型下载源">
+      <SettingsSection id="download-source" title={t('settings.modelSource')}>
         <SettingsField
-          label="下载源"
+          label={t('settings.downloadSource')}
           helpTooltip={
-            <p>魔搭（ModelScope）对国内用户更快；无映射的模型自动回退 HuggingFace。</p>
+            <p>{t('settings.downloadSourceHelp')}</p>
           }
         >
           <DownloadSourceSelect
@@ -809,7 +810,7 @@ export default function SettingsPage() {
             <SettingsField
               label="token"
               helpTooltip={
-                <p>用于 HF 私有 repo 鉴权。公开仓库（含 SmilingWolf WD14 / cella110n CLTagger）不用填。</p>
+                <p>{t('settings.hfTokenHelp')}</p>
               }
             >
               <SensitiveInput
@@ -820,7 +821,7 @@ export default function SettingsPage() {
             </SettingsField>
             <SettingsField
               label="endpoint"
-              helpTooltip={<p>模型下载端点。国内推荐 hf-mirror，海外推荐官方源。</p>}
+              helpTooltip={<p>{t('settings.hfEndpointHelp')}</p>}
             >
               <HFEndpointSelect
                 value={draft.huggingface.endpoint}
@@ -833,8 +834,8 @@ export default function SettingsPage() {
             label="token"
             helpTooltip={
               <>
-                <p>公开模型不用填；私有仓库或限速时需要。</p>
-                <p>使用前请先 <code>pip install modelscope</code> 安装命令行工具。</p>
+                <p>{t('settings.modelscopeTokenHelp')}</p>
+                <p><Trans i18nKey="settings.modelscopeInstallHelp" components={{ code: <code /> }} /></p>
               </>
             }
           >
@@ -847,12 +848,12 @@ export default function SettingsPage() {
         )}
       </SettingsSection>
 
-      <SettingsSection id="queue" title="队列调度">
-        <SettingsField label="允许 GPU 任务与训练并行">
+      <SettingsSection id="queue" title={t('settings.queueSchedule')}>
+        <SettingsField label={t('settings.allowGpuDuringTrain')}>
           <div className="flex items-center gap-3">
             <Bool value={draft.queue.allow_gpu_during_train} onChange={(v) => update('queue', 'allow_gpu_during_train', v)} />
             <span className="text-xs text-warn">
-              WD14 打标推理 onnxruntime-gpu 大约占 ~2 GB；确认训练之外的剩余显存够再打开，否则 OOM
+              {t('settings.allowGpuDuringTrainHint')}
             </span>
           </div>
         </SettingsField>
@@ -876,7 +877,7 @@ export default function SettingsPage() {
 
       {tab === 'monitor' && (<>
       <SettingsSection id="wandb" title="Weights & Biases">
-        <SettingsField label="启用 WandB" desc="打开后所有训练任务都会写入 W&B；不再占用训练配置字段">
+        <SettingsField label={t('settings.enableWandb')} desc={t('settings.enableWandbHint')}>
           <Bool value={draft.wandb.enabled} onChange={(v) => update('wandb', 'enabled', v)} />
         </SettingsField>
         <SettingsField label="api_key">
@@ -895,7 +896,7 @@ export default function SettingsPage() {
             className={textInputClass}
           />
         </SettingsField>
-        <SettingsField label="entity" desc="可选；团队/用户名，留空使用 wandb 默认账号">
+        <SettingsField label="entity" desc={t('settings.wandbEntityHint')}>
           <input
             type="text"
             value={draft.wandb.entity}
@@ -903,7 +904,7 @@ export default function SettingsPage() {
             className={textInputClass}
           />
         </SettingsField>
-        <SettingsField label="base_url" desc="可选；私有 W&B/self-hosted 时填写">
+        <SettingsField label="base_url" desc={t('settings.wandbBaseUrlHint')}>
           <input
             type="text"
             value={draft.wandb.base_url}
@@ -925,9 +926,9 @@ export default function SettingsPage() {
             </select>
           </SettingsField>
           <SettingsField
-            label="记录采样图"
+            label={t('settings.logSamples')}
             helpTooltip={
-              <p>开启后训练采样图会上传到 <code>wandb.ai</code> 公网；私有 IP / NSFW 数据集请关掉，仅保留指标。</p>
+              <p><Trans i18nKey="settings.logSamplesHelp" components={{ code: <code /> }} /></p>
             }
           >
             <Bool value={draft.wandb.log_samples} onChange={(v) => update('wandb', 'log_samples', v)} />
@@ -936,8 +937,8 @@ export default function SettingsPage() {
         {draft.wandb.log_samples && (
           <div className="grid grid-cols-2 gap-3">
             <SettingsField
-              label="采样图最长边"
-              helpTooltip={<p>上传前缩到此像素。原图常 2K+，1216 已够 wandb 浏览。</p>}
+              label={t('settings.sampleMaxSide')}
+              helpTooltip={<p>{t('settings.sampleMaxSideHelp')}</p>}
             >
               <input
                 type="number"
@@ -949,9 +950,9 @@ export default function SettingsPage() {
               />
             </SettingsField>
             <SettingsField
-              label="step 节流"
+              label={t('settings.sampleEveryNSteps')}
               helpTooltip={
-                <p>0 = 不额外节流。&gt; 0 时只在 <code>global_step % N == 0</code> 上传，避免长训练上 GB 级图。</p>
+                <p><Trans i18nKey="settings.sampleEveryNStepsHelp" components={{ code: <code /> }} /></p>
               }
             >
               <input
@@ -1038,9 +1039,10 @@ function SectionIndex({
   sections,
   scrollContainer,
 }: {
-  sections: { id: string; label: string }[]
+  sections: { id: string; labelKey: string }[]
   scrollContainer: RefObject<HTMLDivElement>
 }) {
+  const { t } = useTranslation()
   const [active, setActive] = useState<string>(sections[0]?.id ?? '')
 
   useEffect(() => {
@@ -1086,7 +1088,7 @@ function SectionIndex({
   return (
     <aside className="hidden lg:block">
       <nav className="sticky top-4 flex flex-col gap-0.5">
-        <div className="caption mb-2 px-2">本页索引</div>
+        <div className="caption mb-2 px-2">{t('settings.pageIndex')}</div>
         {sections.map((s) => (
           <button
             key={s.id}
@@ -1097,7 +1099,7 @@ function SectionIndex({
                 : 'border-transparent text-fg-tertiary hover:text-fg-secondary hover:bg-overlay/40'
             }`}
           >
-            {s.label}
+            {t(s.labelKey)}
           </button>
         ))}
       </nav>
@@ -1142,12 +1144,13 @@ function Bool({ value, onChange }: { value: boolean; onChange: (v: boolean) => v
 function SensitiveInput({ value, serverValue, onChange }: {
   value: string; serverValue: string; onChange: (v: string) => void
 }) {
+  const { t } = useTranslation()
   const masked = value === MASK
   return (
     <input
       type="password"
       value={masked ? '' : value}
-      placeholder={serverValue === MASK ? '已保存（不显示），输入新值才覆盖' : ''}
+      placeholder={serverValue === MASK ? t('settings.sensitiveSavedPlaceholder') : ''}
       onChange={(e) => onChange(e.target.value || MASK)}
       className={textInputClass}                />
   )
@@ -1159,15 +1162,16 @@ function SensitiveInput({ value, serverValue, onChange }: {
 // 默认 hf-mirror.com（项目主战场国内）；海外用户切到 huggingface.co；
 // 也支持粘贴自定义 URL（自建反代 / sjtug / 腾讯镜像等）。
 
-const HF_ENDPOINT_PRESETS: { value: string; label: string; hint: string }[] = [
-  { value: 'https://hf-mirror.com', label: 'hf-mirror.com', hint: '国内推荐（社区维护反代）' },
-  { value: '', label: 'huggingface.co', hint: '官方源；海外推荐' },
-  { value: '__custom__', label: '自定义 URL...', hint: '粘贴自建反代 / sjtug / 腾讯等' },
+const HF_ENDPOINT_PRESETS: { value: string; label: string; hintKey: string }[] = [
+  { value: 'https://hf-mirror.com', label: 'hf-mirror.com', hintKey: 'settings.hfMirrorHint' },
+  { value: '', label: 'huggingface.co', hintKey: 'settings.hfOfficialHint' },
+  { value: '__custom__', label: 'Custom URL...', hintKey: 'settings.hfCustomHint' },
 ]
 
 function HFEndpointSelect({ value, onChange }: {
   value: string; onChange: (v: string) => void
 }) {
+  const { t } = useTranslation()
   const isPreset = HF_ENDPOINT_PRESETS.some(p => p.value !== '__custom__' && p.value === value)
   const [mode, setMode] = useState<'preset' | 'custom'>(isPreset ? 'preset' : 'custom')
   const selectedPreset = isPreset
@@ -1192,7 +1196,7 @@ function HFEndpointSelect({ value, onChange }: {
       >
         {HF_ENDPOINT_PRESETS.map(p => (
           <option key={p.value} value={p.value}>
-            {p.label}{p.hint ? ` — ${p.hint}` : ''}
+            {p.label}{p.hintKey ? ` — ${t(p.hintKey)}` : ''}
           </option>
         ))}
       </select>
@@ -1214,14 +1218,15 @@ function HFEndpointSelect({ value, onChange }: {
 function DownloadSourceSelect({ value, onChange }: {
   value: string; onChange: (v: string) => void
 }) {
+  const { t } = useTranslation()
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className={`${textInputClass} max-w-xs`}
     >
-      <option value="huggingface">HuggingFace（含 hf-mirror 等镜像）</option>
-      <option value="modelscope">ModelScope（魔搭社区，国内直连）</option>
+      <option value="huggingface">{t('settings.downloadSourceHuggingface')}</option>
+      <option value="modelscope">{t('settings.downloadSourceModelscope')}</option>
     </select>
   )
 }
@@ -1231,6 +1236,7 @@ function DownloadSourceSelect({ value, onChange }: {
 function ModelIdsEditor({ ids, currentId, onChange }: {
   ids: string[]; currentId: string; onChange: (next: string[]) => void
 }) {
+  const { t } = useTranslation()
   const [draft, setDraft] = useState('')
   const seen = new Set(ids)
 
@@ -1257,7 +1263,7 @@ function ModelIdsEditor({ ids, currentId, onChange }: {
             }`}>
               <code className="font-mono text-fg-primary flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{m}</code>
               {isCurrent ? (
-                <span className="text-xs text-accent">当前</span>
+                <span className="text-xs text-accent">{t('settings.current')}</span>
               ) : (
                 <button onClick={() => remove(m)} className="text-xs text-fg-tertiary hover:text-err bg-transparent border-none cursor-pointer transition-colors">×</button>
               )}
@@ -1271,9 +1277,9 @@ function ModelIdsEditor({ ids, currentId, onChange }: {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
-          placeholder="添加 HuggingFace 模型 ID"
+          placeholder={t('settings.addHfModelId')}
           className={`${textInputClass} flex-1`}                            />
-        <button onClick={add} disabled={!draft.trim() || seen.has(draft.trim())} className="btn btn-secondary btn-sm">+ 添加</button>
+        <button onClick={add} disabled={!draft.trim() || seen.has(draft.trim())} className="btn btn-secondary btn-sm">{t('settings.add')}</button>
       </div>
     </div>
   )
@@ -1299,13 +1305,13 @@ function WD14ModelCard({
   const wd14 = catalog?.wd14
   const wd14Description = translatedCatalogText(MODEL_DESCRIPTION_KEYS, 'wd14', wd14?.description, t)
   if (!wd14) {
-    return <p className="text-fg-tertiary text-xs">加载模型清单...</p>
+    return <p className="text-fg-tertiary text-xs">{t('settings.loadingModelCatalog')}</p>
   }
   return (
     <ModelGroupCard
-      title={wd14.name + '（候选模型）'}
+      title={t('settings.wd14CandidateTitle', { name: wd14.name })}
       helpTooltip={
-        <p>{wd14Description}。选中作为当前 <code>model_id</code>；下载缺的版本。</p>
+        <p><Trans i18nKey="settings.wd14CandidateHelp" values={{ desc: wd14Description }} components={{ code: <code /> }} /></p>
       }
     >
       <ul className="list-none m-0 p-0 flex flex-col gap-1">
@@ -1321,7 +1327,7 @@ function WD14ModelCard({
                 onChange={() => onSelectModelId(v.model_id)}
                 className="shrink-0"
                 style={{ accentColor: 'var(--accent)' }}
-                title="选作 WD14 当前 model_id"
+                title={t('settings.selectWd14ModelId')}
               />
               <code className="font-mono text-fg-primary flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{v.model_id}</code>
               <ModelStatusBadge
@@ -1339,7 +1345,7 @@ function WD14ModelCard({
       </ul>
       <button type="button" onClick={() => setAdvOpen(!advOpen)}
         className="btn btn-ghost btn-sm text-xs text-fg-tertiary self-start">
-        {advOpen ? '▾' : '▸'} 候选编辑（添加/删除自定义 model_id）
+        {advOpen ? '▾' : '▸'} {t('settings.candidateEditor')}
       </button>
       {advOpen && (
         <ModelIdsEditor
@@ -1370,13 +1376,13 @@ function CLTaggerModelCard({
   const cl = catalog?.cltagger
   const clDescription = translatedCatalogText(MODEL_DESCRIPTION_KEYS, 'cltagger', cl?.description, t)
   if (!cl) {
-    return <p className="text-fg-tertiary text-xs">加载模型清单...</p>
+    return <p className="text-fg-tertiary text-xs">{t('settings.loadingModelCatalog')}</p>
   }
   return (
     <ModelGroupCard
-      title={cl.name + '（版本）'}
+      title={t('settings.clTaggerVersionTitle', { name: cl.name })}
       helpTooltip={
-        <p>{clDescription}。仓库：<code>{cl.repo}</code></p>
+        <p><Trans i18nKey="settings.repoHelp" values={{ desc: clDescription, repo: cl.repo }} components={{ code: <code /> }} /></p>
       }
     >
       <ul className="list-none m-0 p-0 flex flex-col gap-1">
@@ -1394,7 +1400,7 @@ function CLTaggerModelCard({
                 onChange={() => onSelectVariant(v)}
                 className="shrink-0"
                 style={{ accentColor: 'var(--accent)' }}
-                title="选作 CLTagger 当前版本"
+                title={t('settings.selectClTaggerVersion')}
               />
               <code className="font-mono text-fg-primary flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{v.label}</code>
               <ModelStatusBadge
@@ -1412,7 +1418,7 @@ function CLTaggerModelCard({
       </ul>
       <button type="button" onClick={() => setAdvOpen(!advOpen)}
         className="btn btn-ghost btn-sm text-xs text-fg-tertiary self-start">
-        {advOpen ? '▾' : '▸'} 自定义 repo（高级）
+        {advOpen ? '▾' : '▸'} {t('settings.customRepoAdvanced')}
       </button>
       {advOpen && (
         <SettingsField label="model_id">
@@ -1491,7 +1497,7 @@ function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError, t }:
     setSelectedAnima(variant)
     try {
       await api.updateSecrets({ models: { selected_anima: variant } })
-      toast(`默认主模型已切到 ${variant}`, 'success')
+      toast(t('settings.mainModelSelected', { name: variant }), 'success')
       await reloadCatalog()
     } catch (e) {
       toast(String(e), 'error')
@@ -1504,7 +1510,7 @@ function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError, t }:
     setSavingRoot(true)
     try {
       await api.updateSecrets({ models: { root: v ? v : null } })
-      toast(v ? `已保存模型根目录: ${v}` : '已恢复默认模型根目录', 'success')
+      toast(v ? t('settings.modelRootSaved', { path: v }) : t('settings.modelRootDefault'), 'success')
       setServerRoot(v ? v : null)
       await reloadCatalog()
     } catch (e) {
@@ -1518,18 +1524,18 @@ function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError, t }:
   const error = catalogError
 
   return (
-    <SettingsSection id="models" title="训练模型（一键下载）">
-      <SettingsField label="模型根目录 (models_root)">
+    <SettingsSection id="models" title={t('settings.trainingModelsOneClick')}>
+      <SettingsField label={t('settings.modelsRoot')}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input
             type="text"
             value={rootDraft}
             onChange={(e) => setRootDraft(e.target.value)}
-            placeholder="留空 = 默认 REPO_ROOT/anima/"
+            placeholder={t('settings.modelsRootPlaceholder')}
             className={`${textInputClass} flex-1`}                                  />
           <button onClick={saveRoot} disabled={!rootDirty || savingRoot} className="btn btn-primary btn-sm"
-            title={rootDirty ? '保存路径配置' : '未修改'}>
-            {savingRoot ? '保存中...' : '保存路径'}
+            title={rootDirty ? t('settings.savePathConfig') : t('settings.notModified')}>
+            {savingRoot ? t('common.saving') : t('settings.savePath')}
           </button>
           <button onClick={() => setRootDraft(serverRoot ?? '')} disabled={!rootDirty || savingRoot}
             className="px-2 py-0.5 text-fg-tertiary bg-transparent border-none cursor-pointer rounded-sm"
@@ -1540,7 +1546,7 @@ function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError, t }:
 
       {error && <div className="text-err text-xs font-mono">{error}</div>}
       {!catalog ? (
-        <p className="text-fg-tertiary text-xs">加载...</p>
+        <p className="text-fg-tertiary text-xs">{t('settings.loadingModelCatalog')}</p>
       ) : (
         <div className="flex flex-col gap-2">
           {/* Anima 主模型 */}
@@ -1548,8 +1554,8 @@ function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError, t }:
             title={catalog.anima_main.name}
             helpTooltip={
               <>
-                <p>{translatedCatalogText(MODEL_DESCRIPTION_KEYS, 'anima_main', catalog.anima_main.description, t)}。仓库：<code>{catalog.anima_main.repo}</code></p>
-                <p>选中的版本会作为<strong>新建 version</strong> 的默认 transformer。</p>
+                <p><Trans i18nKey="settings.repoHelp" values={{ desc: translatedCatalogText(MODEL_DESCRIPTION_KEYS, 'anima_main', catalog.anima_main.description, t), repo: catalog.anima_main.repo }} components={{ code: <code /> }} /></p>
+                <p><Trans i18nKey="settings.defaultTransformerHelp" components={{ strong: <strong /> }} /></p>
               </>
             }
           >
@@ -1567,7 +1573,7 @@ function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError, t }:
                       onChange={() => void pickAnima(v.variant)}
                       className="shrink-0"
                       style={{ accentColor: 'var(--accent)' }}
-                      title={canSelect ? '选作默认主模型' : v.exists ? '下载中...' : '未下载，请先下载'}
+                      title={canSelect ? t('settings.selectDefaultMainModel') : v.exists ? t('settings.downloadInProgress') : t('settings.downloadRequiredFirst')}
                     />
                     <code className="font-mono text-fg-primary w-32 shrink-0">{v.variant}</code>
                     <ModelStatusBadge exists={v.exists} size={v.size} status={dl?.status} />
@@ -1611,7 +1617,7 @@ function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError, t }:
           {Object.values(catalog.downloads).filter((d) => d.status === 'running' || d.status === 'failed').length > 0 && (
             <details className="text-xs">
               <summary className="cursor-pointer text-fg-tertiary">
-                下载日志 ({Object.values(catalog.downloads).filter((d) => d.status === 'running' || d.status === 'failed').length})
+                {t('settings.downloadLogs', { n: Object.values(catalog.downloads).filter((d) => d.status === 'running' || d.status === 'failed').length })}
               </summary>
               <div className="mt-1 flex flex-col gap-2">
                 {Object.values(catalog.downloads).map((d) => (
@@ -1622,7 +1628,7 @@ function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError, t }:
                       {d.message && <span className="text-err overflow-hidden text-ellipsis whitespace-nowrap">{d.message}</span>}
                     </div>
                     <pre className="text-xs font-mono text-fg-tertiary max-h-32 overflow-auto whitespace-pre-wrap m-0">
-                      {d.log_tail.join('\n') || '(等待日志...)'}
+                      {d.log_tail.join('\n') || t('settings.emptyLog')}
                     </pre>
                   </div>
                 ))}
@@ -1653,7 +1659,7 @@ function UpscalerSection({
   const pickUpscaler = async (label: string) => {
     try {
       await api.selectUpscaler(label)
-      toast(`默认放大器: ${label}`, 'success')
+      toast(t('settings.defaultUpscaler', { name: label }), 'success')
       await reloadCatalog()
     } catch (e) {
       toast(String(e), 'error')
@@ -1664,7 +1670,7 @@ function UpscalerSection({
     const repo = customRepo.trim()
     const file = customFile.trim()
     if (!repo || !file) {
-      toast('仓库 / 文件名都要填', 'error')
+      toast(t('settings.repoAndFilenameRequired'), 'error')
       return
     }
     setCustomBusy(true)
@@ -1672,7 +1678,7 @@ function UpscalerSection({
       await api.startUpscalerCustomDownload({
         source: customSource, repo_id: repo, filename: file,
       })
-      toast(`开始下载 ${file}`, 'success')
+      toast(t('settings.downloadStarted', { name: file }), 'success')
       setCustomRepo('')
       setCustomFile('')
       // SSE 推 model_download_changed 会刷 catalog；这里兜底
@@ -1688,17 +1694,17 @@ function UpscalerSection({
   const current = catalog?.upscalers?.current ?? ''
 
   return (
-    <SettingsSection id="upscalers" title="放大器（预处理）">
+    <SettingsSection id="upscalers" title={t('settings.upscalersPreprocess')}>
       {!catalog ? (
-        <p className="text-fg-tertiary text-xs">加载中...</p>
+        <p className="text-fg-tertiary text-xs">{t('common.loading')}</p>
       ) : (
         <div className="flex flex-col gap-2">
           <ModelGroupCard
-            title="可用放大器"
+            title={t('settings.availableUpscalers')}
             helpTooltip={
               <>
-                <p>预处理阶段对小图做超分。文件落在 <code>{catalog.upscalers?.target_dir}</code>。</p>
-                <p>单选选中的就是预处理页默认用的模型。custom 是从下面表单或之前自定义下载来的。</p>
+                <p><Trans i18nKey="settings.upscalersHelpPath" values={{ path: catalog.upscalers?.target_dir }} components={{ code: <code /> }} /></p>
+                <p>{t('settings.upscalersHelpDefault')}</p>
               </>
             }
           >
@@ -1722,7 +1728,7 @@ function UpscalerSection({
                       onChange={() => void pickUpscaler(v.label)}
                       className="shrink-0"
                       style={{ accentColor: 'var(--accent)' }}
-                      title={canSelect ? '选作预处理默认' : v.exists ? '下载中...' : '未下载'}
+                      title={canSelect ? t('settings.selectDefaultPreprocess') : v.exists ? t('settings.downloadInProgress') : t('settings.notDownloaded')}
                     />
                     <div className="flex flex-col min-w-0 flex-1">
                       <div className="flex items-center gap-2">
@@ -1754,17 +1760,17 @@ function UpscalerSection({
           </ModelGroupCard>
 
           <ModelGroupCard
-            title="自定义下载"
+            title={t('settings.customDownload')}
             helpTooltip={
               <>
-                <p>从 HuggingFace 或 ModelScope 拉任意 <code>.pth</code> / <code>.safetensors</code> 放大器。</p>
-                <p>常见来源：<code>Kim2091/*</code>、<code>libfishopen/upscaler</code>、<code>licyks/sd-upscaler-models</code> 等。</p>
-                <p>下完会出现在上面列表里（标记 custom），单选即可启用。</p>
+                <p><Trans i18nKey="settings.customUpscalerHelpTypes" components={{ code: <code /> }} /></p>
+                <p><Trans i18nKey="settings.customUpscalerHelpSources" components={{ code: <code /> }} /></p>
+                <p>{t('settings.customUpscalerHelpEnable')}</p>
               </>
             }
           >
             <div className="flex flex-col gap-2 text-xs">
-              <SettingsField label="源">
+              <SettingsField label={t('settings.source')}>
                 <select
                   value={customSource}
                   onChange={(e) => setCustomSource(e.target.value as 'hf' | 'ms')}
@@ -1775,7 +1781,7 @@ function UpscalerSection({
                   <option value="ms">ModelScope</option>
                 </select>
               </SettingsField>
-              <SettingsField label="仓库 ID">
+              <SettingsField label={t('settings.repoId')}>
                 <input
                   type="text"
                   value={customRepo}
@@ -1784,7 +1790,7 @@ function UpscalerSection({
                   className={`${textInputClass} flex-1 font-mono`}
                 />
               </SettingsField>
-              <SettingsField label="文件名">
+              <SettingsField label={t('common.filename')}>
                 <input
                   type="text"
                   value={customFile}
@@ -1799,7 +1805,7 @@ function UpscalerSection({
                   disabled={customBusy || !customRepo.trim() || !customFile.trim()}
                   className="btn btn-primary btn-sm"
                 >
-                  {customBusy ? '下载中...' : '下载'}
+                  {customBusy ? t('settings.downloadInProgress') : t('common.download')}
                 </button>
               </div>
             </div>
@@ -1808,7 +1814,7 @@ function UpscalerSection({
           {/* 下载日志 */}
           {Object.values(catalog.downloads).filter((d) => d.key.startsWith('upscaler') && (d.status === 'running' || d.status === 'failed')).length > 0 && (
             <details className="text-xs">
-              <summary className="cursor-pointer text-fg-tertiary">放大器下载日志</summary>
+              <summary className="cursor-pointer text-fg-tertiary">{t('settings.upscalerDownloadLogs')}</summary>
               <div className="mt-1 flex flex-col gap-2">
                 {Object.values(catalog.downloads).filter((d) => d.key.startsWith('upscaler')).map((d) => (
                   <div key={d.key} className="rounded-sm border border-subtle bg-sunken p-2">
@@ -1818,7 +1824,7 @@ function UpscalerSection({
                       {d.message && <span className="text-err overflow-hidden text-ellipsis whitespace-nowrap">{d.message}</span>}
                     </div>
                     <pre className="text-xs font-mono text-fg-tertiary max-h-32 overflow-auto whitespace-pre-wrap m-0">
-                      {d.log_tail.join('\n') || '(等待日志...)'}
+                      {d.log_tail.join('\n') || t('settings.emptyLog')}
                     </pre>
                   </div>
                 ))}
@@ -1852,19 +1858,20 @@ function ModelGroupCard({
 function ModelStatusBadge({ exists, size, status, fileCount, existsCount }: {
   exists: boolean; size: number; status?: ModelDownloadStatus['status']; fileCount?: number; existsCount?: number
 }) {
+  const { t } = useTranslation()
   if (status === 'running') {
-    return <StatusLabel bg="bg-warn-soft" fg="text-warn" text="下载中..." pulse />
+    return <StatusLabel bg="bg-warn-soft" fg="text-warn" text={t('settings.downloadInProgress')} pulse />
   }
   if (status === 'failed') {
-    return <StatusLabel bg="bg-err-soft" fg="text-err" text="失败" />
+    return <StatusLabel bg="bg-err-soft" fg="text-err" text={t('status.failed')} />
   }
   if (exists) {
     return <StatusLabel bg="bg-ok-soft" fg="text-ok" text={`✓ ${fmtBytes(size)}${fileCount !== undefined ? ` (${existsCount}/${fileCount})` : ''}`} />
   }
   if (fileCount !== undefined && existsCount! > 0) {
-    return <StatusLabel bg="bg-warn-soft" fg="text-warn" text={`部分 (${existsCount}/${fileCount})`} />
+    return <StatusLabel bg="bg-warn-soft" fg="text-warn" text={t('settings.partialFiles', { exists: existsCount, total: fileCount })} />
   }
-  return <StatusLabel bg="bg-overlay" fg="text-fg-tertiary" text="未下载" />
+  return <StatusLabel bg="bg-overlay" fg="text-fg-tertiary" text={t('settings.notDownloaded')} />
 }
 
 function StatusLabel({ bg, fg, text, pulse }: { bg: string; fg: string; text: string; pulse?: boolean }) {
@@ -1878,14 +1885,15 @@ function StatusLabel({ bg, fg, text, pulse }: { bg: string; fg: string; text: st
 function DownloadButton({ exists, status, busy, onClick }: {
   exists: boolean; status?: ModelDownloadStatus['status']; busy: boolean; onClick: () => void
 }) {
+  const { t } = useTranslation()
   const running = status === 'running' || busy
   if (running) {
     return <button disabled className="btn btn-secondary btn-sm" style={{ opacity: 0.5 }}>...</button>
   }
   return (
     <button onClick={onClick} className={exists ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm'}
-      title={exists ? '已下载，点击重新下载' : '下载'}>
-      {exists ? '↻ 重下' : '⤓ 下载'}
+      title={exists ? t('settings.redownloadTitle') : t('common.download')}>
+      {exists ? t('settings.redownload') : t('settings.downloadAction')}
     </button>
   )
 }
@@ -1893,6 +1901,7 @@ function DownloadButton({ exists, status, busy, onClick }: {
 // ── ONNX Runtime Section（WD14 + CLTagger 共用 onnxruntime 包管理） ─────────
 
 function ONNXRuntimeSection() {
+  const { t } = useTranslation()
   const dialog = useDialog()
   const [rt, setRt] = useState<WD14Runtime | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1913,12 +1922,14 @@ function ONNXRuntimeSection() {
   useEffect(() => { void refresh() }, [refresh])
 
   const install = async (target: 'auto' | 'gpu' | 'cpu') => {
-    const detail = target === 'auto' ? '将按 nvidia-smi 检测自动选 GPU/CPU 包'
-      : target === 'gpu' ? '将卸载现有 onnxruntime 并安装 onnxruntime-gpu'
-      : '将卸载现有 onnxruntime-gpu 并安装 onnxruntime（CPU）'
+    const confirmKey = target === 'auto'
+      ? 'settings.confirmInstallOnnxAuto'
+      : target === 'gpu'
+        ? 'settings.confirmInstallOnnxGpu'
+        : 'settings.confirmInstallOnnxCpu'
     const ok = await dialog.confirm(
-      `${detail}。装包需要几分钟。\n\n注意：装完后必须重启 Studio 才能生效。继续？`,
-      { tone: 'warn', okText: '开始装' },
+      t(confirmKey),
+      { tone: 'warn', okText: t('settings.startInstall') },
     )
     if (!ok) return
     setBusy(target)
@@ -1931,9 +1942,9 @@ function ONNXRuntimeSection() {
       })
       const newPkg = result.installed_pkg ?? result.installed ?? '?'
       const newVer = result.installed_version ?? result.version ?? '?'
-      toast(`已装 ${newPkg}==${newVer}，请重启 Studio 让 EP 生效`, 'success')
+      toast(t('settings.packageInstalledRestart', { pkg: newPkg, version: newVer }), 'success')
     } catch (e) {
-      toast(`装包失败: ${e}`, 'error')
+      toast(t('settings.packageInstallFailed', { error: String(e) }), 'error')
     } finally {
       setBusy(null)
     }
@@ -1948,15 +1959,15 @@ function ONNXRuntimeSection() {
 
   // summary 里显示一行简短状态，用户不展开就能扫到
   const statusLabel = error
-    ? '⚠ 加载状态失败'
+    ? `⚠ ${t('settings.statusLoadFailed')}`
     : !rt
-      ? '加载中...'
+      ? t('settings.loadingStatus')
       : rt.cuda_load_error
-        ? '⚠ CUDA 加载失败'
+        ? `⚠ ${t('settings.cudaLoadFailed')}`
         : rt.restart_required
-          ? '⚠ 需重启 Studio'
+          ? `⚠ ${t('settings.restartStudioRequired')}`
           : mismatched
-            ? '⚠ GPU 但跑 CPU EP'
+            ? `⚠ ${t('settings.gpuRunningCpuEp')}`
             : rt.cuda_available
               ? `CUDA · ${rt.installed ?? '?'}`
               : `CPU · ${rt.installed ?? '?'}`
@@ -1967,38 +1978,38 @@ function ONNXRuntimeSection() {
       <summary className="cursor-pointer p-4 list-none flex items-center gap-2">
         <span className="text-fg-tertiary text-xs transition-transform group-open:rotate-90 inline-block w-3">▸</span>
         <h2 className="text-sm font-semibold text-fg-primary m-0">ONNX Runtime</h2>
-        <span className="text-xs text-fg-tertiary">WD14 / CLTagger 共用</span>
+        <span className="text-xs text-fg-tertiary">{t('settings.sharedByWd14ClTagger')}</span>
         <span className={`ml-auto text-xs font-mono ${statusOk ? 'text-ok' : 'text-warn'}`}>{statusLabel}</span>
       </summary>
 
       <div className="px-4 pb-4 flex flex-col gap-3">
         {error && <div className="text-err text-xs font-mono">{error}</div>}
-        {!error && !rt && <div className="text-xs text-fg-tertiary">加载 runtime 状态...</div>}
+        {!error && !rt && <div className="text-xs text-fg-tertiary">{t('settings.loadingRuntimeStatus')}</div>}
         {rt && (
           <>
             <div className="rounded-sm border border-subtle bg-sunken p-2 flex flex-col gap-1 text-xs">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-fg-tertiary shrink-0">runtime:</span>
-                <code className="font-mono text-fg-primary">{rt.installed ?? '(未安装)'}{rt.version ? `==${rt.version}` : ''}</code>
+                <code className="font-mono text-fg-primary">{rt.installed ?? t('settings.notInstalledParen')}{rt.version ? `==${rt.version}` : ''}</code>
                 <StatusLabel bg={rt.cuda_available ? 'bg-ok-soft' : 'bg-warn-soft'} fg={rt.cuda_available ? 'text-ok' : 'text-warn'} text={rt.cuda_available ? 'CUDA' : 'CPU only'} />
               </div>
               <div className="text-fg-tertiary">EP: <code className="text-fg-secondary font-mono">{(rt.providers ?? []).map((p) => p.replace('ExecutionProvider', '')).join(' / ') || '(none)'}</code></div>
-              <div className="text-fg-tertiary">GPU 检测: <span className="text-fg-secondary">{cuda.available ? `${cuda.gpu_name ?? '?'} (driver ${cuda.driver_version ?? '?'})` : '未检测到 NVIDIA GPU'}</span></div>
+              <div className="text-fg-tertiary">{t('settings.gpuDetect')}: <span className="text-fg-secondary">{cuda.available ? `${cuda.gpu_name ?? '?'} (driver ${cuda.driver_version ?? '?'})` : t('settings.noNvidiaGpu')}</span></div>
             </div>
 
             {rt.restart_required && (
               <div className="rounded-sm border border-err bg-err-soft px-2 py-1.5 text-err text-xs">
-                已装新 onnxruntime 包，但当前进程仍在用旧的。<strong>请重启 Studio</strong> 让 EP 切换生效。
+                <Trans i18nKey="settings.onnxRestartRequired" components={{ strong: <strong /> }} />
               </div>
             )}
             {!rt.restart_required && mismatched && (
               <div className="rounded-sm border border-info bg-info-soft px-2 py-1.5 text-info text-xs">
-                检测到 NVIDIA GPU 但 onnxruntime 只有 CPU EP — WD14 / CLTagger 会跑得很慢。展开「强制重装」装 GPU 版本。
+                {t('settings.onnxCpuEpWarning')}
               </div>
             )}
             {rt.cuda_load_error && (
               <div className="rounded-sm border border-err bg-err-soft px-2 py-1.5 text-xs text-err">
-                <div>CUDA EP 加载失败，已降级到 CPU。</div>
+                <div>{t('settings.cudaEpFailedCpu')}</div>
                 <code className="block font-mono text-xs text-err break-all whitespace-pre-wrap mt-1">
                   {rt.cuda_load_error}
                 </code>
@@ -2007,20 +2018,20 @@ function ONNXRuntimeSection() {
 
             <div className="flex gap-1.5 items-center flex-wrap">
               <button onClick={() => install('auto')} disabled={busy !== null} className="btn btn-primary btn-sm">
-                {busy === 'auto' ? '装包中...' : '自动检测 + 装合适的包'}
+                {busy === 'auto' ? t('settings.installingPackage') : t('settings.autoDetectInstall')}
               </button>
-              <button onClick={() => void refresh()} disabled={busy !== null} title="刷新状态"
+              <button onClick={() => void refresh()} disabled={busy !== null} title={t('settings.refreshStatus')}
                 className="px-2 py-0.5 text-fg-tertiary bg-transparent border-none cursor-pointer rounded-sm">↻</button>
               <button type="button" onClick={() => setReinstallOpen(!reinstallOpen)}
                 className="btn btn-ghost btn-sm text-xs text-fg-tertiary ml-auto">
-                {reinstallOpen ? '▾' : '▸'} 强制重装（高级）
+                {reinstallOpen ? '▾' : '▸'} {t('settings.forceReinstallAdvanced')}
               </button>
             </div>
             {reinstallOpen && (
               <div className="flex gap-1.5 items-center flex-wrap pt-2 border-t border-subtle">
-                <button onClick={() => install('gpu')} disabled={busy !== null} className="btn btn-secondary btn-sm">{busy === 'gpu' ? '装包中...' : '重装为 GPU'}</button>
-                <button onClick={() => install('cpu')} disabled={busy !== null} className="btn btn-secondary btn-sm">{busy === 'cpu' ? '装包中...' : '重装为 CPU'}</button>
-                <span className="text-[10px] text-fg-tertiary">不知道选哪个就用上面"自动检测"。</span>
+                <button onClick={() => install('gpu')} disabled={busy !== null} className="btn btn-secondary btn-sm">{busy === 'gpu' ? t('settings.installingPackage') : t('settings.reinstallGpu')}</button>
+                <button onClick={() => install('cpu')} disabled={busy !== null} className="btn btn-secondary btn-sm">{busy === 'cpu' ? t('settings.installingPackage') : t('settings.reinstallCpu')}</button>
+                <span className="text-[10px] text-fg-tertiary">{t('settings.onnxForceHint')}</span>
               </div>
             )}
           </>
@@ -2041,6 +2052,7 @@ function ONNXRuntimeSection() {
 // - is_cuda_build_unavailable=True     → 黄色驱动警告（pip 修不了，给文档链接）
 
 function PyTorchSection() {
+  const { t } = useTranslation()
   const dialog = useDialog()
   const [status, setStatus] = useState<TorchStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -2064,16 +2076,17 @@ function PyTorchSection() {
     const tag = target === 'auto' ? status?.recommended_cu_tag ?? '?' : target
     // 注册 → 用户 Ctrl+C 重启 → launcher 进程跑 pip。Windows 上 torch.pyd 被
     // 当前 server 进程锁住，没法直接 replace；只能 defer 到 launcher。
-    const msg = `将注册 torch 重装请求（${tag} 版）。\n` +
-      `提交后请 Ctrl+C 关闭 Studio 重新运行 studio.bat —— 启动时会装 torch（~3 GB，5-30 分钟）。继续？`
-    if (!(await dialog.confirm(msg, { tone: 'warn', okText: '注册请求' }))) return
+    if (!(await dialog.confirm(
+      t('settings.confirmRegisterTorch', { tag }),
+      { tone: 'warn', okText: t('settings.registerRequest') },
+    ))) return
     setBusy(true)
     try {
       const result = await api.reinstallTorch(target)
       // 后端已写 marker，server 进程没真装；提示用户去重启
       toast(result.message, 'success')
     } catch (e) {
-      toast(`注册失败: ${e}`, 'error')
+      toast(t('settings.registerFailed', { error: String(e) }), 'error')
     } finally {
       setBusy(false)
     }
@@ -2082,15 +2095,15 @@ function PyTorchSection() {
   const hasIssue = !!error || (status && (status.is_cpu_with_gpu || status.is_cuda_build_unavailable || !status.installed))
   const statusOk = status?.cuda_available && !error
   const statusLabel = error
-    ? '加载失败'
+    ? t('settings.loadFailedShort')
     : !status
-      ? '加载中...'
+      ? t('settings.loadingStatus')
       : !status.installed
-        ? '未安装'
+        ? t('settings.notInstalledShort')
         : status.is_cpu_with_gpu
-          ? 'CPU 版（误装）'
+          ? t('settings.cpuBuildMisinstalled')
           : !status.cuda_available && status.cuda_build !== 'cpu'
-            ? 'CUDA 不可用（驱动？）'
+            ? t('settings.cudaUnavailableDriver')
             : status.cuda_available
               ? `CUDA ✓ ${status.cuda_build}`
               : `CPU ${status.cuda_build}`
@@ -2100,7 +2113,7 @@ function PyTorchSection() {
       <summary className="cursor-pointer p-4 list-none flex items-center gap-2">
         <span className="text-fg-tertiary text-xs transition-transform group-open:rotate-90 inline-block w-3">▸</span>
         <h2 className="text-sm font-semibold text-fg-primary m-0">PyTorch</h2>
-        <span className="text-xs text-fg-tertiary">训练核心依赖</span>
+        <span className="text-xs text-fg-tertiary">{t('settings.trainingCoreDependency')}</span>
         <span className={`ml-auto text-xs font-mono ${statusOk ? 'text-ok' : status?.is_cpu_with_gpu ? 'text-err' : 'text-warn'}`}>
           {statusLabel}
         </span>
@@ -2108,13 +2121,13 @@ function PyTorchSection() {
 
       <div className="px-4 pb-4 flex flex-col gap-3">
         {error && <div className="text-err text-xs font-mono">{error}</div>}
-        {!error && !status && <div className="text-xs text-fg-tertiary">加载状态...</div>}
+        {!error && !status && <div className="text-xs text-fg-tertiary">{t('settings.loadingStatus')}</div>}
 
         {status && (<>
           {/* 当前状态卡 */}
           <div className="rounded-sm border border-subtle bg-sunken p-2 flex flex-col gap-1 text-xs">
             <div className="flex gap-4 flex-wrap">
-              <span className="text-fg-tertiary">torch: <code className="text-fg-secondary font-mono">{status.version ?? '（未安装）'}</code></span>
+              <span className="text-fg-tertiary">torch: <code className="text-fg-secondary font-mono">{status.version ?? t('settings.notInstalledParen')}</code></span>
               {status.cuda_build && (
                 <span className="text-fg-tertiary">build: <code className="text-fg-secondary font-mono">{status.cuda_build}</code></span>
               )}
@@ -2124,14 +2137,14 @@ function PyTorchSection() {
             </div>
             <div className="flex gap-4 flex-wrap">
               <span className="text-fg-tertiary">
-                NVIDIA 驱动:{' '}
+                {t('settings.driverLabel')}:{' '}
                 <code className="text-fg-secondary font-mono">
-                  {status.cuda_detect.driver_version ?? '未检测到'}
+                  {status.cuda_detect.driver_version ?? t('settings.notDetected')}
                 </code>
               </span>
               {status.cuda_detect.gpu_name && !status.cuda_available && (
                 <span className="text-fg-tertiary">
-                  系统 GPU:{' '}
+                  {t('settings.systemGpu')}:{' '}
                   <code className="text-fg-secondary font-mono">{status.cuda_detect.gpu_name}</code>
                 </span>
               )}
@@ -2141,17 +2154,21 @@ function PyTorchSection() {
           {/* 误装：CPU torch + 有 GPU */}
           {status.is_cpu_with_gpu && (
             <div className="rounded-sm border border-err bg-err-soft px-2 py-1.5 text-err text-xs">
-              检测到 NVIDIA GPU 但当前装的是 CPU 版 torch —— 训练 / 出图会跑在 CPU 上，单步常需数十秒。
-              点下方按钮一键重装为 <code className="font-mono">{status.recommended_cu_tag}</code> 版。
+              <Trans
+                i18nKey="settings.torchCpuWithGpuWarning"
+                values={{ tag: status.recommended_cu_tag }}
+                components={{ code: <code className="font-mono" /> }}
+              />
             </div>
           )}
 
           {/* CUDA build 但运行时不可用：驱动 / WSL 问题 */}
           {status.is_cuda_build_unavailable && (
             <div className="rounded-sm border border-warn bg-warn-soft px-2 py-1.5 text-warn text-xs">
-              torch 是 CUDA 版但 <code className="font-mono">torch.cuda.is_available()=False</code>。
-              这通常不是 pip 能修的（驱动版本过低 / WSL 缺 CUDA 支持 / 容器无 GPU 直通）。
-              请检查 NVIDIA 驱动与 CUDA Toolkit。
+              <Trans
+                i18nKey="settings.torchCudaUnavailableWarning"
+                components={{ code: <code className="font-mono" /> }}
+              />
             </div>
           )}
 
@@ -2162,18 +2179,18 @@ function PyTorchSection() {
               disabled={busy || !status.cuda_detect.available}
               className={status.is_cpu_with_gpu ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
               title={status.cuda_detect.available
-                ? `自动选择：${status.recommended_cu_tag}`
-                : '没检测到 NVIDIA 驱动，无法装 CUDA 版'}
+                ? t('settings.autoSelect', { tag: status.recommended_cu_tag })
+                : t('settings.noNvidiaDriverCannotCuda')}
             >
-              {busy ? '安装中...' : status.is_cpu_with_gpu
-                ? `⤓ 重装为 CUDA 版（${status.recommended_cu_tag}）`
-                : `↻ 重装（auto: ${status.recommended_cu_tag}）`}
+              {busy ? t('settings.installing') : status.is_cpu_with_gpu
+                ? t('settings.reinstallCudaBuild', { tag: status.recommended_cu_tag })
+                : t('settings.reinstallAuto', { tag: status.recommended_cu_tag })}
             </button>
             <button onClick={() => void refresh()} disabled={busy}
               className="px-2 py-0.5 text-fg-tertiary bg-transparent border-none cursor-pointer rounded-sm">↻</button>
             <button type="button" onClick={() => setAdvancedOpen(!advancedOpen)}
               className="btn btn-ghost btn-sm text-xs text-fg-tertiary ml-auto">
-              {advancedOpen ? '▾' : '▸'} 高级（手动选 CUDA 版本）
+              {advancedOpen ? '▾' : '▸'} {t('settings.advancedManualCuda')}
             </button>
           </div>
 
@@ -2181,8 +2198,7 @@ function PyTorchSection() {
           {advancedOpen && (
             <div className="flex flex-col gap-1.5 pt-2 border-t border-subtle text-xs">
               <p className="text-fg-tertiary m-0">
-                按你的驱动 / 偏好选；通常用 auto 即可。
-                选错版本会在 import 时报错，需重新选。
+                {t('settings.manualCudaHint')}
               </p>
               <div className="flex gap-1.5 flex-wrap">
                 {(['cu128', 'cu126', 'cu124', 'cu118', 'cpu'] as const).map((tag) => (
@@ -2195,8 +2211,8 @@ function PyTorchSection() {
                     }`}
                     title={
                       tag === 'cpu'
-                        ? '装 CPU 版（极慢，仅诊断 / 无 GPU 用）'
-                        : `装 ${tag} 版（PyTorch index: /whl/${tag}）`
+                        ? t('settings.installCpuBuildHint')
+                        : t('settings.installCudaBuildHint', { tag })
                     }
                   >
                     {tag}{status.cuda_build === tag ? ' ✓' : ''}
@@ -2223,6 +2239,7 @@ function PyTorchSection() {
 // - GitHub API 限流时 candidates=[] + fetch_error，给手动 URL 输入兜底
 
 function FlashAttentionSection() {
+  const { t } = useTranslation()
   const dialog = useDialog()
   const [status, setStatus] = useState<FlashAttnStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -2244,17 +2261,15 @@ function FlashAttentionSection() {
   useEffect(() => { void refresh() }, [refresh])
 
   const install = async (url: string | null) => {
-    const msg = url
-      ? '将 pip install 该 wheel，装包需要几分钟。\n装完后必须重启 Studio 才能生效。继续？'
-      : '将自动从 GitHub Releases 选择最匹配的 flash_attn wheel 并安装。\n装包需要几分钟，装完后必须重启 Studio。继续？'
-    if (!(await dialog.confirm(msg, { tone: 'warn', okText: '开始装' }))) return
+    const msg = url ? t('settings.confirmInstallFlashUrl') : t('settings.confirmInstallFlashAuto')
+    if (!(await dialog.confirm(msg, { tone: 'warn', okText: t('settings.startInstall') }))) return
     setBusy(true)
     try {
       const result = await api.installFlashAttn(url)
-      toast(`flash_attn==${result.version ?? '?'} 安装成功，请重启 Studio`, 'success')
+      toast(t('settings.flashAttnInstalled', { version: result.version ?? '?' }), 'success')
       await refresh()
     } catch (e) {
-      toast(`安装失败: ${e}`, 'error')
+      toast(t('settings.installFailed', { error: String(e) }), 'error')
     } finally {
       setBusy(false)
     }
@@ -2269,12 +2284,12 @@ function FlashAttentionSection() {
   const canAutoInstall = !!env?.torch_tag && !!env?.platform && usable.length > 0
 
   const statusLabel = error
-    ? '加载失败'
+    ? t('settings.loadFailedShort')
     : !status
-      ? '加载中...'
+      ? t('settings.loadingStatus')
       : status.installed
-        ? `已安装 v${status.version ?? '?'}`
-        : '未安装'
+        ? t('settings.installedVersion', { version: status.version ?? '?' })
+        : t('settings.notInstalledShort')
   const statusOk = status?.installed && !error
 
   return (
@@ -2282,13 +2297,13 @@ function FlashAttentionSection() {
       <summary className="cursor-pointer p-4 list-none flex items-center gap-2">
         <span className="text-fg-tertiary text-xs transition-transform group-open:rotate-90 inline-block w-3">▸</span>
         <h2 className="text-sm font-semibold text-fg-primary m-0">Flash Attention</h2>
-        <span className="text-xs text-fg-tertiary">训练加速（可选）</span>
+        <span className="text-xs text-fg-tertiary">{t('settings.trainingAccelerationOptional')}</span>
         <span className={`ml-auto text-xs font-mono ${statusOk ? 'text-ok' : 'text-warn'}`}>{statusLabel}</span>
       </summary>
 
       <div className="px-4 pb-4 flex flex-col gap-3">
         {error && <div className="text-err text-xs font-mono">{error}</div>}
-        {!error && !status && <div className="text-xs text-fg-tertiary">加载状态...</div>}
+        {!error && !status && <div className="text-xs text-fg-tertiary">{t('settings.loadingStatus')}</div>}
 
         {status && env && (<>
           {/* 环境信息 */}
@@ -2296,22 +2311,22 @@ function FlashAttentionSection() {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-fg-tertiary shrink-0">flash_attn:</span>
               <code className="font-mono text-fg-primary">
-                {status.installed ? `v${status.version ?? '?'}` : '（未安装）'}
+                {status.installed ? `v${status.version ?? '?'}` : t('settings.notInstalledParen')}
               </code>
-              {status.installed && <StatusLabel bg="bg-ok-soft" fg="text-ok" text="已安装" />}
+              {status.installed && <StatusLabel bg="bg-ok-soft" fg="text-ok" text={t('settings.installed')} />}
             </div>
             <div className="flex gap-4 flex-wrap">
               <span className="text-fg-tertiary">Python: <code className="text-fg-secondary font-mono">{env.python_tag}</code></span>
-              <span className="text-fg-tertiary">CUDA: <code className="text-fg-secondary font-mono">{env.cuda_tag ?? '未检测到'}</code></span>
-              <span className="text-fg-tertiary">PyTorch: <code className="text-fg-secondary font-mono">{env.torch_tag ?? '未检测到'}</code></span>
-              <span className="text-fg-tertiary">平台: <code className="text-fg-secondary font-mono">{env.platform ?? '不支持'}</code></span>
+              <span className="text-fg-tertiary">CUDA: <code className="text-fg-secondary font-mono">{env.cuda_tag ?? t('settings.notDetected')}</code></span>
+              <span className="text-fg-tertiary">PyTorch: <code className="text-fg-secondary font-mono">{env.torch_tag ?? t('settings.notDetected')}</code></span>
+              <span className="text-fg-tertiary">{t('settings.platform')}: <code className="text-fg-secondary font-mono">{env.platform ?? t('settings.unsupported')}</code></span>
             </div>
           </div>
 
           {/* GitHub API 失败 */}
           {fetchError && (
             <div className="rounded-sm border border-err bg-err-soft px-2 py-1.5 text-err text-xs">
-              GitHub API 请求失败（国内网络可能不稳定，请刷新重试）：
+              {t('settings.githubApiFailed')}
               <code className="block mt-0.5 break-all">{fetchError}</code>
             </div>
           )}
@@ -2319,8 +2334,7 @@ function FlashAttentionSection() {
           {/* 没匹配 wheel */}
           {!canAutoInstall && !fetchError && env.platform && env.torch_tag && (
             <div className="rounded-sm border border-warn bg-warn-soft px-2 py-1.5 text-warn text-xs">
-              未找到 {env.python_tag} 的预编译 wheel（当前 Python 版本可能尚无支持）。
-              请在下方候选列表手动选择其他版本，或从 GitHub Releases 粘贴 URL。
+              {t('settings.noWheelForPython', { python: env.python_tag })}
             </div>
           )}
 
@@ -2331,16 +2345,16 @@ function FlashAttentionSection() {
               disabled={busy || !canAutoInstall}
               className="btn btn-primary btn-sm"
               title={canAutoInstall
-                ? `自动选择：${bestCandidate?.name ?? ''}`
-                : '无可用 wheel，请手动选择'}
+                ? t('settings.autoSelect', { tag: bestCandidate?.name ?? '' })
+                : t('settings.noWheelManual')}
             >
-              {busy ? '安装中...' : status.installed ? '↻ 重装（自动匹配）' : '⤓ 自动匹配安装'}
+              {busy ? t('settings.installing') : status.installed ? t('settings.reinstallAutoMatch') : t('settings.autoMatchInstall')}
             </button>
             <button onClick={() => void refresh()} disabled={busy}
               className="px-2 py-0.5 text-fg-tertiary bg-transparent border-none cursor-pointer rounded-sm">↻</button>
             <button type="button" onClick={() => setCandidatesOpen(!candidatesOpen)}
               className="btn btn-ghost btn-sm text-xs text-fg-tertiary ml-auto">
-              {candidatesOpen ? '▾' : '▸'} 候选 wheel（{usable.length} 可用）
+              {candidatesOpen ? '▾' : '▸'} {t('settings.candidateWheels', { n: usable.length })}
             </button>
           </div>
 
@@ -2348,7 +2362,7 @@ function FlashAttentionSection() {
           {candidatesOpen && (
             <div className="flex flex-col gap-2 pt-2 border-t border-subtle">
               {candidates.length === 0 ? (
-                <p className="text-xs text-fg-tertiary m-0">查询失败或无匹配（检查网络连接）</p>
+                <p className="text-xs text-fg-tertiary m-0">{t('settings.wheelQueryFailed')}</p>
               ) : (
                 <ul className="list-none m-0 p-0 flex flex-col gap-1">
                   {candidates.map((c) => (
@@ -2365,9 +2379,9 @@ function FlashAttentionSection() {
                         onClick={() => void install(c.url)}
                         disabled={busy}
                         className={c.usable ? 'btn btn-primary btn-sm shrink-0' : 'btn btn-secondary btn-sm shrink-0'}
-                        title={c.usable ? '安装此 wheel' : 'Python ABI 不兼容，强制安装可能失败'}
+                        title={c.usable ? t('settings.installWheel') : t('settings.wheelAbiIncompatible')}
                       >
-                        {c.usable ? '⤓ 安装' : '强制安装'}
+                        {c.usable ? t('settings.installAction') : t('settings.forceInstall')}
                       </button>
                     </li>
                   ))}
@@ -2375,7 +2389,7 @@ function FlashAttentionSection() {
               )}
 
               <div className="flex flex-col gap-1 pt-1 border-t border-subtle">
-                <p className="text-xs text-fg-tertiary m-0">手动粘贴 URL：</p>
+                <p className="text-xs text-fg-tertiary m-0">{t('settings.manualUrl')}</p>
                 <div className="flex gap-1.5">
                   <input
                     type="text"
@@ -2388,7 +2402,7 @@ function FlashAttentionSection() {
                     onClick={() => { if (manualUrl.trim()) void install(manualUrl.trim()) }}
                     disabled={busy || !manualUrl.trim()}
                     className="btn btn-secondary btn-sm shrink-0"
-                  >安装</button>
+                  >{t('settings.install')}</button>
                 </div>
               </div>
             </div>
@@ -2405,6 +2419,7 @@ function FlashAttentionSection() {
 // 不需要 flash_attn 那种 GitHub 候选 wheel 列表。失败时给 stderr 让用户排错。
 
 function XformersSection() {
+  const { t } = useTranslation()
   const dialog = useDialog()
   const [status, setStatus] = useState<XformersStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -2426,30 +2441,29 @@ function XformersSection() {
   const install = async () => {
     if (
       !(await dialog.confirm(
-        '将 pip install xformers，按当前 torch+cu 选 PyTorch index URL。\n' +
-        '装包几分钟到十几分钟，装完后必须重启 Studio。继续？',
-        { tone: 'warn', okText: '开始装' },
+        t('settings.confirmInstallXformers'),
+        { tone: 'warn', okText: t('settings.startInstall') },
       ))
     ) return
     setBusy(true)
     try {
       const r = await api.installXformers()
-      toast(`xformers==${r.version ?? '?'} 安装成功，请重启 Studio`, 'success')
+      toast(t('settings.xformersInstalled', { version: r.version ?? '?' }), 'success')
       await refresh()
     } catch (e) {
-      toast(`安装失败: ${e}`, 'error')
+      toast(t('settings.installFailed', { error: String(e) }), 'error')
     } finally {
       setBusy(false)
     }
   }
 
   const statusLabel = error
-    ? '加载失败'
+    ? t('settings.loadFailedShort')
     : !status
-      ? '加载中...'
+      ? t('settings.loadingStatus')
       : status.installed
-        ? `已安装 v${status.version ?? '?'}`
-        : '未安装'
+        ? t('settings.installedVersion', { version: status.version ?? '?' })
+        : t('settings.notInstalledShort')
   const statusOk = status?.installed && !error
   const hasIssue = !!error
 
@@ -2458,33 +2472,26 @@ function XformersSection() {
       <summary className="cursor-pointer p-4 list-none flex items-center gap-2">
         <span className="text-fg-tertiary text-xs transition-transform group-open:rotate-90 inline-block w-3">▸</span>
         <h2 className="text-sm font-semibold text-fg-primary m-0">xformers</h2>
-        <span className="text-xs text-fg-tertiary">attention 加速（与 Flash Attention 二选一）</span>
+        <span className="text-xs text-fg-tertiary">{t('settings.xformersSubtitle')}</span>
         <InfoButton>
-          <p>
-            xformers 与 Flash Attention <strong>互斥</strong>，每个训练 / 出图任务的{' '}
-            <code>attention_backend</code> 字段三选一（无 / xformers / flash_attn）。
-          </p>
-          <p>xformers 泛用性更广（支持 sm_70+），flash_attn 性能更高（sm_80+ Ampere 起）。</p>
-          <p>
-            装失败多数是上游 PyPI / PyTorch index 没出对应 torch+cu 组合的 wheel
-            （5090 / 新 GPU 常见）。失败时按钮 toast 会显示 stderr 末尾，可根据提示
-            降 torch 版本或等上游覆盖。
-          </p>
+          <p><Trans i18nKey="settings.xformersHelp1" components={{ strong: <strong />, code: <code /> }} /></p>
+          <p>{t('settings.xformersHelp2')}</p>
+          <p>{t('settings.xformersHelp3')}</p>
         </InfoButton>
         <span className={`ml-auto text-xs font-mono ${statusOk ? 'text-ok' : 'text-warn'}`}>{statusLabel}</span>
       </summary>
 
       <div className="px-4 pb-4 flex flex-col gap-3">
         {error && <div className="text-err text-xs font-mono">{error}</div>}
-        {!error && !status && <div className="text-xs text-fg-tertiary">加载状态...</div>}
+        {!error && !status && <div className="text-xs text-fg-tertiary">{t('settings.loadingStatus')}</div>}
 
         {status && (<>
           <div className="rounded-sm border border-subtle bg-sunken p-2 flex items-center gap-2 text-xs">
             <span className="text-fg-tertiary shrink-0">xformers:</span>
             <code className="font-mono text-fg-primary">
-              {status.installed ? `v${status.version ?? '?'}` : '（未安装）'}
+              {status.installed ? `v${status.version ?? '?'}` : t('settings.notInstalledParen')}
             </code>
-            {status.installed && <StatusLabel bg="bg-ok-soft" fg="text-ok" text="已安装" />}
+            {status.installed && <StatusLabel bg="bg-ok-soft" fg="text-ok" text={t('settings.installed')} />}
           </div>
 
           <div className="flex gap-2">
@@ -2494,16 +2501,16 @@ function XformersSection() {
               className="btn btn-primary btn-sm"
             >
               {busy
-                ? '安装中...'
+                ? t('settings.installing')
                 : status.installed
-                  ? '重装（自动匹配）'
-                  : '安装（自动匹配）'}
+                  ? t('settings.reinstallAutoMatchPlain')
+                  : t('settings.installAutoMatchPlain')}
             </button>
             <button
               onClick={() => void refresh()}
               disabled={busy}
               className="btn btn-ghost btn-sm"
-              title="刷新状态"
+              title={t('settings.refreshStatus')}
             >↻</button>
           </div>
         </>)}
@@ -2525,14 +2532,15 @@ function TaeFluxSection({
     section: S, key: K, value: Secrets[S][K],
   ) => void
 }) {
+  const { t } = useTranslation()
   const n = draft.generate.preview_every_n_steps
   return (
-    <SettingsSection id="preview" title="中间步预览">
+    <SettingsSection id="preview" title={t('settings.intermediatePreview')}>
       <SettingsField
-        label="节流（每 N 步推一次预览）"
-        desc="0 = 关闭；推荐 3-5"
+        label={t('settings.previewThrottle')}
+        desc={t('settings.previewThrottleDesc')}
         helpTooltip={
-          <p>TAEFlux 解码模型 server 启动时已后台下载，UI 不需要单独操作。</p>
+          <p>{t('settings.taeFluxHelp')}</p>
         }
       >
         <input
@@ -2553,8 +2561,10 @@ function TaeFluxSection({
 // ── Display Section ────────────────────────────────────────────────────────
 
 function DisplaySection() {
+  const { t } = useTranslation()
   const [theme, setTheme] = useState<Theme>(() => getStoredTheme())
   const [density, setDensity] = useState<Density>(() => getStoredDensity())
+  const [lang, setLang] = useState<string>(() => getStoredLangWithDefault())
 
   const handleThemeChange = (t: Theme) => {
     setTheme(t)
@@ -2568,35 +2578,58 @@ function DisplaySection() {
     applyDensity(d)
   }
 
+  const handleLangChange = (newLang: string) => {
+    setLang(newLang)
+    setStoredLang(newLang)
+    void i18n.changeLanguage(newLang)
+  }
+
   const densityLabel = (d: Density): string => {
-    if (d === 'tight') return '紧凑'
-    if (d === 'loose') return '宽松'
-    return '默认'
+    if (d === 'tight') return t('settings.densityTight')
+    if (d === 'loose') return t('settings.densityLoose')
+    return t('settings.densityDefault')
   }
 
   return (
-    <SettingsSection id="display" title="显示">
-      <SettingsField label="主题">
+    <SettingsSection id="display" title={t('settings.display')}>
+      <SettingsField label={t('settings.language')}>
         <div className="flex gap-1">
-          {(['light', 'dark'] as Theme[]).map((t) => (
+          {[
+            { id: 'zh', label: t('settings.languageZh') },
+            { id: 'en', label: t('settings.languageEn') },
+          ].map((l) => (
             <button
-              key={t}
-              onClick={() => handleThemeChange(t)}
-              className={`btn btn-sm ${theme === t ? 'btn-primary' : 'btn-secondary'}`}
+              key={l.id}
+              onClick={() => handleLangChange(l.id)}
+              className={`btn btn-sm ${lang === l.id ? 'btn-primary' : 'btn-secondary'}`}
             >
-              {t === 'light' ? '☀ 日间' : '☾ 暗色'}
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+
+      <SettingsField label={t('settings.theme')}>
+        <div className="flex gap-1">
+          {(['light', 'dark'] as Theme[]).map((themeOption) => (
+            <button
+              key={themeOption}
+              onClick={() => handleThemeChange(themeOption)}
+              className={`btn btn-sm ${theme === themeOption ? 'btn-primary' : 'btn-secondary'}`}
+            >
+              {themeOption === 'light' ? t('settings.themeLight') : t('settings.themeDark')}
             </button>
           ))}
         </div>
       </SettingsField>
 
       <SettingsField
-        label="界面缩放"
+        label={t('settings.uiScale')}
         helpTooltip={
           <>
-            <p><strong>紧凑</strong>：字号更小，间距更紧，适合小屏或高信息密度</p>
-            <p><strong>默认</strong>：标准字号与间距</p>
-            <p><strong>宽松</strong>：字号更大，间距更宽，适合阅读舒适</p>
+            <p><strong>{t('settings.densityTight')}</strong>：{t('settings.densityTightHelp')}</p>
+            <p><strong>{t('settings.densityDefault')}</strong>：{t('settings.densityDefaultHelp')}</p>
+            <p><strong>{t('settings.densityLoose')}</strong>：{t('settings.densityLooseHelp')}</p>
           </>
         }
       >
@@ -2645,6 +2678,7 @@ async function pollHealthThenReload(
   timeoutMs: number,
   label: string,
   onTimeout: () => void,
+  t: TFunction,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs
   const pollInterval = 500
@@ -2653,7 +2687,7 @@ async function pollHealthThenReload(
   while (Date.now() < deadline) {
     try {
       await api.health()
-      toast(`${label}完成，正在刷新页面...`, 'success')
+      toast(t('settings.operationCompletedReloading', { label }), 'success')
       setTimeout(() => window.location.reload(), 800)
       return
     } catch {
@@ -2662,7 +2696,7 @@ async function pollHealthThenReload(
     await new Promise((r) => setTimeout(r, pollInterval))
   }
   const mins = Math.round(timeoutMs / 60_000)
-  toast(`${label}超时（${mins} 分钟），请检查终端输出后手动刷新页面`, 'error')
+  toast(t('settings.operationTimeout', { label, mins }), 'error')
   onTimeout()
 }
 
@@ -2684,6 +2718,7 @@ async function pollHealthThenReload(
 //
 // 自动检查 + Topbar 红点仍然只看 master（ADR 0002 决策）。
 function VersionSection() {
+  const { t } = useTranslation()
   const { toast } = useToast()
   // chunk 4：dialog 模态被 inline preview 面板取代，VersionSection 不再用 dialog
   const [version, setVersion] = useState<SystemVersion | null>(null)
@@ -2740,7 +2775,7 @@ function VersionSection() {
     setInitError(null)
     try {
       await api.initGitRepo()
-      toast('git 仓库初始化完成，自动更新已启用', 'success')
+      toast(t('settings.gitInitEnabled'), 'success')
       const v = await api.getSystemVersion().catch(() => null)
       if (v) setVersion(v)
       // init 后立刻拉一次 check，banner 消失 + 同屏显示「已是最新 / 有新版」
@@ -2749,7 +2784,7 @@ function VersionSection() {
       const err = e as Error & { detail?: { message?: string } }
       const msg = err.detail?.message ?? err.message ?? String(e)
       setInitError(msg)
-      toast(`初始化失败: ${msg}`, 'error')
+      toast(t('settings.gitInitFailed', { error: msg }), 'error')
     } finally {
       setIniting(false)
     }
@@ -2782,17 +2817,17 @@ function VersionSection() {
       const r = await api.checkSystemUpdate('master', true)
       setCheck(r)
       if (r.error) {
-        toast(`检查失败: ${r.error}`, 'error')
+        toast(t('settings.checkFailed', { error: r.error }), 'error')
       } else if (r.state === 'update_available') {
         const target = r.latest_version ?? r.latest_tag ?? r.latest_commit.slice(0, 8)
-        toast(`有新稳定版：${target}`, 'info')
+        toast(t('settings.stableUpdateAvailable', { version: target }), 'info')
       } else if (r.state === 'ahead') {
-        toast('本地领先稳定版（可能由回滚 / 抢跑造成）', 'info')
+        toast(t('settings.stableAhead'), 'info')
       } else {
-        toast(`已是最新${r.latest_version ? '稳定版 ' + r.latest_version : ''}`, 'success')
+        toast(t('settings.upToDateStable', { version: r.latest_version ? ` ${r.latest_version}` : '' }), 'success')
       }
     } catch (e) {
-      toast(`检查更新失败: ${e}`, 'error')
+      toast(t('settings.checkUpdateFailed', { error: String(e) }), 'error')
     } finally {
       setChecking(false)
     }
@@ -2802,16 +2837,16 @@ function VersionSection() {
   const _formatActionError = (e: unknown, action: string): string => {
     const err = e as Error & { status?: number; detail?: { error?: string; tasks?: { name: string; id?: number }[] } }
     if (err.status === 422 && err.detail?.error === 'running_tasks_present') {
-      const names = (err.detail.tasks ?? []).map((t) => t.name || `task#${t.id ?? '?'}`).join(', ')
-      return `有任务在跑，请先取消：${names}`
+      const names = (err.detail.tasks ?? []).map((task) => task.name || `task#${task.id ?? '?'}`).join(', ')
+      return t('settings.taskRunningCancelFirst', { names })
     }
     if (err.status === 422 && err.detail?.error === 'dirty_working_tree') {
-      return '本地有未提交修改，请先 commit 或 stash'
+      return t('settings.dirtyWorkingTree')
     }
     if (err.status === 409 && err.detail?.error === 'no_rollback_target') {
-      return '没有可回滚的版本（首次启动 / .last_version 已被清理）'
+      return t('settings.noRollbackTarget')
     }
-    return `触发${action}失败: ${err.message ?? e}`
+    return t('settings.triggerActionFailed', { action, error: err.message ?? String(e) })
   }
 
   // chunk 4 — inline preview/progress/failed 状态机：所有 "更新 / 切换 / 回滚"
@@ -2848,7 +2883,7 @@ function VersionSection() {
     try {
       await api.performSystemUpdate(t.ref)
     } catch (e) {
-      toast(_formatActionError(e, t.kind === 'master' ? '更新' : '切换'), 'error')
+      toast(_formatActionError(e, t.kind === 'master' ? i18n.t('settings.actionUpdate') : i18n.t('settings.actionSwitch')), 'error')
       setBusy(false)
       if (t.kind === 'master') setMasterState('idle')
       else setDevState('idle')
@@ -2857,12 +2892,13 @@ function VersionSection() {
     void pollHealthThenReload(
       toast,
       10 * 60_000,
-      t.kind === 'master' ? '更新' : '切换',
+      t.kind === 'master' ? i18n.t('settings.actionUpdate') : i18n.t('settings.actionSwitch'),
       () => {
         setBusy(false)
         if (t.kind === 'master') setMasterState('idle')
         else setDevState('idle')
       },
+      i18n.t.bind(i18n),
     )
   }
 
@@ -2891,9 +2927,9 @@ function VersionSection() {
     setLogModal({ open: true, content: '', loading: true })
     try {
       const r = await api.getSystemUpdateLog()
-      setLogModal({ open: true, content: r.content || '(空)', loading: false })
+      setLogModal({ open: true, content: r.content || t('settings.emptyLog'), loading: false })
     } catch (e) {
-      setLogModal({ open: true, content: `加载失败: ${e}`, loading: false })
+      setLogModal({ open: true, content: t('settings.loadFailedWithError', { error: String(e) }), loading: false })
     }
   }
 
@@ -2913,7 +2949,7 @@ function VersionSection() {
       setPrefs(updated.system)
     } catch (e) {
       setPrefs(prev)
-      toast(`保存通道偏好失败: ${(e as Error).message ?? e}`, 'error')
+      toast(t('settings.saveChannelFailed', { error: (e as Error).message ?? String(e) }), 'error')
     }
   }
 
@@ -2928,18 +2964,18 @@ function VersionSection() {
       setDevCheck(check)
       setDevCommits(commits)
       if (check.error) {
-        toast(`dev 检查失败: ${check.error}`, 'error')
+        toast(t('settings.devCheckFailed', { error: check.error }), 'error')
       } else if (commits.error && !commits.fetched) {
-        toast(`dev 抓取部分失败: ${commits.error}`, 'error')
+        toast(t('settings.devFetchPartialFailed', { error: commits.error }), 'error')
       } else if (check.state === 'update_available') {
-        toast(`dev 通道有 ${check.behind_count} 项新更新`, 'info')
+        toast(t('settings.devHasNewCommits', { count: check.behind_count }), 'info')
       } else if (check.state === 'ahead') {
-        toast('本地领先 dev HEAD（罕见，可能是抢跑）', 'info')
+        toast(t('settings.devAhead'), 'info')
       } else {
-        toast('已与 dev HEAD 一致', 'success')
+        toast(t('settings.devUpToDate'), 'success')
       }
     } catch (e) {
-      toast(`dev 检查失败: ${e}`, 'error')
+      toast(t('settings.devCheckFailed', { error: String(e) }), 'error')
     } finally {
       setCheckingDev(false)
     }
@@ -3004,14 +3040,14 @@ function VersionSection() {
   return (
     <SettingsSection
       id="version"
-      title="版本"
+      title={t('settings.version')}
       headerExtras={
         <InfoButton>
           <ul>
-            <li>切换通道是改 UI 视图偏好（不动 git）；真正"切到 dev HEAD" / "更新到 vX.Y.Z" 是单独按钮</li>
-            <li>自动检查每 24 小时，仅看稳定版通道；切到开发版通道不进 Topbar 红点</li>
-            <li>更新 / 切换底层走 git reset --hard，需要时跑 pip / npm install</li>
-            <li>有运行中任务 / 本地工作树脏 → 操作会被 pre-flight 拒绝</li>
+            <li>{t('settings.versionInfoChannel')}</li>
+            <li>{t('settings.versionInfoAutoCheck')}</li>
+            <li>{t('settings.versionInfoUpdateImpl')}</li>
+            <li>{t('settings.versionInfoPreflight')}</li>
           </ul>
         </InfoButton>
       }
@@ -3023,22 +3059,23 @@ function VersionSection() {
         <div className="vs-zip-banner">
           {!version.git_available ? (
             <>
-              <div className="vs-zip-banner-title">未检测到 git</div>
+              <div className="vs-zip-banner-title">{t('settings.gitNotDetected')}</div>
               <div className="vs-zip-banner-body">
-                自动更新功能需要本地装有 git。请先{' '}
-                <a href="https://git-scm.com/downloads" target="_blank" rel="noreferrer">安装 git</a>
-                {' '}后重启 Studio。
+                <Trans
+                  i18nKey="settings.gitRequiredHelp"
+                  components={{ a: <a href="https://git-scm.com/downloads" target="_blank" rel="noreferrer" /> }}
+                />
               </div>
             </>
           ) : (
             <>
-              <div className="vs-zip-banner-title">启用自动更新</div>
+              <div className="vs-zip-banner-title">{t('settings.enableAutoUpdate')}</div>
               <div className="vs-zip-banner-body">
-                检测到你是 zip 解压安装。要使用版本面板的一键更新 / 切换通道功能，
-                需要在本地初始化 git 仓库（首次约 30–60 MB 下载历史元数据）。
-                本地源码会同步到上游 <b>v{version.stable_version?.replace(/^v/, '') ?? version.version}</b>
-                ，<b>你在 zip 目录里的本地修改会被覆盖</b>
-                （npm 自动生成的 lockfile / 自定义配置等都会重置到上游版本）。
+                <Trans
+                  i18nKey="settings.zipInstallGitInitHelp"
+                  values={{ version: `v${version.stable_version?.replace(/^v/, '') ?? version.version}` }}
+                  components={{ b: <b /> }}
+                />
               </div>
               <div className="vs-zip-banner-actions">
                 <button
@@ -3047,9 +3084,9 @@ function VersionSection() {
                   onClick={() => void handleInitGit()}
                   disabled={initing}
                 >
-                  {initing ? '初始化中…（约 30 秒）' : '启用自动更新'}
+                  {initing ? t('settings.initializingGit') : t('settings.enableAutoUpdate')}
                 </button>
-                {initError && <span className="vs-zip-banner-error">失败：{initError}</span>}
+                {initError && <span className="vs-zip-banner-error">{t('settings.failedWithError', { error: initError })}</span>}
               </div>
             </>
           )}
@@ -3058,16 +3095,16 @@ function VersionSection() {
 
       {/* 顶部：你装的是什么（一行事实状态，与通道偏好解耦） */}
       <div className="vs-installed-row">
-        <span className="vs-installed-label">你装的：</span>
-        <b className="vs-installed-value">{version?.installed_label ?? '加载中…'}</b>
-        {version?.is_dirty && !version.installed_label.includes('未提交修改') && (
-          <span className="vs-installed-warn">· 本地有改动</span>
+        <span className="vs-installed-label">{t('settings.installedVersionLabel')}</span>
+        <b className="vs-installed-value">{version?.installed_label ?? t('settings.loadingEllipsis')}</b>
+        {version?.is_dirty && !version.installed_label.includes(t('settings.uncommittedChangesText')) && (
+          <span className="vs-installed-warn">· {t('settings.localChanges')}</span>
         )}
       </div>
 
       {/* 通道偏好：radio toggle（不触发 git） */}
       <div className="vs-channel-toggle-row">
-        <span className="vs-channel-toggle-label">更新通道：</span>
+        <span className="vs-channel-toggle-label">{t('settings.updateChannel')}</span>
         <button
           type="button"
           role="radio"
@@ -3075,7 +3112,7 @@ function VersionSection() {
           className={`vs-channel-radio${channelPref === 'stable' ? ' on' : ''}`}
           onClick={() => { if (channelPref !== 'stable') void handleSwitchChannel('stable') }}
         >
-          <span className="vs-channel-dot" />稳定版
+          <span className="vs-channel-dot" />{t('settings.stable')}
         </button>
         <button
           type="button"
@@ -3084,9 +3121,9 @@ function VersionSection() {
           className={`vs-channel-radio${channelPref === 'dev' ? ' on' : ''}`}
           onClick={() => { if (channelPref !== 'dev') void handleSwitchChannel('dev') }}
         >
-          <span className="vs-channel-dot" />开发版
+          <span className="vs-channel-dot" />{t('settings.devBuild')}
         </button>
-        <span className="vs-channel-hint">仅切 UI 视图，不动 git</span>
+        <span className="vs-channel-hint">{t('settings.channelUiOnly')}</span>
       </div>
 
       <div className="vs-sec-card">
@@ -3237,9 +3274,9 @@ const KIND_PILL_CLASS: Record<string, string> = {
   security:   'vs-pill-here',     // accent
 }
 
-const KIND_LABEL: Record<string, string> = {
-  added: '新增', changed: '变更', improved: '改进', fixed: '修复',
-  removed: '删除', deprecated: '弃用', security: '安全',
+const KIND_LABEL_KEY: Record<string, string> = {
+  added: 'kindAdded', changed: 'kindChanged', improved: 'kindImproved', fixed: 'kindFixed',
+  removed: 'kindRemoved', deprecated: 'kindDeprecated', security: 'kindSecurity',
 }
 
 // chunk 4 — preview / progress 通用面板。channel 决定主按钮配色（master=primary
@@ -3259,6 +3296,7 @@ type PreviewPaneProps = {
 }
 
 function PreviewPane(p: PreviewPaneProps) {
+  const { t } = useTranslation()
   const confirmDisabled = !p.preflight || p.preflight.blocking || p.busy
   return (
     <div className="vs-preview-pane">
@@ -3272,11 +3310,11 @@ function PreviewPane(p: PreviewPaneProps) {
       {p.details}
 
       <div className="vs-preflight">
-        <div className="vs-h">Pre-flight 检查</div>
+        <div className="vs-h">{t('settings.preflightCheck')}</div>
         {p.loading ? (
           <div className="vs-row">
             <span className="vs-glyph">·</span>
-            <span>检查中…</span>
+            <span>{t('settings.checkingEllipsis')}</span>
           </div>
         ) : p.preflight ? (
           p.preflight.checks.map((c, i) => (
@@ -3290,25 +3328,30 @@ function PreviewPane(p: PreviewPaneProps) {
         ) : (
           <div className="vs-row err">
             <span className="vs-glyph">✗</span>
-            <span>预检失败 — 请重试</span>
+            <span>{t('settings.preflightFailedRetry')}</span>
           </div>
         )}
       </div>
 
       <div className="vs-chan-foot" style={{ borderTop: 0, paddingTop: 0 }}>
         <div className="vs-info">
-          git reset --hard · 关闭 server · 按需 pip/npm install · 重启 · 预计 1-3 分钟
+          {t('settings.preflightInfo')}
         </div>
         <div className="vs-actions">
           <button onClick={p.onCancel} disabled={p.busy} className="btn btn-sm">
-            取消
+            {t('settings.cancel')}
           </button>
           <button
             onClick={p.onConfirm}
             disabled={confirmDisabled}
             className={`btn btn-sm ${p.channel === 'master' ? 'btn-primary' : 'btn-warn'}`}
           >
-            {p.busy ? '处理中…' : `确认${p.channel === 'master' ? '更新' : '切换'} → ${p.toLabel}`}
+            {p.busy
+              ? t('settings.processing')
+              : t('settings.confirmActionTo', {
+                action: p.channel === 'master' ? t('settings.actionUpdate') : t('settings.actionSwitch'),
+                label: p.toLabel,
+              })}
           </button>
         </div>
       </div>
@@ -3317,6 +3360,7 @@ function PreviewPane(p: PreviewPaneProps) {
 }
 
 function ProgressPane({ fromLabel, toLabel }: { fromLabel: string; toLabel: string }) {
+  const { t } = useTranslation()
   return (
     <div className="vs-progress-pane">
       <div className="vs-preview-head">
@@ -3328,13 +3372,11 @@ function ProgressPane({ fromLabel, toLabel }: { fromLabel: string; toLabel: stri
         <div className="vs-progress-fill" style={{ width: '100%' }} />
       </div>
       <div className="vs-progress-step">
-        <span>已发起更新 · server 正在重启…</span>
-        <span>页面会自动等待并刷新</span>
+        <span>{t('settings.progressStarted')}</span>
+        <span>{t('settings.progressWaitReload')}</span>
       </div>
       <p style={{ color: 'var(--fg-tertiary)', fontSize: 11, lineHeight: 1.5, margin: 0 }}>
-        当前进程已发完 SIGINT 退出；cli.py 在做 git reset / pip / npm / 重启。
-        无法获取实时进度（server 已死）。重启后前端 reconnect 自动刷新；失败
-        时会进 master 卡片的红色 banner。
+        {t('settings.progressDetail')}
       </p>
     </div>
   )
@@ -3343,6 +3385,7 @@ function ProgressPane({ fromLabel, toLabel }: { fromLabel: string; toLabel: stri
 function MasterReleaseNotes({
   notes, onShowDetail,
 }: { notes: ReleaseNotes | null; onShowDetail: () => void }) {
+  const { t } = useTranslation()
   const entries = notes?.found ? notes.entries : []
   const total = entries.length
   if (total === 0) {
@@ -3352,8 +3395,8 @@ function MasterReleaseNotes({
           <span className="vs-glyph">▸</span>
           <span className="vs-txt">
             {notes && !notes.found
-              ? <>本 tag 在 <code>release_notes.yaml</code> 没有条目</>
-              : <>完整变更见 <code>CHANGELOG.md</code></>}
+              ? <Trans i18nKey="settings.releaseNoEntry" components={{ code: <code /> }} />
+              : <Trans i18nKey="settings.releaseSeeChangelog" components={{ code: <code /> }} />}
           </span>
         </li>
       </ul>
@@ -3373,7 +3416,7 @@ function MasterReleaseNotes({
             style={{ flexShrink: 0 }}
             title={e.detail ?? ''}
           >
-            {KIND_LABEL[e.kind] || e.kind}
+            {t(`settings.${KIND_LABEL_KEY[e.kind] ?? ''}`, { defaultValue: e.kind })}
           </span>
           <span className="vs-txt">{e.summary}</span>
         </li>
@@ -3382,14 +3425,14 @@ function MasterReleaseNotes({
         <li>
           <span className="vs-glyph">·</span>
           <span className="vs-txt" style={{ color: 'var(--fg-tertiary)' }}>
-            {overflow > 0 && <>还有 {overflow} 项 · </>}
+            {overflow > 0 && t('settings.moreItems', { count: overflow })}
             <button
               type="button"
               onClick={onShowDetail}
               className="vs-lnk"
               style={{ display: 'inline' }}
             >
-              详细内容 ↗
+              {t('settings.detailContent')}
             </button>
           </span>
         </li>
@@ -3399,6 +3442,7 @@ function MasterReleaseNotes({
 }
 
 function MasterCard(p: MasterCardProps) {
+  const { t } = useTranslation()
   // 装的是 stable 时显示当前稳定版号，否则 ver-tag 区不显示 from（"你装的"
   // 顶部行已经表达了装了什么，避免 "v0.8.0 → v0.8.0" 这种因 __version__
   // 字符串与目标 tag 字面相同导致的伪箭头）
@@ -3408,7 +3452,7 @@ function MasterCard(p: MasterCardProps) {
     : null
   // 远端最新稳定版（state=update_available 时显示）
   const targetTag = p.check?.latest_version ?? p.check?.latest_tag ?? ''
-  const stateText = formatMasterStateText(p.check)
+  const stateText = formatMasterStateText(p.check, t)
   const showUpdateButton = shouldShowMasterUpdateButton(p.check, p.version?.installed_kind)
   const showSwitchToStableButton = shouldShowSwitchToStableButton(p.check, p.version?.installed_kind)
   if (p.cardState === 'preview' && p.pendingTarget && p.pendingTarget.kind === 'master') {
@@ -3416,20 +3460,20 @@ function MasterCard(p: MasterCardProps) {
       <div className="vs-chan">
         <div className="vs-chan-head">
           <div className="vs-lhs">
-            <span className="vs-name">稳定版 · 确认更新</span>
-            <span className="vs-pill vs-pill-stable"><span className="vs-dot" />稳定</span>
+            <span className="vs-name">{t('settings.stableConfirmUpdate')}</span>
+            <span className="vs-pill vs-pill-stable"><span className="vs-dot" />{t('settings.stable')}</span>
           </div>
           <button className="btn btn-sm btn-ghost" onClick={p.onCancelPreview} disabled={p.busy}>
-            ← 返回
+            {t('settings.back')}
           </button>
         </div>
         <PreviewPane
           channel="master"
-          fromLabel={currentTag ?? p.version?.installed_label ?? '当前'}
+          fromLabel={currentTag ?? p.version?.installed_label ?? t('settings.currentShort')}
           toLabel={p.pendingTarget.label}
           details={
             <div className="vs-change-block">
-              <div className="vs-h">{p.pendingTarget.label} · 更新内容</div>
+              <div className="vs-h">{t('settings.targetUpdateContent', { label: p.pendingTarget.label })}</div>
               <MasterReleaseNotes notes={p.releaseNotes} onShowDetail={p.onShowReleaseNotesDetail} />
             </div>
           }
@@ -3447,17 +3491,17 @@ function MasterCard(p: MasterCardProps) {
       <div className="vs-chan">
         <div className="vs-chan-head">
           <div className="vs-lhs">
-            <span className="vs-name">稳定版 · 更新中</span>
-            <span className="vs-pill vs-pill-stable"><span className="vs-dot" />稳定</span>
+            <span className="vs-name">{t('settings.stableUpdating')}</span>
+            <span className="vs-pill vs-pill-stable"><span className="vs-dot" />{t('settings.stable')}</span>
           </div>
         </div>
-        <ProgressPane fromLabel={currentTag ?? p.version?.installed_label ?? '当前'} toLabel={p.pendingTarget.label} />
+        <ProgressPane fromLabel={currentTag ?? p.version?.installed_label ?? t('settings.currentShort')} toLabel={p.pendingTarget.label} />
       </div>
     )
   }
   const checkedAt = p.check?.checked_at
     ? new Date(p.check.checked_at * 1000).toLocaleString()
-    : '未检查'
+    : t('settings.notChecked')
   const releasedAt = p.version?.commit_time_iso
     ? new Date(p.version.commit_time_iso).toLocaleDateString()
     : null
@@ -3466,8 +3510,8 @@ function MasterCard(p: MasterCardProps) {
     <div className="vs-chan">
       <div className="vs-chan-head">
         <div className="vs-lhs">
-          <span className="vs-name">稳定版</span>
-          <span className="vs-pill vs-pill-stable"><span className="vs-dot" />稳定</span>
+          <span className="vs-name">{t('settings.stable')}</span>
+          <span className="vs-pill vs-pill-stable"><span className="vs-dot" />{t('settings.stable')}</span>
         </div>
         <div className={`vs-meta${p.hasUpdate ? ' attn' : ''}`}>{stateText}</div>
       </div>
@@ -3476,10 +3520,10 @@ function MasterCard(p: MasterCardProps) {
         <div className="vs-fail-banner">
           <div className="vs-h">
             <span>
-              上次更新
-              {p.status.status === 'aborted' ? '中止'
-                : p.status.status === 'partial' ? '部分成功'
-                : '失败'}
+              {t('settings.lastUpdate')}
+              {p.status.status === 'aborted' ? t('settings.statusAborted')
+                : p.status.status === 'partial' ? t('settings.statusPartial')
+                : t('settings.statusFailed')}
             </span>
             {!!p.status.finished_at && (
               <span className="vs-when">
@@ -3488,17 +3532,17 @@ function MasterCard(p: MasterCardProps) {
             )}
           </div>
           <div className="vs-d">
-            {p.status.reason || '原因未知'}
+            {p.status.reason || t('settings.unknownReason')}
             {p.status.target && <> · target = <code>{p.status.target}</code></>}
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {p.hasUpdate && (
               <button className="btn btn-primary btn-sm" onClick={p.onUpdate} disabled={p.busy}>
-                重试更新到 {targetTag}
+                {t('settings.retryUpdateTo', { tag: targetTag })}
               </button>
             )}
             <button className="btn btn-sm" onClick={p.onViewLog} disabled={p.busy}>
-              <VersionIcon name="log" />查看完整日志
+              <VersionIcon name="log" />{t('settings.viewFullLog')}
             </button>
           </div>
         </div>
@@ -3524,10 +3568,10 @@ function MasterCard(p: MasterCardProps) {
             ) : null}
           </div>
           <div className="vs-ver-meta">
-            {releasedAt && <span>发布于 <b>{releasedAt}</b></span>}
+            {releasedAt && <span>{t('settings.releasedAt')} <b>{releasedAt}</b></span>}
           </div>
           {!p.hasUpdate && p.solo && (
-            <div className="vs-ver-tagline">Topbar 红点 + 自动检查仅看此通道。</div>
+            <div className="vs-ver-tagline">{t('settings.topbarMasterOnly')}</div>
           )}
         </div>
 
@@ -3535,7 +3579,7 @@ function MasterCard(p: MasterCardProps) {
 
         <div className="vs-change-block">
           <div className="vs-h">
-            {p.hasUpdate ? `${targetTag} · 更新内容` : `${targetTag || currentTag || ''} · 此版本`}
+            {p.hasUpdate ? t('settings.targetUpdateContent', { label: targetTag }) : t('settings.targetThisVersion', { label: targetTag || currentTag || '' })}
           </div>
           <MasterReleaseNotes notes={p.releaseNotes} onShowDetail={p.onShowReleaseNotesDetail} />
         </div>
@@ -3545,17 +3589,17 @@ function MasterCard(p: MasterCardProps) {
         <div className="vs-info">
           {p.check?.error
             ? <span style={{ color: 'var(--err)' }}>{p.check.error}</span>
-            : <span>上次检查 {checkedAt}</span>}
+            : <span>{t('settings.lastCheck', { time: checkedAt })}</span>}
         </div>
         <div className="vs-actions">
           <button onClick={p.onCheck} disabled={p.checking || p.busy} className="btn btn-sm">
-            <VersionIcon name="refresh" />{p.checking ? '检查中…' : '检查更新'}
+            <VersionIcon name="refresh" />{p.checking ? t('settings.checkingEllipsis') : t('settings.checkUpdates')}
           </button>
           {/* state=update_available 才显示更新按钮；up_to_date / ahead / detached 不显示
               （上面 vs-meta 已经把"已是最新 / 本地领先 / 当前不在历史上"说清楚了）*/}
           {showUpdateButton && (
             <button onClick={p.onUpdate} disabled={p.busy || p.checking} className="btn btn-sm btn-primary">
-              {p.busy ? '更新中…' : `更新到 ${targetTag}…`}
+              {p.busy ? t('settings.updatingEllipsis') : t('settings.updateTo', { tag: targetTag })}
             </button>
           )}
           {/* 装在非稳定版（dev / custom）时显示"切到最新稳定版"按钮；
@@ -3563,7 +3607,7 @@ function MasterCard(p: MasterCardProps) {
               installed_kind 排除了非 stable），避免同屏显示两个做同样事的按钮 */}
           {showSwitchToStableButton && (
             <button onClick={p.onSwitchToMaster} disabled={p.busy || p.checking} className="btn btn-sm btn-primary">
-              {p.busy ? '切换中…' : `切到稳定版 ${p.check?.latest_version}…`}
+              {p.busy ? t('settings.switchingEllipsis') : t('settings.switchToStable', { tag: p.check?.latest_version })}
             </button>
           )}
         </div>
@@ -3581,17 +3625,17 @@ function MasterCard(p: MasterCardProps) {
           <details className="vs-rollback-collapse">
             <summary className="vs-rollback-summary">
               <span className="vs-caret">▸</span>
-              历史版本可切回（{label}）
+              {t('settings.rollbackAvailable', { label })}
             </summary>
             <div className="vs-rollback-inline-row">
               <div className="vs-lhs">
                 <span className="vs-ico"><VersionIcon name="rollback" /></span>
-                <span>上一版本</span>
+                <span>{t('settings.previousVersion')}</span>
                 <b>{label}</b>
                 {tag && <span className="vs-when">{sha.slice(0, 8)}</span>}
               </div>
               <button onClick={p.onRollback} disabled={p.busy || p.checking} className="btn btn-sm">
-                切回 {label}
+                {t('settings.switchBackTo', { label })}
               </button>
             </div>
           </details>
@@ -3623,49 +3667,50 @@ type DevCardProps = {
 }
 
 function DevCard(p: DevCardProps) {
+  const { t } = useTranslation()
   const commits = p.commits?.commits ?? []
   const head = commits[0]?.short_sha ?? p.check?.latest_commit?.slice(0, 8)
   const selectedCommit = p.selectedSha ? commits.find((c) => c.sha === p.selectedSha) ?? null : null
   const fetchError = p.commits?.error ?? p.check?.error
-  const currentShortSha = p.currentSha ? p.currentSha.slice(0, 8) : '当前'
-  const stateText = formatDevStateText(p.check)
+  const currentShortSha = p.currentSha ? p.currentSha.slice(0, 8) : t('settings.currentShort')
+  const stateText = formatDevStateText(p.check, t)
   // installedKind 用作 check 还没 resolve 期间的 fallback：装 dev tip 时
   // 按钮 disabled，避免显示可点但点了 no-op
   const devSwitchDisabled = isDevSwitchButtonDisabled(p.check, p.installedKind)
   if (p.cardState === 'preview' && p.pendingTarget && p.pendingTarget.kind === 'dev') {
-    const t = p.pendingTarget
+    const target = p.pendingTarget
     return (
       <div className="vs-chan">
         <div className="vs-chan-head">
           <div className="vs-lhs">
-            <span className="vs-name">开发版 · 确认切换</span>
-            <span className="vs-pill vs-pill-dev"><span className="vs-dot" />开发版</span>
+            <span className="vs-name">{t('settings.devConfirmSwitch')}</span>
+            <span className="vs-pill vs-pill-dev"><span className="vs-dot" />{t('settings.devBuild')}</span>
           </div>
           <button className="btn btn-sm btn-ghost" onClick={p.onCancelPreview} disabled={p.busy}>
-            ← 返回
+            {t('settings.back')}
           </button>
         </div>
         <PreviewPane
           channel="dev"
           fromLabel={currentShortSha}
-          toLabel={t.label}
+          toLabel={target.label}
           details={
             <div className="vs-change-block">
-              <div className="vs-h">{t.label} · 此 commit</div>
-              {t.msg ? (
+              <div className="vs-h">{t('settings.targetThisCommit', { label: target.label })}</div>
+              {target.msg ? (
                 <>
                   <div style={{ fontSize: 13, color: 'var(--fg-primary)', marginTop: 4, lineHeight: 1.5 }}>
-                    {t.msg}
+                    {target.msg}
                   </div>
-                  {t.author && (
+                  {target.author && (
                     <div className="vs-ver-meta" style={{ marginTop: 6 }}>
-                      <span>author <b>{t.author}</b></span>
+                      <span>author <b>{target.author}</b></span>
                     </div>
                   )}
                 </>
               ) : (
                 <div style={{ fontSize: 13, color: 'var(--fg-tertiary)', marginTop: 4 }}>
-                  切到 dev HEAD
+                  {t('settings.switchToDevHeadDesc')}
                 </div>
               )}
             </div>
@@ -3684,8 +3729,8 @@ function DevCard(p: DevCardProps) {
       <div className="vs-chan">
         <div className="vs-chan-head">
           <div className="vs-lhs">
-            <span className="vs-name">开发版 · 切换中</span>
-            <span className="vs-pill vs-pill-dev"><span className="vs-dot" />开发版</span>
+            <span className="vs-name">{t('settings.devSwitching')}</span>
+            <span className="vs-pill vs-pill-dev"><span className="vs-dot" />{t('settings.devBuild')}</span>
           </div>
         </div>
         <ProgressPane fromLabel={currentShortSha} toLabel={p.pendingTarget.label} />
@@ -3697,8 +3742,8 @@ function DevCard(p: DevCardProps) {
     <div className="vs-chan">
       <div className="vs-chan-head">
         <div className="vs-lhs">
-          <span className="vs-name">开发版</span>
-          <span className="vs-pill vs-pill-dev"><span className="vs-dot" />开发版</span>
+          <span className="vs-name">{t('settings.devBuild')}</span>
+          <span className="vs-pill vs-pill-dev"><span className="vs-dot" />{t('settings.devBuild')}</span>
         </div>
         <div className={`vs-meta${p.check?.state === 'update_available' ? ' attn' : ''}`}>
           {fetchError && !head ? (
@@ -3709,13 +3754,13 @@ function DevCard(p: DevCardProps) {
               {p.check && <>{' · '}{stateText}</>}
             </>
           ) : (
-            <span>未抓取</span>
+            <span>{t('settings.notFetched')}</span>
           )}
         </div>
       </div>
 
       <div className="vs-change-block" style={{ paddingTop: 4, paddingBottom: 4 }}>
-        <div className="vs-h">最近提交</div>
+        <div className="vs-h">{t('settings.recentCommits')}</div>
         {commits.length === 0 ? (
           <ul className="vs-change-list">
             <li>
@@ -3723,7 +3768,7 @@ function DevCard(p: DevCardProps) {
               <span className="vs-txt">
                 {fetchError
                   ? <span style={{ color: 'var(--err)' }}>{fetchError}</span>
-                  : '点 [抓取 dev] 查看最近提交。'}
+                  : t('settings.fetchDevHint')}
               </span>
             </li>
           </ul>
@@ -3755,13 +3800,13 @@ function DevCard(p: DevCardProps) {
                     <span className="vs-sha">{c.short_sha}</span>
                     <span className="vs-pill-slot">
                       {isCurrent ? (
-                        <span className="vs-head-pill">● 当前</span>
+                        <span className="vs-head-pill">{t('settings.currentMarker')}</span>
                       ) : isHead ? (
                         <span className="vs-head-pill">HEAD</span>
                       ) : isSelected ? (
-                        <span className="vs-switch-hint">已选 ✓</span>
+                        <span className="vs-switch-hint">{t('settings.selectedMarker')}</span>
                       ) : (
-                        <span className="vs-switch-hint">切到此 →</span>
+                        <span className="vs-switch-hint">{t('settings.switchHere')}</span>
                       )}
                     </span>
                   </li>
@@ -3770,7 +3815,7 @@ function DevCard(p: DevCardProps) {
             </ul>
             {p.commits && !p.commits.fetched && p.commits.error && (
               <p className="vs-d" style={{ color: 'var(--warn)', marginTop: 6 }}>
-                ⚠ fetch 失败（{p.commits.error}）；列表是本地 origin/dev 缓存
+                {t('settings.fetchFailedCached', { error: p.commits.error })}
               </p>
             )}
           </>
@@ -3786,14 +3831,14 @@ function DevCard(p: DevCardProps) {
           </span>
           <div className="vs-actions">
             <button onClick={() => p.setSelectedSha(null)} disabled={p.busy} className="btn btn-sm btn-ghost">
-              取消
+              {t('settings.cancel')}
             </button>
             <button
               onClick={() => p.onSwitchToCommit(selectedCommit)}
               disabled={p.busy || p.checking}
               className="btn btn-sm btn-warn"
             >
-              {p.busy ? '切换中…' : `切到 ${selectedCommit.short_sha}…`}
+              {p.busy ? t('settings.switchingEllipsis') : t('settings.switchToCommit', { sha: selectedCommit.short_sha })}
             </button>
           </div>
         </div>
@@ -3801,25 +3846,25 @@ function DevCard(p: DevCardProps) {
         <div className="vs-chan-foot">
           <div className="vs-info">
             {p.check?.checked_at
-              ? <span>上次抓取 {new Date(p.check.checked_at * 1000).toLocaleString()}</span>
-              : <span style={{ color: 'var(--fg-tertiary)' }}>未抓取</span>}
+              ? <span>{t('settings.lastFetch', { time: new Date(p.check.checked_at * 1000).toLocaleString() })}</span>
+              : <span style={{ color: 'var(--fg-tertiary)' }}>{t('settings.notFetched')}</span>}
           </div>
           <div className="vs-actions">
             <button onClick={p.onCheck} disabled={p.checking || p.busy} className="btn btn-sm">
-              <VersionIcon name="refresh" />{p.checking ? '抓取中…' : '抓取 dev'}
+              <VersionIcon name="refresh" />{p.checking ? t('settings.fetchingEllipsis') : t('settings.fetchDev')}
             </button>
             {/* 切按钮 disabled 条件改用 commit 比较（state=up_to_date），不再
                 看 branch / installed_kind —— 因为 release 直后存在"装的是 stable
                 但 commit 恰好等于 dev HEAD"的边界，此时切操作是 no-op */}
             {devSwitchDisabled ? (
-              <button disabled className="btn btn-sm">已与 dev HEAD 同步</button>
+              <button disabled className="btn btn-sm">{t('settings.alreadyAtDevHead')}</button>
             ) : commits.length > 0 ? (
               <button
                 onClick={p.onSwitchToDev}
                 disabled={p.busy || p.checking}
                 className="btn btn-sm btn-warn"
               >
-                {p.busy ? '切换中…' : `切到 dev HEAD${head ? ` (${head})` : ''}`}
+                {p.busy ? t('settings.switchingEllipsis') : t('settings.switchToDev', { head: head ? ` (${head})` : '' })}
               </button>
             ) : null}
           </div>
@@ -3834,6 +3879,7 @@ function DevCard(p: DevCardProps) {
 function UpdateLogModal({
   loading, content, onClose,
 }: { loading: boolean; content: string; onClose: () => void }) {
+  const { t } = useTranslation()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -3849,16 +3895,16 @@ function UpdateLogModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-subtle px-4 py-2.5">
-          <h3 className="text-sm font-semibold text-fg-primary">上次更新日志</h3>
+          <h3 className="text-sm font-semibold text-fg-primary">{t('settings.updateLogTitle')}</h3>
           <button
             onClick={onClose}
             className="text-fg-dim hover:text-fg-primary text-lg leading-none"
-            aria-label="关闭"
+            aria-label={t('common.close')}
           >×</button>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
-            <span className="text-fg-dim text-sm">加载中...</span>
+            <span className="text-fg-dim text-sm">{t('common.loading')}</span>
           ) : (
             <pre className="text-2xs font-mono text-fg-primary whitespace-pre-wrap break-words">
               {content}
@@ -3879,6 +3925,7 @@ function UpdateLogModal({
 function ReleaseNotesDetailModal({
   notes, onClose,
 }: { notes: ReleaseNotes; onClose: () => void }) {
+  const { t } = useTranslation()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -3906,7 +3953,7 @@ function ReleaseNotesDetailModal({
           <button
             onClick={onClose}
             className="text-fg-dim hover:text-fg-primary text-xl leading-none px-1"
-            aria-label="关闭"
+            aria-label={t('common.close')}
           >×</button>
         </div>
         <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
@@ -3917,7 +3964,7 @@ function ReleaseNotesDetailModal({
                   className={`vs-pill ${KIND_PILL_CLASS[e.kind] || 'vs-pill-info'}`}
                   style={{ flexShrink: 0, marginTop: 2 }}
                 >
-                  {KIND_LABEL[e.kind] || e.kind}
+                  {t(`settings.${KIND_LABEL_KEY[e.kind] ?? ''}`, { defaultValue: e.kind })}
                 </span>
                 <span className="text-sm text-fg-primary font-medium leading-snug">
                   {e.summary}
@@ -3953,16 +4000,15 @@ function ReleaseNotesDetailModal({
 
 // ── 服务 Section（重启 server）─────────────────────────────────────────
 function ServiceSection() {
+  const { t } = useTranslation()
   const { toast } = useToast()
   const dialog = useDialog()
   const [busy, setBusy] = useState(false)
 
   const handleRestart = async () => {
     const ok = await dialog.confirm(
-      '将关闭并重新启动 Studio 后端服务。\n\n' +
-      '通常 30 秒到 1 分钟，期间 webui 无法访问（页面会自动等待并刷新）。\n\n' +
-      '若有训练 / 打标任务在跑会被拒绝（PR-B 起加保护）。',
-      { tone: 'warn', okText: '重启' },
+      t('settings.confirmRestartService'),
+      { tone: 'warn', okText: t('settings.restart') },
     )
     if (!ok) return
 
@@ -3972,26 +4018,26 @@ function ServiceSection() {
     } catch (e) {
       const err = e as Error & { status?: number; detail?: { error?: string; tasks?: { name: string; id?: number }[] } }
       if (err.status === 422 && err.detail?.error === 'running_tasks_present') {
-        const names = (err.detail.tasks ?? []).map((t) => t.name || `task#${t.id ?? '?'}`).join(', ')
-        toast(`有任务在跑，请先取消：${names}`, 'error')
+        const names = (err.detail.tasks ?? []).map((task) => task.name || `task#${task.id ?? '?'}`).join(', ')
+        toast(t('settings.taskRunningCancelFirst', { names }), 'error')
       } else {
-        toast(`触发重启失败: ${err.message ?? e}`, 'error')
+        toast(t('settings.restartTriggerFailed', { error: err.message ?? String(e) }), 'error')
       }
       setBusy(false)
       return
     }
 
-    void pollHealthThenReload(toast, 5 * 60_000, '重启', () => setBusy(false))
+    void pollHealthThenReload(toast, 5 * 60_000, t('settings.restart'), () => setBusy(false), t)
   }
 
   return (
-    <SettingsSection id="service" title="服务">
+    <SettingsSection id="service" title={t('settings.service')}>
       <SettingsField
-        label="重启 Studio"
+        label={t('settings.serviceRestartTitle')}
         helpTooltip={
           <>
-            <p>关闭并重新启动后端进程。</p>
-            <p>常用场景：修改 <code>secrets.json</code> 后强制刷新、装完新 onnxruntime / PyTorch 让 EP 生效。</p>
+            <p>{t('settings.serviceRestartHelp1')}</p>
+            <p><Trans i18nKey="settings.serviceRestartHelp2" components={{ code: <code /> }} /></p>
           </>
         }
       >
@@ -4000,7 +4046,7 @@ function ServiceSection() {
           disabled={busy}
           className="btn btn-secondary btn-sm self-start"
         >
-          {busy ? '重启中...' : '重启 server'}
+          {busy ? t('settings.restarting') : t('settings.restartServer')}
         </button>
       </SettingsField>
     </SettingsSection>
