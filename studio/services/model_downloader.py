@@ -4,7 +4,7 @@
 
 提供：
 - 模型清单常量（ANIMA_VARIANTS / VAE / Qwen3 / T5 tokenizer）
-- `models_root()` — 默认 `REPO_ROOT/anima/`，后续 PP7 加 `models_root` 全局配置后会改读 secrets
+- `models_root()` — 读 `secrets.models.root`；未设时回退 `REPO_ROOT/models/`
 - `build_catalog(root)` — 扫盘组装一份 catalog（哪些已下载、目标路径、大小）
 - 同步下载 helper：`download_anima_main` / `download_anima_vae` / `download_qwen3` /
   `download_t5_tokenizer`，CLI 直接调

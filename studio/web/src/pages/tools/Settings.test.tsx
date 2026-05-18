@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import { DialogProvider } from '../../components/Dialog'
 import { ToastProvider } from '../../components/Toast'
 import SettingsPage from './Settings'
@@ -101,7 +102,7 @@ const initialServerState = {
     blacklist_tags: [],
     batch_size: 8,
   },
-  models: { root: null, selected_anima: '1.0' },
+  models: { root: null, selected_anima: '1.0', selected_upscaler: '4x-AnimeSharp', auto_sync_paths: true },
   queue: { allow_gpu_during_train: false },
 }
 
@@ -212,11 +213,13 @@ afterEach(() => {
 
 function renderPage() {
   return render(
-    <ToastProvider>
-      <DialogProvider>
-        <SettingsPage />
-      </DialogProvider>
-    </ToastProvider>
+    <MemoryRouter>
+      <ToastProvider>
+        <DialogProvider>
+          <SettingsPage />
+        </DialogProvider>
+      </ToastProvider>
+    </MemoryRouter>
   )
 }
 

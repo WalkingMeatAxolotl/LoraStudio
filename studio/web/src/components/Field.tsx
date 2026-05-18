@@ -15,10 +15,14 @@ interface Props {
   disabled?: boolean
   /** 字段标签后的小徽章（如「自动 · 全局设置」/「自动 · 项目设置」）。
    * 与 disabled 解耦：可以让字段保持可编辑只挂个徽章作信息提示，也可以
-   * 配合 disabled 来表达「这字段被自动填且不让你改」。 */
-  hint?: string
+   * 配合 disabled 来表达「这字段被自动填且不让你改」。支持 ReactNode 以便
+   * 嵌入可点击链接（如跳转到 Settings 对应区段）。 */
+  hint?: React.ReactNode
   /** 覆盖 prop.description 的说明文字（用于条件上下文描述）。 */
   descriptionOverride?: string
+  /** path 字段右侧额外按钮槽（如「↺ 重置为全局默认」）。仅对 string/path
+   * 字段渲染；其他类型字段忽略。 */
+  suffix?: React.ReactNode
 }
 
 // input 覆盖 .input 默认值（更紧凑；背景用 canvas 而不是 surface）
@@ -29,20 +33,20 @@ const inputStyle: React.CSSProperties = {
   color: 'var(--fg-primary)',
 }
 
-const FieldHint = ({ text }: { text: string }) => (
-  <span className="ml-2 text-[11px] text-warn align-middle">{text}</span>
+const FieldHint = ({ children }: { children: React.ReactNode }) => (
+  <span className="ml-2 text-[11px] text-warn align-middle">{children}</span>
 )
 
 /** 单个表单字段，按 control kind 分发渲染。 */
 export default function Field({
-  name, prop, value, onChange, disabled = false, hint, descriptionOverride,
+  name, prop, value, onChange, disabled = false, hint, descriptionOverride, suffix,
 }: Props) {
   const { t } = useTranslation()
   const kind = controlKind(prop)
   const label = fieldLabel(name)
   const help = descriptionOverride ?? prop.description
   const hintText = hint ?? (disabled ? t('field.autoProject') : null)
-  const hintNode = hintText ? <FieldHint text={hintText} /> : null
+  const hintNode = hintText ? <FieldHint>{hintText}</FieldHint> : null
   void name
 
   // bool ----------------------------------------------------------------
@@ -166,6 +170,7 @@ export default function Field({
       onChange={onChange}
       disabled={disabled}
       hintNode={hintNode}
+      suffix={suffix}
     />
   )
 }
@@ -256,10 +261,12 @@ interface PathFieldProps {
   onChange: (v: unknown) => void
   disabled?: boolean
   hintNode?: React.ReactNode
+  /** 输入行右侧额外按钮槽（如重置按钮）。 */
+  suffix?: React.ReactNode
 }
 
 function PathStringField({
-  name, label, kind, help, value, onChange, disabled = false, hintNode,
+  name, label, kind, help, value, onChange, disabled = false, hintNode, suffix,
 }: PathFieldProps) {
   const { t } = useTranslation()
   const [picking, setPicking] = useState(false)
@@ -302,6 +309,7 @@ function PathStringField({
             {useResumePicker ? t('field.browseProject') : t('field.browse')}
           </button>
         )}
+        {suffix}
       </div>
       {help && <div className="text-xs text-fg-tertiary mt-1">{help}</div>}
       {/* resume_state / resume_lora：贴字段的 dropdown，按 version 分组列文件 */}

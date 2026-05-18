@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from ..presets_io import _absolutize_model_paths
 from ..schema import TrainingConfig
 from ..versions import version_dir
 from .. import projects as _projects
@@ -107,7 +108,7 @@ def read_version_config(
         cfg = TrainingConfig.model_validate(raw)
     except ValidationError as exc:
         raise VersionConfigError(f"config 校验失败: {exc}") from exc
-    return cfg.model_dump(mode="python")
+    return _absolutize_model_paths(cfg.model_dump(mode="python"))
 
 
 def write_version_config(

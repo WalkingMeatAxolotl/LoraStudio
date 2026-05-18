@@ -319,6 +319,10 @@ export const DEFAULT_WD14_MODELS: readonly string[] = [
 ]
 
 export interface ModelsConfig {
+  /** fork 预设到 version 时是否自动用全局模型路径覆盖 4 个模型字段。
+   * ON（默认）：多数用户场景，4 字段在 UI 上 disabled；fork 始终用 Settings 全局。
+   * OFF：独立模型用户，fork 尊重预设值，4 字段可编辑 + picker。 */
+  auto_sync_paths: boolean
   /** 训练模型根目录；null/空 → 回退 REPO_ROOT/models/（云端机改这里） */
   root: string | null
   /** 当前默认主模型 variant（1.0 / preview3-base / preview2 / preview）。
@@ -1170,6 +1174,8 @@ export const api = {
 
   // Models management (PP7) ------------------------------------------------
   getModelsCatalog: () => req<ModelsCatalog>('/api/models/catalog'),
+  /** 当前 Settings 算出的 4 个模型字段绝对路径。预设页 reset / 新建用。 */
+  getModelPathDefaults: () => req<Record<string, string>>('/api/models/path-defaults'),
   startModelDownload: (body: { model_id: string; variant?: string }) =>
     req<{ key: string; status: string }>('/api/models/download', {
       method: 'POST',
@@ -2010,4 +2016,6 @@ export interface BrowseResult {
   path: string
   parent: string | null
   entries: BrowseEntry[]
+  /** 若传入的是文件路径，后端会回退到父目录，并把文件名放在这里供 picker 高亮。 */
+  selected?: string | null
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate, useOutletContext } from 'react-router-dom'
+import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import {
   api,
   type ConfigData,
@@ -51,6 +51,7 @@ export default function TrainPage() {
   const [config, setConfig] = useState<ConfigData | null>(null)
   const [reg, setReg] = useState<RegStatus | null>(null)
   const [busy, setBusy] = useState(false)
+  const [autoSyncPaths, setAutoSyncPaths] = useState<boolean>(true)
 
   /** 已落盘的 config JSON 快照，dirty 判断的 baseline。 */
   const savedJsonRef = useRef<string | null>(null)
@@ -106,6 +107,7 @@ export default function TrainPage() {
   useEffect(() => {
     api.schema().then(setSchema).catch((e) => toast(t('train.loadSchemaFailed', { error: e }), 'error'))
     api.listPresets().then(setPresets).catch(() => setPresets([]))
+    api.getSecrets().then((s) => setAutoSyncPaths(s.models?.auto_sync_paths ?? true)).catch(() => {})
   }, [toast, t])
 
   useEffect(() => {
@@ -119,24 +121,69 @@ export default function TrainPage() {
   }, [project.id, vid])
 
 
-  // 全局模型路径仍然灰显 readonly（值来自 Settings.models 配置；version 维度
-  // 改了没意义）。PP10.4 起项目特定字段（data_dir 等）改成可编辑：fork preset
-  // 时仍然预填项目路径，但用户后续可以自由改（接续训练填 resume_lora 之类）。
-  const disabledFields = GLOBAL_MODEL_FIELDS
+  // auto_sync_paths ON（默认 / 多数用户）：4 个模型路径字段 disabled，fork 时
+  // 后端自动用 Settings 全局值覆盖；OFF（独立模型用户）：字段可编辑 + reset
+  // 按钮，fork 时尊重预设里的绝对路径。
+  const disabledFields = autoSyncPaths ? GLOBAL_MODEL_FIELDS : []
   const disabledHints = useMemo(() => {
-    const h: Record<string, string> = {}
-    for (const f of GLOBAL_MODEL_FIELDS) h[f] = t('train.globalAutoHint')
+    const h: Record<string, React.ReactNode> = {}
+    if (autoSyncPaths) {
+      const node = (
+        <>
+          {t('train.globalAutoLockedPrefix')} ·{' '}
+          <Link
+            to="/tools/settings?section=models"
+            className="underline text-warn hover:opacity-80"
+          >
+            {t('train.globalAutoLockedLink')}
+          </Link>
+        </>
+      )
+      for (const f of GLOBAL_MODEL_FIELDS) h[f] = node
+    }
     return h
-  }, [t])
+  }, [t, autoSyncPaths])
   // 项目特定字段（data_dir / reg_data_dir / output_dir 等）：值由项目预填，但
   // 不锁定，挂「自动 · 项目设置」徽章让用户知道这是预填的，不是预设里来的。
+  // toggle OFF 时全局模型字段也挂 hint「默认来自 Settings · 可改」。
   const autoHints = useMemo(() => {
     const h: Record<string, string> = {}
     for (const f of configResp?.project_specific_fields ?? []) {
       if (!GLOBAL_MODEL_FIELDS.includes(f)) h[f] = t('train.projectAutoHint')
     }
+    if (!autoSyncPaths) {
+      for (const f of GLOBAL_MODEL_FIELDS) h[f] = t('train.globalAutoEditableHint')
+    }
     return h
-  }, [configResp?.project_specific_fields, t])
+  }, [configResp?.project_specific_fields, t, autoSyncPaths])
+
+  // toggle OFF 时给 4 个模型字段加「↺ 重置为全局默认」按钮。值取自
+  // configResp.project_specific_defaults（后端已用 default_paths_for_new_version
+  // 算好的绝对路径）。
+  const makeResetSuffixes = useCallback(
+    (formValues: ConfigData | null, setForm: (v: ConfigData) => void): Record<string, React.ReactNode> => {
+      if (autoSyncPaths) return {}
+      const psd = configResp?.project_specific_defaults
+      if (!psd || !formValues) return {}
+      const out: Record<string, React.ReactNode> = {}
+      for (const f of GLOBAL_MODEL_FIELDS) {
+        const dv = psd[f]
+        if (typeof dv !== 'string' || !dv) continue
+        out[f] = (
+          <button
+            type="button"
+            onClick={() => setForm({ ...formValues, [f]: dv })}
+            className="btn btn-ghost btn-sm shrink-0"
+            title={t('train.resetToGlobalDefaultTitle')}
+          >
+            {t('train.resetToGlobalDefault')}
+          </button>
+        )
+      }
+      return out
+    },
+    [autoSyncPaths, configResp?.project_specific_defaults, t],
+  )
 
   /** 落盘 cfg。串行化保证：如果上一次 save 还在飞，等它跑完再决定是否要再
    * save；这样多次 setConfig + debounce 不会丢任何一次的内容。
@@ -341,16 +388,23 @@ export default function TrainPage() {
     }
     setBusy(true)
     try {
-      // 全局预设池不带项目 / 机器数据：项目特定字段 + 全局模型路径清回 schema
-      // 默认。fork 时后端会再注入项目/全局值，所以 version config 仍然正确。
+      // 全局预设池不带项目数据：项目特定字段清回 schema 默认。
+      // 4 个模型字段：toggle ON 时清成当前 Settings 算的绝对路径（保持
+      // yaml 写盘统一绝对，且不带本机自定义路径出去）；toggle OFF 时原样
+      // 保留绝对路径（独立模型用户的主动设置）。
       // 跟 services/presets.py:save_version_config_as_preset 的清理逻辑对齐。
       const schemaDefaults = defaultsFromSchema(schema)
-      const fieldsToReset = [
-        ...(configResp?.project_specific_fields ?? []),
-        ...GLOBAL_MODEL_FIELDS,
-      ]
       const cleaned: ConfigData = { ...newPresetConfig }
-      for (const f of fieldsToReset) cleaned[f] = schemaDefaults[f]
+      for (const f of configResp?.project_specific_fields ?? []) {
+        if (GLOBAL_MODEL_FIELDS.includes(f)) continue
+        cleaned[f] = schemaDefaults[f]
+      }
+      if (autoSyncPaths) {
+        const psd = configResp?.project_specific_defaults ?? {}
+        for (const f of GLOBAL_MODEL_FIELDS) {
+          if (typeof psd[f] === 'string' && psd[f]) cleaned[f] = psd[f]
+        }
+      }
       await api.savePreset(name, cleaned)
       const desc = newPresetDesc.trim()
       if (desc) {
@@ -593,6 +647,7 @@ export default function TrainPage() {
                       disabledFields={disabledFields}
                       disabledHints={disabledHints}
                       autoHints={autoHints}
+                      fieldSuffixes={makeResetSuffixes(newPresetConfig, setNewPresetConfig)}
                       advancedMode={advancedMode}
                     />
                   </div>
@@ -648,6 +703,7 @@ export default function TrainPage() {
                   disabledFields={disabledFields}
                   disabledHints={disabledHints}
                   autoHints={autoHints}
+                  fieldSuffixes={makeResetSuffixes(config, setConfigSync)}
                   advancedMode={advancedMode}
                 />
               </section>

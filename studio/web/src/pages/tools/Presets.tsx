@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 import {
   api,
   type ConfigData,
@@ -62,6 +63,9 @@ export default function PresetsPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [config, setConfig] = useState<ConfigData | null>(null)
   const [busy, setBusy] = useState(false)
+  const [autoSyncPaths, setAutoSyncPaths] = useState<boolean>(true)
+  // 4 个模型字段当前 Settings 算出的绝对路径（reset 按钮 + 新建预设默认值）
+  const [modelPathDefaults, setModelPathDefaults] = useState<Record<string, string>>({})
 
   // 已保存快照，用于 dirty 判定
   const savedJsonRef = useRef<string | null>(null)
@@ -89,10 +93,17 @@ export default function PresetsPage() {
   const newNameInputRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  // ── 加载 schema + 预设列表 ──
+  // 4 个模型字段（用于新建预设默认值 / reset 按钮）。同 Train.tsx 的 GLOBAL_MODEL_FIELDS。
+  const MODEL_PATH_FIELDS = useMemo(() => [
+    'transformer_path', 'vae_path', 'text_encoder_path', 't5_tokenizer_path',
+  ], [])
+
+  // ── 加载 schema + 预设列表 + Settings toggle + 模型路径默认 ──
   useEffect(() => {
     api.schema().then(setSchema).catch((e) => toast(t('presets.loadSchemaFailed', { error: e }), 'error'))
     refreshList()
+    api.getSecrets().then((s) => setAutoSyncPaths(s.models?.auto_sync_paths ?? true)).catch(() => {})
+    api.getModelPathDefaults().then(setModelPathDefaults).catch(() => {})
   }, [t, toast])
 
   const refreshList = () => {
@@ -102,6 +113,10 @@ export default function PresetsPage() {
   // ── 选 preset 切换 ──
   // 新建模式（selected=null）：优先用 draftSeed（来自「复制副本」/「导入」），
   // 没种子就用 schema 默认值。draftSeed 是一次性的，消费后清空。
+  // modelPathDefaults 加进 deps：进程启动时 useEffect 可能先于 fetch 跑（用 schema
+  // 相对默认初始化），fetch 完成后 modelPathDefaults 到达，重跑一次覆盖成绝对。
+  // 只在 selected===null（新建模式）且没有 draftSeed 时生效；用户编辑过的 config
+  // 不会被此 effect 覆盖，因为 draftSeed 已消费。
   useEffect(() => {
     if (!selected) {
       const seed = draftSeedRef.current
@@ -115,7 +130,9 @@ export default function PresetsPage() {
         // 让用户输名字
         requestAnimationFrame(() => newNameInputRef.current?.focus())
       } else if (schema) {
-        const defaults = defaultsFromSchema(schema)
+        // 用 modelPathDefaults 覆盖 schema 里 4 字段的相对默认值，保证新建预设
+        // 表单里看到的是当前 Settings 算出的绝对路径，跟 fork 后实际落盘一致。
+        const defaults = { ...defaultsFromSchema(schema), ...modelPathDefaults }
         setConfig(defaults)
         savedJsonRef.current = JSON.stringify(defaults)
         setNewName('')
@@ -142,6 +159,29 @@ export default function PresetsPage() {
     })
   }, [selected, schema, descriptions, t, toast])
 
+  // modelPathDefaults 异步拉取，可能晚于主 init useEffect 到达。新建模式下
+  // 用户没改过时（current JSON === saved JSON）就地覆盖 4 字段为绝对路径，
+  // 避免 UI 一开始显示相对默认、稍后才换成绝对的视觉跳变。
+  useEffect(() => {
+    if (selected !== null) return
+    if (!schema || !config) return
+    if (Object.keys(modelPathDefaults).length === 0) return
+    const currentJson = JSON.stringify(config)
+    if (currentJson !== savedJsonRef.current) return  // 用户改过了，不要覆盖
+    let needsUpdate = false
+    for (const f of MODEL_PATH_FIELDS) {
+      if (modelPathDefaults[f] && config[f] !== modelPathDefaults[f]) {
+        needsUpdate = true
+        break
+      }
+    }
+    if (!needsUpdate) return
+    const next = { ...config, ...modelPathDefaults }
+    setConfig(next)
+    savedJsonRef.current = JSON.stringify(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelPathDefaults, selected, schema])
+
   // ── 首次拿到列表后：自动选最近一个，省一次「切换」点击 ──
   const autoSelectedRef = useRef(false)
   useEffect(() => {
@@ -166,6 +206,57 @@ export default function PresetsPage() {
     () => presets.filter((p) => !pickerSearch || p.name.toLowerCase().includes(pickerSearch.toLowerCase())),
     [presets, pickerSearch],
   )
+
+  // auto_sync_paths ON：预设里 4 模型字段灰显（fork 反正会覆盖，编了无意义）。
+  // OFF：可编辑，旁边挂「↺ 重置为全局默认」按钮把字段值刷成当前 Settings 算的绝对路径。
+  const disabledFields = autoSyncPaths ? MODEL_PATH_FIELDS : []
+  const disabledHints = useMemo(() => {
+    const h: Record<string, React.ReactNode> = {}
+    if (autoSyncPaths) {
+      const node = (
+        <>
+          {t('train.globalAutoLockedPrefix')} ·{' '}
+          <Link
+            to="/tools/settings?section=models"
+            className="underline text-warn hover:opacity-80"
+          >
+            {t('train.globalAutoLockedLink')}
+          </Link>
+        </>
+      )
+      for (const f of MODEL_PATH_FIELDS) h[f] = node
+    }
+    return h
+  }, [t, autoSyncPaths, MODEL_PATH_FIELDS])
+  const autoHints = useMemo(() => {
+    const h: Record<string, string> = {}
+    if (!autoSyncPaths) {
+      for (const f of MODEL_PATH_FIELDS) h[f] = t('train.globalAutoEditableHint')
+    }
+    return h
+  }, [t, autoSyncPaths, MODEL_PATH_FIELDS])
+
+  const fieldSuffixes = useMemo(() => {
+    if (autoSyncPaths) return {}
+    if (!config) return {}
+    if (Object.keys(modelPathDefaults).length === 0) return {}
+    const out: Record<string, React.ReactNode> = {}
+    for (const f of MODEL_PATH_FIELDS) {
+      const dv = modelPathDefaults[f]
+      if (typeof dv !== 'string' || !dv) continue
+      out[f] = (
+        <button
+          type="button"
+          onClick={() => setConfig({ ...config, [f]: dv })}
+          className="btn btn-ghost btn-sm shrink-0"
+          title={t('train.resetToGlobalDefaultTitle')}
+        >
+          {t('train.resetToGlobalDefault')}
+        </button>
+      )
+    }
+    return out
+  }, [autoSyncPaths, modelPathDefaults, config, t, MODEL_PATH_FIELDS])
 
   // ── popover 关闭：点外面关 ──
   useEffect(() => {
@@ -560,6 +651,10 @@ export default function PresetsPage() {
                 schema={schema}
                 values={config}
                 onChange={setConfig}
+                disabledFields={disabledFields}
+                disabledHints={disabledHints}
+                autoHints={autoHints}
+                fieldSuffixes={fieldSuffixes}
                 advancedMode={advancedMode}
               />
             </section>

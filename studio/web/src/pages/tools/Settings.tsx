@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { TFunction } from 'i18next'
 import { Trans, useTranslation } from 'react-i18next'
+import { useLocation } from 'react-router-dom'
 import {
   api,
   DEFAULT_WD14_MODELS,
@@ -58,6 +59,13 @@ type Section =
   | 'generate'
 
 type Tab = 'dataset' | 'tagging' | 'preprocess' | 'training' | 'monitor' | 'testing' | 'appearance' | 'system'
+
+// 外部页面通过 `?section=<id>` 跳转到 SettingsPage 的特定 section 时，用这个
+// 反向映射决定要先切到哪个 tab。只列出能从外部链接到的 sections。
+const SECTION_TO_TAB: Record<string, Tab> = {
+  'models': 'training',
+  'download-source': 'training',
+}
 
 const TAB_LIST: { id: Tab; labelKey: string }[] = [
   { id: 'dataset', labelKey: 'settings.tabDataset' },
@@ -221,7 +229,7 @@ const EMPTY: Secrets = {
     blacklist_tags: [],
     batch_size: 8,
   },
-  models: { root: null, selected_anima: '1.0', selected_upscaler: '4x-AnimeSharp' },
+  models: { root: null, selected_anima: '1.0', selected_upscaler: '4x-AnimeSharp', auto_sync_paths: true },
   queue: { allow_gpu_during_train: false },
   generate: { preview_every_n_steps: 3, attention_backend: 'auto' },
   system: { update_channel: 'stable', show_dev_channel: false },
@@ -277,6 +285,24 @@ export default function SettingsPage() {
       /* ignore localStorage errors */
     }
   }
+
+  // 外部页面通过 `/tools/settings?section=models` 跳进来时，先切到对应 tab，
+  // 等 section 渲染完再 scrollIntoView。不写 localStorage，避免覆盖用户平常
+  // 偏好的 tab。
+  const location = useLocation()
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const section = params.get('section')
+    if (!section) return
+    const targetTab = SECTION_TO_TAB[section]
+    if (targetTab) setTab(targetTab)
+    // tab 切换 → section 重新渲染，需要等 DOM 更新后再 scroll
+    const t1 = setTimeout(() => {
+      const el = document.getElementById(section)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 50)
+    return () => clearTimeout(t1)
+  }, [location.search])
 
   const reloadCatalog = useCallback(async () => {
     try {
@@ -1482,16 +1508,27 @@ function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError, t }:
   const [serverRoot, setServerRoot] = useState<string | null>(null)
   const [savingRoot, setSavingRoot] = useState(false)
   const [selectedAnima, setSelectedAnima] = useState<string>('1.0')
+  const [autoSyncPaths, setAutoSyncPaths] = useState<boolean>(true)
+  const [savingAutoSync, setSavingAutoSync] = useState(false)
+  const [secretsLoaded, setSecretsLoaded] = useState(false)
 
-  // 一次性拉一份 secrets 取 models.root + selected_anima（这两项走独立 PUT，
-  // 不进 SettingsPage 的全局 dirty 流程）。catalog 由父级注入。
+  // 一次性拉一份 secrets 取 models.root + selected_anima + auto_sync_paths
+  // （这几项走独立 PUT，不进 SettingsPage 的全局 dirty 流程）。catalog 由父级注入。
   useEffect(() => {
     void api.getSecrets().then((sec) => {
       setServerRoot(sec.models?.root ?? null)
-      setRootDraft(sec.models?.root ?? '')
       setSelectedAnima(sec.models?.selected_anima ?? '1.0')
-    }).catch(() => {})
+      setAutoSyncPaths(sec.models?.auto_sync_paths ?? true)
+      setSecretsLoaded(true)
+    }).catch(() => { setSecretsLoaded(true) })
   }, [])
+
+  // secrets + catalog 都到位后，把输入框预填成「已保存值」或「实际默认绝对路径」。
+  // 用 prev !== '' 当作"已初始化 / 用户已编辑"的标志，避免覆盖用户输入。
+  useEffect(() => {
+    if (!secretsLoaded || !catalog) return
+    setRootDraft((prev) => (prev !== '' ? prev : (serverRoot ?? catalog.models_root ?? '')))
+  }, [secretsLoaded, catalog, serverRoot])
 
   const pickAnima = async (variant: string) => {
     if (variant === selectedAnima) return
@@ -1521,6 +1558,21 @@ function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError, t }:
     }
   }
 
+  const saveAutoSync = async (next: boolean) => {
+    setSavingAutoSync(true)
+    const prev = autoSyncPaths
+    setAutoSyncPaths(next)
+    try {
+      await api.updateSecrets({ models: { auto_sync_paths: next } })
+      toast(next ? t('settings.autoSyncPathsOn') : t('settings.autoSyncPathsOff'), 'success')
+    } catch (e) {
+      setAutoSyncPaths(prev)
+      toast(String(e), 'error')
+    } finally {
+      setSavingAutoSync(false)
+    }
+  }
+
   const rootDirty = rootDraft.trim() !== (serverRoot ?? '')
   const error = catalogError
 
@@ -1532,17 +1584,31 @@ function ModelsSection({ catalog, busy, start, reloadCatalog, catalogError, t }:
             type="text"
             value={rootDraft}
             onChange={(e) => setRootDraft(e.target.value)}
-            placeholder={t('settings.modelsRootPlaceholder')}
             className={`${textInputClass} flex-1`}                                  />
           <button onClick={saveRoot} disabled={!rootDirty || savingRoot} className="btn btn-primary btn-sm"
             title={rootDirty ? t('settings.savePathConfig') : t('settings.notModified')}>
             {savingRoot ? t('common.saving') : t('settings.savePath')}
           </button>
-          <button onClick={() => setRootDraft(serverRoot ?? '')} disabled={!rootDirty || savingRoot}
+          <button onClick={() => setRootDraft(serverRoot ?? (catalog?.models_root ?? ''))} disabled={!rootDirty || savingRoot}
             className="px-2 py-0.5 text-fg-tertiary bg-transparent border-none cursor-pointer rounded-sm"
             style={{ opacity: !rootDirty ? 0.3 : 1 }}
           >↻</button>
         </div>
+      </SettingsField>
+
+      <SettingsField
+        label={t('settings.autoSyncPathsLabel')}
+        helpTooltip={<p>{t('settings.autoSyncPathsHelp')}</p>}
+      >
+        <label className="flex items-center gap-2 pt-1.5">
+          <input
+            type="checkbox"
+            checked={autoSyncPaths}
+            onChange={(e) => void saveAutoSync(e.target.checked)}
+            disabled={savingAutoSync}
+            style={{ height: 16, width: 16 }}
+          />
+        </label>
       </SettingsField>
 
       {error && <div className="text-err text-xs font-mono">{error}</div>}

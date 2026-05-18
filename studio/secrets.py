@@ -377,10 +377,16 @@ class ModelsConfig(BaseModel):
     - `selected_upscaler`：预处理默认放大器。可为预设 label（如 "4x-AnimeSharp"）
       或自定义/上传的文件名（如 "my-anime-model.pth"）。空串/None → 用
       DEFAULT_UPSCALER 兜底。
+    - `auto_sync_paths`：fork 预设到 version 时，是否自动用全局模型路径覆盖
+      预设里的 4 个模型字段（transformer / vae / text_encoder / t5_tokenizer）。
+      ON（默认）→ 多数用户：永不碰 4 字段，fork 始终用 Settings 全局值；
+      4 字段在项目页 / 预设页 UI 上 disabled。
+      OFF → 独立模型用户：fork 时尊重预设值，4 字段可编辑 + picker。
     """
     root: Optional[str] = None
     selected_anima: str = "1.0"
     selected_upscaler: str = "4x-AnimeSharp"
+    auto_sync_paths: bool = True
 
 
 class GenerateConfig(BaseModel):

@@ -510,6 +510,17 @@ def get_models_catalog() -> dict[str, Any]:
     return model_downloader.build_catalog()
 
 
+@app.get("/api/models/path-defaults")
+def get_models_path_defaults() -> dict[str, str]:
+    """当前 Settings 算出的 4 个模型字段绝对路径。
+
+    给预设页 reset 按钮和「新建预设」初始填充用——这两个场景没有 project
+    上下文，拿不到 /api/projects/{pid}/versions/{vid}/config 里的
+    project_specific_defaults，所以单独开一个端点。
+    """
+    return model_downloader.default_paths_for_new_version()
+
+
 @app.post("/api/models/download")
 def start_model_download(body: ModelDownloadRequest) -> dict[str, Any]:
     """启动后台下载，立即返回 status key；前端通过 SSE
@@ -3191,12 +3202,17 @@ def get_datasets(path: str = "") -> dict[str, Any]:
 
 @app.get("/api/browse")
 def browse_dir(path: str = "") -> dict[str, Any]:
-    """目录浏览（给前端 path picker 用）。缺省 = REPO_ROOT。"""
+    """目录浏览（给前端 path picker 用）。缺省 = REPO_ROOT。
+
+    PathPicker 设计本就是给用户选外部模型路径用的（云端机器把模型放数据盘），
+    所以这里 allow_outside_repo=True；安全边界在 list_dir 本身（只读 entries
+    名字+类型，不返回内容）。
+    """
     target = Path(path) if path else REPO_ROOT
     if not target.is_absolute():
         target = (REPO_ROOT / target).resolve()
     try:
-        return browse.list_dir(target)
+        return browse.list_dir(target, allow_outside_repo=True)
     except browse.BrowseError as exc:
         raise HTTPException(404, str(exc)) from exc
 

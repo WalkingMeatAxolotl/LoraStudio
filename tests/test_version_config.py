@@ -189,3 +189,75 @@ def test_save_as_preset_rejects_invalid_name(env) -> None:
     preset_flow.fork_preset_for_version("tpl", p, v)
     with pytest.raises(presets_io.PresetError):
         preset_flow.save_version_config_as_preset(p, v, "../etc/passwd")
+
+
+# ---------------------------------------------------------------------------
+# auto_sync_paths toggle (PP10.5)
+# ---------------------------------------------------------------------------
+
+
+def _custom_path() -> str:
+    """跨平台合法的绝对路径（POSIX 形式），用作"用户自定义模型路径"。
+
+    yaml 落盘 + read 都会规范化成 POSIX，所以这里直接用 POSIX 写法做期望值。
+    """
+    return Path("/tmp/anima-custom/foo.safetensors").resolve().as_posix()
+
+
+def _normalize_default(path_str: str) -> str:
+    """default_paths_for_new_version 用 str(Path)，Windows 上是反斜杠；
+    跟预设流的 normalize 一致比较时统一转 POSIX。"""
+    return Path(path_str).as_posix()
+
+
+def test_fork_with_toggle_on_overrides_model_paths(env, monkeypatch) -> None:
+    """toggle ON：预设里的 4 模型字段 fork 时被 default_paths_for_new_version 覆盖。"""
+    from studio.services import model_downloader
+    monkeypatch.setattr(preset_flow, "_auto_sync_paths", lambda: True)
+    p, v = _make_pv(env)
+    custom = _custom_path()
+    _seed_preset(env, "tpl", transformer_path=custom)
+    cfg = preset_flow.fork_preset_for_version("tpl", p, v)
+    expected = _normalize_default(model_downloader.default_paths_for_new_version()["transformer_path"])
+    assert cfg["transformer_path"] == expected
+    assert cfg["transformer_path"] != custom
+
+
+def test_fork_with_toggle_off_respects_preset(env, monkeypatch) -> None:
+    """toggle OFF：fork 时尊重预设里的绝对路径，不覆盖。"""
+    monkeypatch.setattr(preset_flow, "_auto_sync_paths", lambda: False)
+    p, v = _make_pv(env)
+    custom = _custom_path()
+    _seed_preset(env, "tpl", transformer_path=custom)
+    cfg = preset_flow.fork_preset_for_version("tpl", p, v)
+    assert cfg["transformer_path"] == custom
+
+
+def test_save_as_preset_toggle_on_clears_model_paths(env, monkeypatch) -> None:
+    """toggle ON：保存预设时 4 模型字段清回 default_paths（不带本机自定义出去）。"""
+    from studio.services import model_downloader
+    # fork 时用 toggle OFF 保留用户自定义路径
+    monkeypatch.setattr(preset_flow, "_auto_sync_paths", lambda: False)
+    p, v = _make_pv(env)
+    custom = _custom_path()
+    _seed_preset(env, "tpl", transformer_path=custom)
+    preset_flow.fork_preset_for_version("tpl", p, v)
+    # 此时 version yaml 里 transformer_path = custom
+    assert version_config.read_version_config(p, v)["transformer_path"] == custom
+    # 切到 toggle ON 保存预设
+    monkeypatch.setattr(preset_flow, "_auto_sync_paths", lambda: True)
+    saved = preset_flow.save_version_config_as_preset(p, v, "saved")
+    expected = _normalize_default(model_downloader.default_paths_for_new_version()["transformer_path"])
+    assert saved["transformer_path"] == expected
+    assert saved["transformer_path"] != custom
+
+
+def test_save_as_preset_toggle_off_keeps_model_paths(env, monkeypatch) -> None:
+    """toggle OFF：保存预设时保留 version yaml 里的绝对路径（独立模型用户主动设置）。"""
+    monkeypatch.setattr(preset_flow, "_auto_sync_paths", lambda: False)
+    p, v = _make_pv(env)
+    custom = _custom_path()
+    _seed_preset(env, "tpl", transformer_path=custom)
+    preset_flow.fork_preset_for_version("tpl", p, v)
+    saved = preset_flow.save_version_config_as_preset(p, v, "saved")
+    assert saved["transformer_path"] == custom

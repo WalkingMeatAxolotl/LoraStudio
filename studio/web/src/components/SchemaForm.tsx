@@ -10,11 +10,15 @@ interface Props {
   onChange: (values: ConfigData) => void
   /** 这些字段名将以 readonly / disabled 渲染（项目特定 / 全局控制）。 */
   disabledFields?: string[]
-  /** 每个 disabled 字段的徽章文字；缺省走 Field 默认「自动 · 项目控制」。 */
-  disabledHints?: Record<string, string>
+  /** 每个 disabled 字段的徽章；缺省走 Field 默认「自动 · 项目控制」。
+   * 支持 ReactNode 以便嵌入可点击链接（如跳到 Settings 对应区段）。 */
+  disabledHints?: Record<string, React.ReactNode>
   /** 字段不 disabled 但要挂个徽章（如「自动 · 项目设置」表示项目预填了，
    * 但仍允许用户修改）。优先级：disabledHints > autoHints。 */
-  autoHints?: Record<string, string>
+  autoHints?: Record<string, React.ReactNode>
+  /** 字段右侧额外按钮槽（如「↺ 重置为全局默认」）。仅对 string/path 字段
+   * 生效；按字段名查表。 */
+  fieldSuffixes?: Record<string, React.ReactNode>
   /** false（默认）= 简单模式，隐藏 advanced=true 的字段。 */
   advancedMode?: boolean
 }
@@ -24,12 +28,13 @@ interface Props {
  * show_when 用 evalShowWhen 做条件显示，依赖当前 values。
  */
 export default function SchemaForm({
-  schema, values, onChange, disabledFields, disabledHints, autoHints, advancedMode = false,
+  schema, values, onChange, disabledFields, disabledHints, autoHints, fieldSuffixes, advancedMode = false,
 }: Props) {
   const { t } = useTranslation()
   const disabledSet = new Set(disabledFields ?? [])
   const dHints = disabledHints ?? {}
   const aHints = autoHints ?? {}
+  const suffixes = fieldSuffixes ?? {}
   // 用 schema.groups[].default_collapsed 决定初始折叠状态；用户手动改后保留状态。
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     const out: Record<string, boolean> = {}
@@ -137,6 +142,7 @@ export default function SchemaForm({
                       disabled={isDisabled}
                       hint={hint}
                       descriptionOverride={descriptionOverride}
+                      suffix={suffixes[name]}
                     />
                   )
                 })}
