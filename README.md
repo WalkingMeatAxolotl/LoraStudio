@@ -228,6 +228,10 @@ AnimaLoraStudio/
 - [docs/architecture/studio-pipeline.md](docs/architecture/studio-pipeline.md) — Studio 跨步骤架构总览
 - [studio/README.md](studio/README.md) — Studio 内部模块结构
 
+**协作公约**
+- [CONTRIBUTING.md](CONTRIBUTING.md) — 流程 / 分支 / commit / PR / release
+- [docs/AGENTS.md](docs/AGENTS.md) — 代码质量约定与 AI agent 协作
+
 **历史决策**（[`docs/adr/`](docs/adr/)）
 - 记录「为什么选 X 而不选 Y」，已落地的不删
 
