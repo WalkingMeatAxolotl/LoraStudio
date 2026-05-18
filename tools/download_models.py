@@ -53,10 +53,13 @@ Anima 主模型版本（--variant）:
 {chr(10).join(f"  {k:<14} {v}" for k, v in ANIMA_VARIANTS.items())}
   latest         (= {LATEST_ANIMA})
 
-下载源：默认从 secrets.huggingface.endpoint 读（首装是 hf-mirror.com）。
-  - --no-mirror     用 HuggingFace 官方源（覆盖 secrets）
+下载源：默认从 secrets.huggingface.endpoint 读（首装是 "" = HF 官方）。
+  - --no-mirror     强制使用 HuggingFace 官方源（覆盖 secrets，等价于 endpoint=https://huggingface.co）
   - --endpoint URL  自定义 endpoint URL（覆盖 secrets 和 --no-mirror）
   - --modelscope    走魔搭社区下载（需 pip install modelscope）
+
+注：0.8.2 hotfix 起 hf-mirror.com 暂时不可用（详见 docs/todo/hf-mirror-recheck.md），
+    Settings UI 已隐藏该 preset，但 --endpoint URL 仍接受任意值。
 """,
     )
     parser.add_argument(

@@ -179,7 +179,7 @@ const EMPTY: Secrets = {
     api_rate_per_sec: 2,
     cdn_rate_per_sec: 5,
   },
-  huggingface: { token: '', endpoint: 'https://hf-mirror.com' },
+  huggingface: { token: '', endpoint: '' },
   wandb: {
     enabled: false,
     api_key: '',
@@ -794,7 +794,7 @@ export default function SettingsPage() {
             </SettingsField>
             <SettingsField
               label="endpoint"
-              helpTooltip={<p>模型下载端点。国内推荐 hf-mirror，海外推荐官方源。</p>}
+              helpTooltip={<p>模型下载端点。默认 HuggingFace 官方源。需要镜像 / 自建反代时选「自定义 URL」粘贴。</p>}
             >
               <HFEndpointSelect
                 value={draft.huggingface.endpoint}
@@ -1127,14 +1127,15 @@ function SensitiveInput({ value, serverValue, onChange }: {
 
 // ── HFEndpointSelect ────────────────────────────────────────────────────────
 //
-// HF 模型下载 endpoint 选择器：3 个 preset + 自定义 URL 输入。
-// 默认 hf-mirror.com（项目主战场国内）；海外用户切到 huggingface.co；
-// 也支持粘贴自定义 URL（自建反代 / sjtug / 腾讯镜像等）。
+// HF 模型下载 endpoint 选择器：preset + 自定义 URL 输入。
+// 0.8.2 hotfix：hf-mirror.com preset 暂时隐藏（服务端 redirect 改动后所有
+// huggingface_hub 版本均失败，详见 docs/todo/hf-mirror-recheck.md）。endpoint
+// 字段本身仍接受任意 URL，用户可通过「自定义 URL」粘贴 hf-mirror / sjtug /
+// 腾讯镜像 / 自建反代。复活后把 preset 加回来即可。
 
 const HF_ENDPOINT_PRESETS: { value: string; label: string; hint: string }[] = [
-  { value: 'https://hf-mirror.com', label: 'hf-mirror.com', hint: '国内推荐（社区维护反代）' },
-  { value: '', label: 'huggingface.co', hint: '官方源；海外推荐' },
-  { value: '__custom__', label: '自定义 URL...', hint: '粘贴自建反代 / sjtug / 腾讯等' },
+  { value: '', label: 'huggingface.co', hint: '官方源（默认）' },
+  { value: '__custom__', label: '自定义 URL...', hint: '粘贴自建反代 / sjtug / 腾讯镜像等' },
 ]
 
 function HFEndpointSelect({ value, onChange }: {
@@ -1144,7 +1145,7 @@ function HFEndpointSelect({ value, onChange }: {
   const [mode, setMode] = useState<'preset' | 'custom'>(isPreset ? 'preset' : 'custom')
   const selectedPreset = isPreset
     ? value
-    : (mode === 'custom' ? '__custom__' : 'https://hf-mirror.com')
+    : (mode === 'custom' ? '__custom__' : '')
 
   return (
     <div className="flex flex-col gap-1.5">

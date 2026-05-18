@@ -60,9 +60,10 @@ export default function TrainPage() {
   const inFlightSaveRef = useRef<Promise<void> | null>(null)
   /** 等待中的 debounce setTimeout id；onEnqueue 需要 cancel 它。 */
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  /** 当前预设的原始 config（fork 时缓的那份），picker「· 已自定义」标签
-   * 用它做基准。null = 还没拉到 / 没绑定到任何预设。 */
-  const presetBaselineRef = useRef<ConfigData | null>(null)
+  // 0.8.2 hotfix：删 presetBaselineRef + customized 标签逻辑。fork 之后
+  // version yaml 跟全局预设解耦了，承认这是"项目专属配置"。「已自定义」
+  // 标签是骗人的（全局模型 4 个字段 fork 时被注入绝对路径，跟全局预设
+  // 相对路径 diff 永远存在 → 永远显示已自定义）。
 
   // 预设 picker（dropdown 模式，与 Presets 页一致）
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -100,25 +101,6 @@ export default function TrainPage() {
     }
   }, [project.id, vid, toast, setConfigSync])
 
-  /** 拉当前 version 绑的预设 config，给 picker「· 已自定义」标签做 baseline。
-   * 预设可能已被删（找不到就清掉 baseline，标签自然不显示）。 */
-  const refreshPresetBaseline = useCallback(async (name: string | null) => {
-    if (!name) {
-      presetBaselineRef.current = null
-      return
-    }
-    try {
-      presetBaselineRef.current = await api.getPreset(name)
-    } catch {
-      presetBaselineRef.current = null
-    }
-  }, [])
-
-  // 进入页面 / 切 version 时拉一次预设 baseline；config_name 变化也跟上
-  useEffect(() => {
-    void refreshPresetBaseline(activeVersion?.config_name ?? null)
-  }, [activeVersion?.config_name, refreshPresetBaseline])
-
   useEffect(() => {
     api.schema().then(setSchema).catch((e) => toast(`schema 加载失败: ${e}`, 'error'))
     api.listPresets().then(setPresets).catch(() => setPresets([]))
@@ -153,27 +135,6 @@ export default function TrainPage() {
     }
     return h
   }, [configResp?.project_specific_fields])
-
-  /** 把项目特定字段（data_dir / reg_data_dir 等）从 config 里拿掉再 JSON。
-   * picker「· 已自定义」标签比对预设原值时要排除这几个：fork 时项目预填会把
-   * 它们覆盖成项目路径，跟预设原值天然不一样，但这不算用户自己改了。 */
-  const stripProjectFields = useCallback((cfg: ConfigData | null): string => {
-    if (!cfg) return ''
-    const skip = new Set(configResp?.project_specific_fields ?? [])
-    const filtered: ConfigData = {}
-    for (const k of Object.keys(cfg)) {
-      if (!skip.has(k)) filtered[k] = cfg[k]
-    }
-    return JSON.stringify(filtered)
-  }, [configResp?.project_specific_fields])
-
-  /** 当前 config 是否相对预设原值有自定义改动（picker 标签用）。
-   * 注意 presetBaselineRef 是 ref 不进 deps 数组；它只在 fork 时变，那时
-   * config 也会跟着变，依赖 config 重算就够。 */
-  const customized = useMemo(() => {
-    if (!config || !presetBaselineRef.current) return false
-    return stripProjectFields(config) !== stripProjectFields(presetBaselineRef.current)
-  }, [config, stripProjectFields])
 
   /** 落盘 cfg。串行化保证：如果上一次 save 还在飞，等它跑完再决定是否要再
    * save；这样多次 setConfig + debounce 不会丢任何一次的内容。
@@ -261,16 +222,18 @@ export default function TrainPage() {
     if (!name) return
     if (configResp?.has_config) {
       const ok = await confirm(
-        '换预设会覆盖当前 version 的配置（已保存的内容会丢失）。继续？',
-        { tone: 'warn', okText: '换预设' },
+        `重置为预设 ${name} 的配置？当前 version 的所有自定义内容会丢失。`,
+        { tone: 'warn', okText: '重置' },
       )
       if (!ok) return
     }
     setBusy(true)
     try {
       await api.forkPresetForVersion(project.id, vid, name)
-      await refreshConfig()
-      toast(`已从预设 ${name} 复制`, 'success')
+      // refreshConfig 刷本页 config state；reload 刷父级 activeVersion，
+      // 主表单字段才会同步显示新预设的内容。
+      await Promise.all([refreshConfig(), reload()])
+      toast(`已重置为预设 ${name} 的配置`, 'success')
     } catch (e) {
       toast(String(e), 'error')
     } finally {
@@ -330,11 +293,27 @@ export default function TrainPage() {
     return `${project.slug}_v${activeVersion.id}`
   }
 
-  const startCreatePreset = () => {
+  const startCreatePreset = async () => {
     setPickerOpen(false)
     setNewPresetName(defaultPresetName())
     setNewPresetDesc('')
-    setNewPresetConfig(defaultsFromSchema(schema))
+    // 重新拉 GET /config 拿最新 project_specific_defaults —— 用户常见路径
+    // 是 fork preset 之后才跑 reg build，缓存的 configResp 里 reg 状态过期。
+    // 拉不到就 fallback 到缓存值，不阻塞 UI。
+    const fresh = vid
+      ? await api.getVersionConfig(project.id, vid).catch(() => null)
+      : null
+    const psd =
+      fresh?.project_specific_defaults
+      ?? configResp?.project_specific_defaults
+      ?? {}
+    // 用项目预填值覆盖 schema 默认 —— fork 时后端会注入这些，预览要让用户
+    // 看到「保存后会得到的值」而不是误导性的相对路径默认值（reg 目录尤其
+    // 关键）。savePreset 时会清回 schema 默认，全局预设池不带项目数据。
+    setNewPresetConfig({
+      ...defaultsFromSchema(schema),
+      ...psd,
+    })
     setNewNameError('')
     setCreatingPreset(true)
   }
@@ -360,7 +339,17 @@ export default function TrainPage() {
     }
     setBusy(true)
     try {
-      await api.savePreset(name, newPresetConfig)
+      // 全局预设池不带项目 / 机器数据：项目特定字段 + 全局模型路径清回 schema
+      // 默认。fork 时后端会再注入项目/全局值，所以 version config 仍然正确。
+      // 跟 services/presets.py:save_version_config_as_preset 的清理逻辑对齐。
+      const schemaDefaults = defaultsFromSchema(schema)
+      const fieldsToReset = [
+        ...(configResp?.project_specific_fields ?? []),
+        ...GLOBAL_MODEL_FIELDS,
+      ]
+      const cleaned: ConfigData = { ...newPresetConfig }
+      for (const f of fieldsToReset) cleaned[f] = schemaDefaults[f]
+      await api.savePreset(name, cleaned)
       const desc = newPresetDesc.trim()
       if (desc) {
         const all = loadPresetDescriptions()
@@ -371,10 +360,11 @@ export default function TrainPage() {
       setPresets(list)
       // 套用到当前 version —— 避免用户保存完还要再手动选一次
       await api.forkPresetForVersion(project.id, vid, name)
-      await refreshConfig()
-      void refreshPresetBaseline(name)
+      // 跟 onForkPreset 一致：refreshConfig + reload 都要调，主表单才会
+      // 同步显示新预设的内容。
+      await Promise.all([refreshConfig(), reload()])
       setCreatingPreset(false)
-      toast(`已创建预设 ${name} 并套用到当前 version`, 'success')
+      toast(`已创建预设 ${name} 并应用到当前 version`, 'success')
     } catch (e) {
       toast(String(e), 'error')
     } finally {
@@ -439,8 +429,10 @@ export default function TrainPage() {
           {/* 左栏 */}
           <div className="flex flex-col gap-3 min-h-0 min-w-0 overflow-y-auto">
 
-          {/* 预设 picker：dropdown 取代「当前预设条 + 可用预设网格」两块。
-              点击展开 popover 含搜索 + 卡片网格，跟全局 Presets 页一致。 */}
+          {/* 预设 picker：dropdown 入口。0.8.2 起承认 version yaml 是 first-class
+              「项目专属配置」，不再显示「绑定哪个预设」+「已自定义」标签 —— 这套
+              判定逻辑骗人（全局模型 4 字段 fork 时被注入绝对路径，跟全局预设
+              相对路径 diff 永远存在）。预设变成纯"模板起点"概念。 */}
           <section className="flex items-center gap-2.5 shrink-0 relative">
             <button
               ref={pickerAnchorRef}
@@ -454,24 +446,20 @@ export default function TrainPage() {
                   : 'border-dim bg-surface shadow-sm hover:border-bold',
                 busy ? 'cursor-default' : 'cursor-pointer',
               ].join(' ')}
-              title="切换预设"
+              title={configResp?.has_config
+                ? '当前 version 私有配置；点击展开选预设作为起点重置'
+                : '点击选预设作为起点创建当前 version 配置'}
             >
               <span className="text-[10px] uppercase tracking-[0.08em] text-fg-tertiary font-semibold">
-                预设
+                配置
               </span>
               <span className={[
-                'font-mono text-md font-semibold flex-1 text-left truncate',
+                'text-md font-semibold flex-1 text-left truncate',
                 configResp?.has_config ? 'text-fg-primary' : 'text-fg-tertiary',
               ].join(' ')}>
-                {activeVersion.config_name ?? '(未选)'}
-                {customized && (
-                  <span
-                    className="ml-2 text-xs text-warn font-normal"
-                    title="此版本基于预设拷贝。修改只影响当前版本，不影响预设池里的原值。"
-                  >
-                    · 已自定义
-                  </span>
-                )}
+                {configResp?.has_config
+                  ? `${project.title} / ${activeVersion.label} 配置`
+                  : '未配置 — 选预设作为起点'}
               </span>
               <span className="text-fg-tertiary text-md">▾</span>
             </button>
@@ -517,7 +505,7 @@ export default function TrainPage() {
                         非空时藏起来 —— 用户在搜旧的，新建是另一条意图。 */}
                     {!pickerSearch && (
                       <button
-                        onClick={startCreatePreset}
+                        onClick={() => void startCreatePreset()}
                         disabled={busy}
                         className={[
                           'rounded-sm px-2.5 py-2 text-left border border-dashed transition-colors',
@@ -530,7 +518,8 @@ export default function TrainPage() {
                       </button>
                     )}
                     {filteredPresets.map((p) => {
-                      const active = p.name === activeVersion.config_name
+                      // 0.8.2 起预设跟 version 脱钩，picker 卡片不再有
+                      // "active = 当前绑定" 概念，全部一视同仁地作为可用模板。
                       return (
                         <button
                           key={p.name}
@@ -538,18 +527,13 @@ export default function TrainPage() {
                           disabled={busy}
                           className={[
                             'rounded-sm px-2.5 py-2 text-left border transition-colors',
-                            active
-                              ? 'border-accent bg-accent-soft'
-                              : 'border-subtle bg-sunken hover:border-bold',
+                            'border-subtle bg-sunken hover:border-bold',
                             busy ? 'cursor-default' : 'cursor-pointer',
                           ].join(' ')}
                         >
-                          <div className={[
-                            'text-sm font-mono font-semibold truncate',
-                            active ? 'text-accent' : 'text-fg-primary',
-                          ].join(' ')}>{p.name}</div>
+                          <div className="text-sm font-mono font-semibold truncate text-fg-primary">{p.name}</div>
                           <div className="text-xs text-fg-tertiary mt-0.5">
-                            {active ? '当前使用' : '点击套用'}
+                            读取此预设参数
                           </div>
                         </button>
                       )
@@ -598,12 +582,16 @@ export default function TrainPage() {
                       </label>
                     </div>
                   </div>
-                  {/* 参数表单 —— 用 schema 默认值 */}
+                  {/* 参数表单 —— schema 默认 + 项目预填（fork 后会得到的值） */}
                   <div className="rounded-md border border-subtle bg-surface px-3.5 py-2.5">
                     <SchemaForm
                       schema={schema}
                       values={newPresetConfig}
                       onChange={setNewPresetConfig}
+                      disabledFields={disabledFields}
+                      disabledHints={disabledHints}
+                      autoHints={autoHints}
+                      advancedMode={advancedMode}
                     />
                   </div>
                   {/* 操作 */}

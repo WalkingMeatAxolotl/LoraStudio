@@ -20,7 +20,7 @@ const initialServerState = {
     api_rate_per_sec: 2,
     cdn_rate_per_sec: 5,
   },
-  huggingface: { token: '', endpoint: 'https://hf-mirror.com' },
+  huggingface: { token: '', endpoint: '' },
   wandb: {
     enabled: false,
     api_key: '',

@@ -1,6 +1,6 @@
 # AnimaLoraStudio
 
-[![Version](https://img.shields.io/badge/version-0.8.1-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.2-blue)](CHANGELOG.md)
 
 **端到端流水线**：从 Booru 抓图 → 筛选 → 打标 → 正则集 → 训练 → 出图测试，全流程在一个浏览器面板里推进。专为 [Anima](https://huggingface.co/circlestone-labs/Anima)（Cosmos DiT 二次元特调）训练优化。
 
@@ -105,7 +105,9 @@ python -m studio test         # pytest + vitest
 
 打开后先去 **设置（Settings）→ Models**，点按钮一键下载训练所需的全部权重 + tokenizer。
 
-下载源默认走 `hf-mirror.com`（国内反代，社区维护）—— 国内用户开箱即用。海外用户去 **Settings → 训练 → HuggingFace → endpoint** 切换到 `huggingface.co` 官方源（更快直连），或粘贴自建反代 URL。CLI 用户可以在 `python tools/download_models.py` 加 `--no-mirror` / `--endpoint URL` 显式覆盖。
+下载源默认走 `huggingface.co` 官方。国内用户如果直连慢，可以去 **Settings → 训练 → HuggingFace → endpoint** 切到「自定义 URL」粘贴自建反代，或者切到 **Settings → 训练 → 下载源 → ModelScope**（魔搭社区直连，需 `pip install modelscope`）。CLI 用户用 `python tools/download_models.py --endpoint URL` 或 `--modelscope` 覆盖。
+
+> 注：`hf-mirror.com` preset 暂从 UI 隐藏 —— 该社区反代服务端最近的改动让所有 `huggingface_hub` 版本都拿不到 `commit_hash`，导致下载失败（细节见 `docs/todo/hf-mirror-recheck.md`）。endpoint 字段本身仍接受任意 URL，恢复后我们会把 preset 加回来。
 
 下载内容（默认落到 `./models/`）：
 
@@ -119,8 +121,9 @@ python -m studio test         # pytest + vitest
 也可以走 CLI（与 UI 共用同一份代码）：
 
 ```bash
-python tools/download_models.py                   # 全量下
-python tools/download_models.py --no-mirror       # 走 HF 官方源
+python tools/download_models.py                   # 全量下（HF 官方源）
+python tools/download_models.py --endpoint URL    # 走自建反代
+python tools/download_models.py --modelscope      # 走魔搭社区
 python tools/download_models.py --variant preview3-base
 python tools/download_models.py --skip-main --skip-vae
 python tools/download_models.py --output /data/anima
@@ -238,7 +241,7 @@ AnimaLoraStudio/
 
 ## 版本
 
-当前版本 **0.8.0**（见 [CHANGELOG.md](CHANGELOG.md)）。
+当前版本 **0.8.2**（见 [CHANGELOG.md](CHANGELOG.md)）。
 
 版本号唯一来源是 `studio/__init__.py:__version__`：
 

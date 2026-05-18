@@ -768,6 +768,11 @@ export interface VersionConfigResponse {
   config: ConfigData | null
   /** 服务端强制覆盖的项目特定字段（前端表单应 disabled 这些） */
   project_specific_fields: string[]
+  /** fork preset 时后端将注入的项目预填值（项目路径 + 全局模型路径 + reg
+   * 检测）。新建预设预览表单用它显示「保存后会得到的值」。无论 has_config
+   * 与否都返回 —— 新建预设可以在 version 已有 config 的状态下被点（覆盖
+   * 当前预设），所以这个 hint 跟 has_config 状态无关。 */
+  project_specific_defaults?: ConfigData
 }
 
 export interface RegBuildRequest {

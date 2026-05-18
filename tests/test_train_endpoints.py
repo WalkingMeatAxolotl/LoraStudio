@@ -58,6 +58,78 @@ def test_get_config_returns_no_config_initially(client: TestClient) -> None:
     assert "output_name" in body["project_specific_fields"]
 
 
+def test_get_config_no_config_returns_project_specific_defaults(
+    client: TestClient,
+) -> None:
+    """0.8.2 hotfix：has_config=False 时返回 project_specific_defaults，新建预设
+    预览表单用它展示「fork 后会得到的值」。"""
+    pid, vid = _make(client)
+    r = client.get(f"/api/projects/{pid}/versions/{vid}/config")
+    body = r.json()
+    assert body["has_config"] is False
+    defaults = body.get("project_specific_defaults")
+    assert defaults is not None, "缺 project_specific_defaults"
+    # 项目特定路径填好了（reg 不存在时 reg_data_dir 是 None）
+    assert defaults["data_dir"].endswith("train")
+    assert defaults["output_dir"].endswith("output")
+    assert defaults["output_name"], "output_name 不能为空"
+    assert defaults["reg_data_dir"] is None  # reg 还没 build
+    assert defaults["resume_lora"] is None
+    # 全局模型路径也填好了（绝对路径，from secrets.models.root）
+    assert defaults["transformer_path"], "transformer_path 应填默认模型路径"
+    assert defaults["vae_path"], "vae_path 应填"
+    assert defaults["text_encoder_path"]
+    assert defaults["t5_tokenizer_path"]
+
+
+def test_get_config_defaults_picks_up_reg_when_meta_exists(
+    client: TestClient, env
+) -> None:
+    """reg/meta.json 存在时，project_specific_defaults.reg_data_dir 应指向 reg 目录。"""
+    pid, vid = _make(client)
+    # 模拟跑过 reg build → reg/meta.json 写好
+    with db.connection_for(env["db"]) as conn:
+        p = projects.get_project(conn, pid)
+        v = versions.get_version(conn, vid)
+    assert p is not None and v is not None
+    vdir = versions.version_dir(p["id"], p["slug"], v["label"])
+    (vdir / "reg").mkdir(parents=True, exist_ok=True)
+    (vdir / "reg" / "meta.json").write_text('{"target_count": 50}', encoding="utf-8")
+
+    r = client.get(f"/api/projects/{pid}/versions/{vid}/config")
+    defaults = r.json()["project_specific_defaults"]
+    assert defaults["reg_data_dir"] == str(vdir / "reg")
+
+
+def test_get_config_returns_defaults_when_has_config(
+    client: TestClient, env
+) -> None:
+    """has_config=True 时 project_specific_defaults 也要返回 —— 用户在已 fork
+    过预设的 version 上点「+ 新建预设」，前端预览仍需要这个 hint 显示项目路径。"""
+    pid, vid = _make(client)
+    _seed_preset(env, "tpl", lora_rank=64)
+    # 先 fork → has_config=True
+    client.post(
+        f"/api/projects/{pid}/versions/{vid}/config/from_preset",
+        json={"name": "tpl"},
+    )
+    # 加 reg meta，模拟 fork 后跑了 reg build 的常见场景
+    with db.connection_for(env["db"]) as conn:
+        p = projects.get_project(conn, pid)
+        v = versions.get_version(conn, vid)
+    assert p is not None and v is not None
+    vdir = versions.version_dir(p["id"], p["slug"], v["label"])
+    (vdir / "reg" / "meta.json").write_text('{"target_count": 50}', encoding="utf-8")
+
+    r = client.get(f"/api/projects/{pid}/versions/{vid}/config")
+    body = r.json()
+    assert body["has_config"] is True
+    defaults = body.get("project_specific_defaults")
+    assert defaults is not None, "has_config=True 时也应返回 project_specific_defaults"
+    assert defaults["reg_data_dir"] == str(vdir / "reg")
+    assert defaults["transformer_path"]  # 模型路径也在
+
+
 def test_get_config_for_unknown_version_404(client: TestClient) -> None:
     pid, _ = _make(client)
     r = client.get(f"/api/projects/{pid}/versions/9999/config")

@@ -2600,13 +2600,25 @@ def _project_and_version_or_404(
 
 @app.get("/api/projects/{pid}/versions/{vid}/config")
 def get_version_config_endpoint(pid: int, vid: int) -> dict[str, Any]:
-    """读 version 私有 config；不存在返回 has_config=false / config=null。"""
+    """读 version 私有 config；不存在返回 has_config=false / config=null。
+
+    无论 has_config 与否都返回 `project_specific_defaults` —— fork preset 时
+    后端将自动注入的项目预填值（项目路径 + 全局模型路径 + reg 检测结果）。
+    前端「+ 新建预设」可以在 version 已有 config 的状态下被点（替换当前预设），
+    所以这个 hint 跟 has_config 状态无关，永远要返回。
+    """
     project, ver = _project_and_version_or_404(pid, vid)
+    psf = sorted(version_config.PROJECT_SPECIFIC_FIELDS)
+    psd = {
+        **version_config.project_specific_overrides(project, ver),
+        **model_downloader.default_paths_for_new_version(),
+    }
     if not version_config.has_version_config(project, ver):
         return {
             "has_config": False,
             "config": None,
-            "project_specific_fields": sorted(version_config.PROJECT_SPECIFIC_FIELDS),
+            "project_specific_fields": psf,
+            "project_specific_defaults": psd,
         }
     try:
         cfg = version_config.read_version_config(project, ver)
@@ -2615,7 +2627,8 @@ def get_version_config_endpoint(pid: int, vid: int) -> dict[str, Any]:
     return {
         "has_config": True,
         "config": cfg,
-        "project_specific_fields": sorted(version_config.PROJECT_SPECIFIC_FIELDS),
+        "project_specific_fields": psf,
+        "project_specific_defaults": psd,
     }
 
 
