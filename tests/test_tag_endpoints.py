@@ -177,6 +177,7 @@ def test_start_tag_with_llm_overrides(client: TestClient) -> None:
                 "temperature": 0.1,
                 "concurrency": 3,
                 "requests_per_second": 1.5,
+                "max_requests_per_minute": 30,
             },
         },
     )
@@ -189,6 +190,7 @@ def test_start_tag_with_llm_overrides(client: TestClient) -> None:
         "temperature": 0.1,
         "concurrency": 3,
         "requests_per_second": 1.5,
+        "max_requests_per_minute": 30,
     }
 
 

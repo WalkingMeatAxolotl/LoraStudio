@@ -139,6 +139,7 @@ function _makeFallbackPreset(id: string, label: string, output_format: 'json' | 
     max_retries: 3,
     concurrency: 1,
     requests_per_second: 0,
+    max_requests_per_minute: 0,
     ...extra,
   }
 }

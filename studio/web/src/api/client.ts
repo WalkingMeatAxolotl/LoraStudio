@@ -166,6 +166,7 @@ export interface LLMPreset {
   max_retries: number
   concurrency: number
   requests_per_second: number
+  max_requests_per_minute: number
 }
 
 export interface LLMTaggerConfig {

@@ -186,6 +186,91 @@ def test_tag_uses_configured_concurrency(
     assert progress[-1] == (4, 4)
 
 
+def test_minute_limit_applies_only_with_concurrency(
+    isolated_secrets, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    waits: list[tuple[float, int]] = []
+
+    class _FakeLimiter:
+        def __init__(
+            self,
+            requests_per_second: float,
+            *,
+            max_requests_per_minute: int = 0,
+        ) -> None:
+            waits.append((requests_per_second, max_requests_per_minute))
+
+        def wait(self) -> None:
+            pass
+
+    monkeypatch.setattr(llm_tagger, "_RequestRateLimiter", _FakeLimiter)
+    secrets.update(
+        {
+            "llm_tagger": {
+                "presets": [
+                    {
+                        "id": "style_json",
+                        "concurrency": 3,
+                        "max_requests_per_minute": 12,
+                    }
+                ]
+            }
+        }
+    )
+    sess = _SlowSession(delay=0.01)
+    tagger = llm_tagger.LLMTagger(session=sess)
+    imgs = [_png(tmp_path / f"concurrent-{i}.png") for i in range(2)]
+
+    list(tagger.tag(imgs))
+
+    assert waits == [(0.0, 12)]
+
+    waits.clear()
+    secrets.update(
+        {
+            "llm_tagger": {
+                "presets": [
+                    {
+                        "id": "style_json",
+                        "concurrency": 1,
+                        "max_requests_per_minute": 12,
+                    }
+                ]
+            }
+        }
+    )
+    tagger = llm_tagger.LLMTagger(session=_SlowSession(delay=0.01))
+    list(tagger.tag([_png(tmp_path / "serial.png")]))
+
+    assert waits == [(0.0, 0)]
+
+
+def test_rate_limiter_uses_rolling_minute_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = 1000.0
+    slept: list[float] = []
+
+    def fake_monotonic() -> float:
+        return now
+
+    def fake_sleep(seconds: float) -> None:
+        nonlocal now
+        slept.append(seconds)
+        now += seconds
+
+    monkeypatch.setattr(llm_tagger.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(llm_tagger.time, "sleep", fake_sleep)
+    limiter = llm_tagger._RequestRateLimiter(
+        0.0,
+        max_requests_per_minute=2,
+    )
+
+    limiter.wait()
+    limiter.wait()
+    limiter.wait()
+
+    assert slept == [1.0] * 60
+
+
 def test_uses_editable_prompt_preset(isolated_secrets, tmp_path: Path) -> None:
     secrets.update(
         {

@@ -62,6 +62,7 @@ const initialServerState = {
         max_retries: 3,
         concurrency: 1,
         requests_per_second: 0,
+        max_requests_per_minute: 0,
       },
       {
         id: 'joycaption',
@@ -86,6 +87,7 @@ const initialServerState = {
         max_retries: 3,
         concurrency: 1,
         requests_per_second: 0,
+        max_requests_per_minute: 0,
       },
     ],
   },
@@ -278,6 +280,7 @@ describe('SettingsPage (PP0)', () => {
 
     expect(screen.getByText('Concurrency')).toBeInTheDocument()
     expect(screen.getByText('Requests/sec')).toBeInTheDocument()
-    expect(screen.getByText('0 = no limit')).toBeInTheDocument()
+    expect(screen.getByText('Max/min')).toBeInTheDocument()
+    expect(screen.getAllByText('0 = no limit').length).toBeGreaterThanOrEqual(2)
   })
 })

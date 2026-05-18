@@ -88,7 +88,7 @@ export default function LLMTaggerWorkspace(props: Props) {
       'label', 'base_url', 'api_key', 'model', 'model_ids', 'endpoint',
       'messages', 'output_format', 'temperature', 'max_tokens',
       'max_side', 'jpeg_quality', 'max_image_mb', 'timeout', 'max_retries',
-      'concurrency', 'requests_per_second',
+      'concurrency', 'requests_per_second', 'max_requests_per_minute',
     ]
     let n = 0
     for (const k of keys) {
@@ -437,9 +437,9 @@ function AdvancedSection({ preset, onUpdate }: {
             fontSize: 'var(--t-xs)',
             color: 'var(--fg-tertiary)',
           }}
-          title={`temperature ${preset.temperature} · max_tokens ${preset.max_tokens} · concurrency ${preset.concurrency} · max_side ${preset.max_side}px · jpeg_quality ${preset.jpeg_quality}`}
+          title={`temperature ${preset.temperature} · max_tokens ${preset.max_tokens} · concurrency ${preset.concurrency} · max_requests_per_minute ${preset.max_requests_per_minute || 0} · max_side ${preset.max_side}px · jpeg_quality ${preset.jpeg_quality}`}
         >
-          {preset.temperature} · {preset.max_tokens}t · c{preset.concurrency} · {preset.max_side}px · q{preset.jpeg_quality}
+          {preset.temperature} · {preset.max_tokens}t · c{preset.concurrency} · m{preset.max_requests_per_minute || 0} · {preset.max_side}px · q{preset.jpeg_quality}
         </span>
       </summary>
       {/* 展开内容：03 采样 + 04 图片预处理 原样堆叠 */}
@@ -495,6 +495,17 @@ function SamplingSection({ preset, onUpdate, bottomBorder }: {
               style={inputStyle}
             />
           </Field>
+          <Field label="Max/min" optional="0 = no limit">
+            <input
+              type="number" min={0} max={3600}
+              value={preset.max_requests_per_minute}
+              onChange={(e) => onUpdate('max_requests_per_minute',
+                Math.max(0, Math.min(3600, Math.round(Number(e.target.value) || 0))))}
+              style={inputStyle}
+            />
+          </Field>
+        </Row2>
+        <Row2>
           <Field label="Requests/sec" optional="0 = no limit">
             <input
               type="number" min={0} max={60} step={0.1}

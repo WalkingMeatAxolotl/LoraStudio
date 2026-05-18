@@ -60,23 +60,46 @@ short English words in the summary and keep every item as a complete phrase.
 
 
 class _RequestRateLimiter:
-    def __init__(self, requests_per_second: float) -> None:
+    def __init__(
+        self,
+        requests_per_second: float,
+        *,
+        max_requests_per_minute: int = 0,
+    ) -> None:
         self._interval = 0.0
         if requests_per_second > 0:
             self._interval = 1.0 / requests_per_second
+        self._max_per_minute = max(0, int(max_requests_per_minute or 0))
+        self._window_seconds = 60.0
         self._lock = threading.Lock()
         self._next_at = 0.0
+        self._request_times: list[float] = []
 
     def wait(self) -> None:
-        if self._interval <= 0:
+        if self._interval <= 0 and self._max_per_minute <= 0:
             return
-        with self._lock:
-            now = time.monotonic()
-            sleep_for = max(0.0, self._next_at - now)
-            base = max(now, self._next_at)
-            self._next_at = base + self._interval
-        if sleep_for > 0:
-            time.sleep(sleep_for)
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                sleep_for = max(0.0, self._next_at - now)
+                if self._max_per_minute > 0:
+                    cutoff = now - self._window_seconds
+                    self._request_times = [
+                        ts for ts in self._request_times if ts > cutoff
+                    ]
+                    if len(self._request_times) >= self._max_per_minute:
+                        sleep_for = max(
+                            sleep_for,
+                            self._request_times[0] + self._window_seconds - now,
+                        )
+                if sleep_for <= 0:
+                    base = max(now, self._next_at)
+                    if self._interval > 0:
+                        self._next_at = base + self._interval
+                    if self._max_per_minute > 0:
+                        self._request_times.append(now)
+                    return
+            time.sleep(min(sleep_for, 1.0))
 
 
 def _openai_compatible_endpoint(base_url: str, *, kind: str) -> str:
@@ -445,7 +468,10 @@ class LLMTagger:
             return
 
         self._ensure_session_pool(workers)
-        rate_limiter = _RequestRateLimiter(cfg.requests_per_second)
+        rate_limiter = _RequestRateLimiter(
+            cfg.requests_per_second,
+            max_requests_per_minute=cfg.max_requests_per_minute,
+        )
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(self._tag_one, cfg, p, rate_limiter=rate_limiter): p
