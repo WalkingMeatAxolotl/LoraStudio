@@ -3446,17 +3446,6 @@ def system_version() -> dict[str, Any]:
     return asdict(updater.current_version())
 
 
-@app.get("/api/system/lang")
-def get_system_lang() -> dict[str, Any]:
-    """Return the language preference written by the startup script on first run."""
-    lang_file = STUDIO_DATA / "studio_lang"
-    if lang_file.exists():
-        lang = lang_file.read_text(encoding="utf-8").strip()
-        if lang in ("en", "zh"):
-            return {"lang": lang}
-    return {"lang": None}
-
-
 @app.get("/api/system/update_check")
 def system_update_check(channel: str = "master", force: bool = False) -> dict[str, Any]:
     """git fetch + 比对。master 通道用 24h cache（force=true 强制重 fetch）；

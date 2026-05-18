@@ -131,25 +131,6 @@ else
     "$BOOTSTRAP_PY" -m venv venv || { echo "studio.sh: failed to create venv" >&2; exit 1; }
     PYTHON="venv/bin/python"
 
-    # Language selection — only on fresh install, skip if already saved.
-    mkdir -p studio_data
-    if [ ! -f "studio_data/studio_lang" ]; then
-        echo ""
-        echo "  Welcome to AnimaLoraStudio!"
-        echo "  ================================"
-        echo "  1) English"
-        echo "  2) Chinese (Zhongwen / Zhong wen)"
-        printf "  Select language [1/2, default 2]: "
-        read -r _lang_choice
-        case "$_lang_choice" in
-            1) _STUDIO_LANG="en" ;;
-            *) _STUDIO_LANG="zh" ;;
-        esac
-        echo "$_STUDIO_LANG" > "studio_data/studio_lang"
-        echo "[studio] Language set to: $_STUDIO_LANG"
-        echo ""
-    fi
-
     _pip_install --upgrade pip || { echo "studio.sh: failed to upgrade pip" >&2; exit 1; }
 
     # GPU-aware torch first install (PR-S1a). Without this, requirements.txt's

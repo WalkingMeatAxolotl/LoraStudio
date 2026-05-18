@@ -107,25 +107,6 @@ if exist "venv\Scripts\python.exe" (
     !BOOTSTRAP_PY! -m venv venv || (echo studio.bat: failed to create venv 1>&2 & goto :fail)
     set PYTHON=venv\Scripts\python.exe
 
-    REM Language selection -- only on fresh install, skip if already saved.
-    if not exist studio_data mkdir studio_data
-    if not exist studio_data\studio_lang (
-        echo.
-        echo   Welcome to AnimaLoraStudio!
-        echo   ================================
-        echo   1^) English
-        echo   2^) Chinese ^(Zhongwen^)
-        set /p LANG_CHOICE="  Select language [1/2, default 2]: "
-        if /i "!LANG_CHOICE!"=="1" (
-            set STUDIO_LANG=en
-        ) else (
-            set STUDIO_LANG=zh
-        )
-        echo !STUDIO_LANG!>studio_data\studio_lang
-        echo [studio] Language set to: !STUDIO_LANG!
-        echo.
-    )
-
     !PYTHON! -m pip install --upgrade pip -i https://mirrors.cloud.tencent.com/pypi/simple/ || (echo studio.bat: failed to upgrade pip 1>&2 & goto :fail)
 
     REM GPU-aware torch first install (PR-S1a). Without this, requirements.txt's
