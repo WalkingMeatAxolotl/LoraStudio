@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
@@ -19,6 +20,46 @@ from training.observability import init_wandb_monitor
 
 
 logger = logging.getLogger(__name__)
+
+
+def _maybe_apply_pause_snapshot(args, resume_state_path: Path) -> None:
+    """读 pause snapshot 覆盖 args（ADR 0006 PR-3 / §5.7）。
+
+    args.resume_state = `…/pause_step_<N>.pt` → snapshot = `…/pause_step_<N>.config.json`。
+    snapshot 不存在 → 静默跳过（用户走 ResumeFieldPicker 选周期 save 文件
+    起新 task 的旧路径）。
+
+    覆盖规则：
+    - snapshot["args"] 内所有字段写到 args namespace，**例外**：
+      - `resume_state` 不覆盖（snapshot 记录的是 pause 前的 args，那时 resume_state
+        是空；现在我们才用它续训）
+      - `config` 不覆盖（snapshot 记录的是用户当时的 yaml 路径，用户可能已删/改名）
+    - snapshot["sample_prompts"] → args.sample_prompts（resume_phase 会读这个）
+    """
+    snapshot_path = resume_state_path.with_suffix(".config.json")
+    if not snapshot_path.exists():
+        return  # 不是 pause state，沿用现有 args
+    try:
+        raw = snapshot_path.read_text(encoding="utf-8")
+        snapshot = json.loads(raw)
+    except Exception as exc:
+        logger.warning(
+            f"读取 pause snapshot 失败，沿用现有 args: {snapshot_path} ({exc})"
+        )
+        return
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("args"), dict):
+        logger.warning(f"pause snapshot schema 不识别，沿用现有 args: {snapshot_path}")
+        return
+    logger.info(f"加载 pause snapshot 覆盖训练参数: {snapshot_path}")
+    snap_args: dict = snapshot["args"]
+    skipped = {"resume_state", "config"}
+    for k, v in snap_args.items():
+        if k in skipped:
+            continue
+        setattr(args, k, v)
+    sp = snapshot.get("sample_prompts")
+    if isinstance(sp, list):
+        args.sample_prompts = sp
 
 
 def run(ctx: TrainingContext) -> None:
@@ -53,6 +94,17 @@ def run(ctx: TrainingContext) -> None:
 
     # bridge 已为 prefer_json bool 自动产生 --prefer-json / --no-prefer-json，
     # 此处无需再做兼容处理。
+
+    # ADR 0006 PR-3：pause 文件旁边的 .config.json snapshot 覆盖 args。
+    # 触发条件：args.resume_state 指向的 .pt 旁边有同前缀的 .config.json。
+    # 仅 pause 触发的 state 会带 snapshot（PR-2 handle_interrupt 写）；周期
+    # save 没有 snapshot，ResumeFieldPicker 起新 task 走原路径（用户当前
+    # yaml config）。Snapshot freeze 是 ADR §5.7 的核心 — resume 时 task 的
+    # 训练参数严格用暂停那一刻的值，跟用户后续改 version / preset / yaml
+    # 完全解耦。
+    if getattr(args, "resume_state", None):
+        _maybe_apply_pause_snapshot(args, Path(args.resume_state))
+        ctx.args = args
 
     # 交互模式检查
     required = [args.data_dir, args.transformer_path, args.vae_path, args.text_encoder_path]

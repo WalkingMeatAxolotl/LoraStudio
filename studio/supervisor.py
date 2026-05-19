@@ -135,6 +135,12 @@ def _default_cmd_builder(task: dict[str, Any], config_path: Path) -> list[str]:
     msp = task.get("monitor_state_path")
     if msp:
         cmd.extend(["--monitor-state-file", str(msp)])
+    # ADR 0006 PR-3: paused task 复活 → 注入 --resume-state，让 anima_train
+    # 的 resume_phase 加载 state；旁边的 .config.json snapshot 由 bootstrap_phase
+    # 自动检测并 freeze args（ADR §5.7）。
+    paused_state = task.get("paused_state_path")
+    if paused_state:
+        cmd.extend(["--resume-state", str(paused_state)])
     return cmd
 
 
@@ -305,29 +311,21 @@ class Supervisor:
                     {"type": "task_state_changed", "task_id": task_id, "status": "canceled"}
                 )
                 return True
-            if task["status"] == "paused":
-                # 进程已退出，无需发信号 — 直接改 db 状态 + 清 pause 文件对
-                # （ADR §5.5: 离开 paused 状态时一律删 pause 文件）。
-                for col in ("paused_state_path", "paused_config_path"):
-                    p = task.get(col)
-                    if p:
-                        try:
-                            Path(p).unlink(missing_ok=True)
-                        except Exception:
-                            logger.exception("failed to remove pause file %s", p)
+        if task["status"] == "paused":
+            # 进程已退出，无需发信号 — 复用 _clear_pause_artifacts 删文件 + 清字段，
+            # 再单独写 status=canceled + finished_at（ADR §5.5）。
+            # 故意走 with 块外：_clear_pause_artifacts 内部开自己 conn，避免嵌套。
+            self._clear_pause_artifacts(task_id)
+            with db.connection_for(self._db_path) as conn:
                 db.update_task(
                     conn, task_id,
                     status="canceled",
                     finished_at=time.time(),
-                    paused_state_path=None,
-                    paused_config_path=None,
-                    paused_step=None,
-                    paused_at=None,
                 )
-                self._on_event(
-                    {"type": "task_state_changed", "task_id": task_id, "status": "canceled"}
-                )
-                return True
+            self._on_event(
+                {"type": "task_state_changed", "task_id": task_id, "status": "canceled"}
+            )
+            return True
         if task["status"] == "running":
             slot = self._find_slot(kind="task", id=task_id)
             if slot is not None:
@@ -678,9 +676,10 @@ class Supervisor:
                 elif evt_type == "train_loop_started":
                     slot.train_loop_started = True
                 elif evt_type == "resume_state_loaded":
-                    # PR-3 cmd_builder 接入后用此事件清理上次 pause 文件对。
-                    # PR-2 仅记录，不做副作用。
-                    pass
+                    # ADR §5.5 / PR-3：训练子进程 load_training_state 成功 →
+                    # 旧 pause 文件对已被消费完，删盘 + 清 db 字段，避免下次
+                    # pause 时跟旧文件命名撞 / 让 ResumeFieldPicker 显示 stale 项。
+                    self._clear_pause_artifacts(tid)
                 self._on_event({
                     "type": evt_type,
                     "task_id": tid,
@@ -1280,6 +1279,36 @@ class Supervisor:
             return
         slot.pause_pending = True
         self._send_pause_signal(slot.proc)
+
+    def _clear_pause_artifacts(self, task_id: int) -> None:
+        """删 pause 文件对 + 清 db `paused_*` 字段（ADR §5.5）。
+
+        调用点：
+          - resume_state_loaded 事件（cmd_builder 成功 load 后）
+          - cancel paused → canceled
+          - 删除 paused task（未来 PR）
+
+        故意 **不改 status** — caller 决定要写什么状态。文件 unlink 兜 missing_ok
+        以容忍用户手动删 / 磁盘异常；db update 是 single transaction。
+        """
+        with db.connection_for(self._db_path) as conn:
+            task = db.get_task(conn, task_id)
+            if not task:
+                return
+            for col in ("paused_state_path", "paused_config_path"):
+                p = task.get(col)
+                if p:
+                    try:
+                        Path(p).unlink(missing_ok=True)
+                    except Exception:
+                        logger.exception("failed to remove pause file %s", p)
+            db.update_task(
+                conn, task_id,
+                paused_state_path=None,
+                paused_config_path=None,
+                paused_step=None,
+                paused_at=None,
+            )
 
 
 def _kill_process_tree(pid: int) -> None:

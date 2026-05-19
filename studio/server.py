@@ -2975,6 +2975,57 @@ def release_queue() -> dict[str, Any]:
     return {"held": False}
 
 
+@app.post("/api/queue/{task_id}/resume")
+def resume_task(task_id: int) -> dict[str, Any]:
+    """恢复 paused task（ADR 0006 PR-3 / §6 路径 A）。
+
+    流程：
+      1. 校验 status == 'paused' + paused_state_path 文件存在
+      2. task → pending（**保留 paused_* 字段**，cmd_builder 下轮 dispatch 读它）
+      3. supervisor 下次 _tick 自然 pick up，cmd 加 `--resume-state <pt>`，
+         bootstrap_phase 读 sibling .config.json snapshot 覆盖 args
+      4. 子进程 load_training_state 成功后 emit `resume_state_loaded` →
+         supervisor `_clear_pause_artifacts` 清文件对 + db 字段
+
+    文件丢失 → 409（ADR §5.5：引导用户走 ResumeFieldPicker 起新 task）。
+    """
+    _require_pause_resume_enabled()
+    with db.connection_for() as conn:
+        task = db.get_task(conn, task_id)
+        if not task:
+            raise HTTPException(404, "task not found")
+        if task["status"] != "paused":
+            raise HTTPException(
+                409, f"task status is {task['status']!r}, not paused"
+            )
+        state_path = task.get("paused_state_path")
+        config_path = task.get("paused_config_path")
+        if not state_path or not Path(state_path).exists():
+            raise HTTPException(
+                409,
+                f"paused state file missing: {state_path!r}; "
+                f"use ResumeFieldPicker to start a fresh task from another .pt",
+            )
+        if config_path and not Path(config_path).exists():
+            # snapshot 缺失虽然不致命（bootstrap_phase 会沿用 args.config yaml），
+            # 但 resume 语义会漂；按 ADR §5.7 严格 freeze 原则，拒绝继续。
+            raise HTTPException(
+                409,
+                f"paused config snapshot missing: {config_path!r}; "
+                f"cannot guarantee config freeze, refusing to resume",
+            )
+        db.update_task(
+            conn, task_id,
+            status="pending",
+            started_at=None,
+            finished_at=None,
+            exit_code=None,
+            error_msg=None,
+        )
+    bus.publish({"type": "task_state_changed", "task_id": task_id, "status": "pending"})
+    return {"task_id": task_id, "status": "pending"}
+
+
 @app.post("/api/queue/{task_id}/retry")
 def retry_task(task_id: int) -> dict[str, Any]:
     """已结束任务重新入队：复制完整训练上下文创建新 task。
