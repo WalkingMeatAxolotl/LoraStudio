@@ -395,7 +395,7 @@ def _copytree(src: Path, dst: Path) -> None:
             shutil.copy2(sub, target)
 
 
-_UPDATABLE = {"note", "stage", "config_name", "output_lora_path"}
+_UPDATABLE = {"note", "stage", "config_name", "output_lora_path", "trigger_word"}
 
 
 def update_version(

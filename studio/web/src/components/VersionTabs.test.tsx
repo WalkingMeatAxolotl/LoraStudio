@@ -14,6 +14,7 @@ const versions: Version[] = [
     created_at: 0,
     output_lora_path: null,
     note: null,
+    trigger_word: '',
   },
   {
     id: 2,
@@ -24,6 +25,7 @@ const versions: Version[] = [
     created_at: 1,
     output_lora_path: null,
     note: null,
+    trigger_word: '',
   },
 ]
 

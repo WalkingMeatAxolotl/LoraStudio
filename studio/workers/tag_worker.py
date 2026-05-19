@@ -78,6 +78,8 @@ def run(job_id: int) -> int:
         tagger_name = params.get("tagger", "wd14")
         version_id = int(params["version_id"])
         fmt = str(params.get("output_format", "txt"))
+        # 触发词：worker 端 prepend 到 caption 第一位。空串 / 缺省 = 不启用。
+        trigger_word = str(params.get("trigger_word") or "").strip()
         # 约定：每个支持本次覆盖的 tagger 都把 overrides 存在 `<name>_overrides` 键下
         overrides = params.get(f"{tagger_name}_overrides") or None
 
@@ -99,6 +101,8 @@ def run(job_id: int) -> int:
             f"[start] tagger={tagger_name} version={v['label']} "
             f"images={len(images)} format={fmt}"
         )
+        if trigger_word:
+            progress(f"[trigger] '{trigger_word}' 将作为第一个 tag prepend 到每张图")
 
         tagger = get_tagger(tagger_name, overrides=overrides)
         tagger.prepare()
@@ -124,6 +128,7 @@ def run(job_id: int) -> int:
                 fmt,
                 caption_text=r.get("caption"),
                 caption_json=r.get("caption_json"),
+                trigger_word=trigger_word,
             )
             ok += 1
         progress(f"[done] tagged {ok}/{len(images)} (errors={errs})")
@@ -134,6 +139,27 @@ def run(job_id: int) -> int:
         return 1
 
 
+def _prepend_trigger_to_tags(tags: list[str], trigger_word: str) -> list[str]:
+    """trigger 作为第一个 tag 注入；已存在（case-insensitive）则跳过。"""
+    if not trigger_word:
+        return list(tags)
+    lower = trigger_word.lower()
+    if any((t or "").strip().lower() == lower for t in tags):
+        return list(tags)
+    return [trigger_word, *tags]
+
+
+def _prepend_trigger_to_text(text: str, trigger_word: str) -> str:
+    """trigger prepend 到逗号分隔的 caption 字符串；已存在则跳过。"""
+    if not trigger_word:
+        return text
+    lower = trigger_word.lower()
+    tokens = [t.strip() for t in text.split(",")]
+    if any(t.lower() == lower for t in tokens if t):
+        return text
+    return f"{trigger_word}, {text}" if text else trigger_word
+
+
 def _write_caption(
     image: Path,
     tags: list[str],
@@ -141,34 +167,67 @@ def _write_caption(
     *,
     caption_text: str | None = None,
     caption_json: dict[str, Any] | None = None,
+    trigger_word: str = "",
 ) -> None:
-    """fmt 仅决定「不存在 caption 时」用什么格式；已存在的 .json 仍走 .json。"""
+    """fmt 仅决定「不存在 caption 时」用什么格式；已存在的 .json 仍走 .json。
+
+    trigger_word 非空时：
+      - 标签列表：作为第 0 项 prepend（去重）
+      - 字符串 caption：prepend 到最前
+      - JSON：写入 ``meta.trigger`` 字段；caption_utils.build_caption_from_json
+        会把它作为输出的第一个 token，不参与 shuffle —— 与 .txt 路径行为一致。
+    """
     if caption_json is not None:
         if fmt == "json":
+            doc = standard_to_documented_full(caption_json)
+            if trigger_word:
+                meta = doc.get("meta")
+                if not isinstance(meta, dict):
+                    meta = {}
+                meta["trigger"] = trigger_word
+                doc["meta"] = meta
             image.with_suffix(".json").write_text(
-                json.dumps(
-                    standard_to_documented_full(caption_json),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
+                json.dumps(doc, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             image.with_suffix(".txt").unlink(missing_ok=True)
             return
         text = caption_text if caption_text is not None else caption_json_to_text(caption_json)
+        text = _prepend_trigger_to_text(text, trigger_word)
         image.with_suffix(".txt").write_text(text, encoding="utf-8")
         image.with_suffix(".json").unlink(missing_ok=True)
         return
     if fmt == "json" and not image.with_suffix(".txt").exists():
         # 强制写 json（即使没有现成 json 文件）
-        data = {"tags": list(tags)}
+        data: dict[str, Any] = {"tags": _prepend_trigger_to_tags(tags, trigger_word)}
+        if trigger_word:
+            data["meta"] = {"trigger": trigger_word}
         image.with_suffix(".json").write_text(
             json.dumps(data, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         return
-    # 否则交给 tagedit 决定（已有 .json 就写 .json，否则 .txt）
-    tagedit.write_tags(image, tags)
+    # 否则交给 tagedit 决定（已有 .json 就写 .json，否则 .txt）。
+    # 已有 .json 时 tagedit 保留其他字段（包括 meta.trigger 如有），只覆盖 tags 数组；
+    # 这里我们把 trigger prepend 进 tags list，并保证 .json 走 tagedit 的同时也补 meta.trigger。
+    new_tags = _prepend_trigger_to_tags(tags, trigger_word)
+    written = tagedit.write_tags(image, new_tags)
+    if trigger_word and written.suffix == ".json":
+        try:
+            existing = json.loads(written.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {}
+        if not isinstance(existing, dict):
+            existing = {}
+        meta = existing.get("meta")
+        if not isinstance(meta, dict):
+            meta = {}
+        meta["trigger"] = trigger_word
+        existing["meta"] = meta
+        written.write_text(
+            json.dumps(existing, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
 
 def main() -> None:

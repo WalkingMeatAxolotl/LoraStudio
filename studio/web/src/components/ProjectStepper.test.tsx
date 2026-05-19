@@ -30,6 +30,7 @@ function version(stage: Version['stage']): Version {
     created_at: 0,
     output_lora_path: null,
     note: null,
+    trigger_word: '',
   }
 }
 

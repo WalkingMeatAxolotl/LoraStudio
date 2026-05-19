@@ -1207,7 +1207,9 @@
     "noImagesWithTag": "没有图含「{{tag}}」",
     "noImagesHint": "还没有图。请先在筛选和打标步骤完成操作。",
     "selectedContaining": "已选含「{{tag}}」的 {{n}} 张",
-    "savedToast": "已保存 {{written}} 张，还原点 {{id}}"
+    "savedToast": "已保存 {{written}} 张，还原点 {{id}}",
+    "triggerWord": "触发词",
+    "triggerWordHint": "Step 4 打标时已写入每张 caption 第一位。要改，回 Step 4 改触发词并重新打标。"
   },
   "download": {
     "tagEmpty": "tag 不能为空",
@@ -1420,7 +1422,10 @@
     "taggingEnqueued": "已入队 #{{id}}",
     "taggingEnqueuedOverrides": "（含 {{n}} 项覆盖）",
     "taggerUnavailable": "{{tagger}} 不可用：{{msg}}",
-    "cancelToast": "已取消"
+    "cancelToast": "已取消",
+    "triggerWord": "触发词",
+    "triggerWordPlaceholder": "如 ohwx / mychar",
+    "triggerWordHint": "打标时作为第一个 tag 写入每张 caption；空 = 不启用。改后启动打标会同步落库到当前 version。"
   },
   "presets": {
     "loadSchemaFailed": "schema 加载失败: {{error}}",

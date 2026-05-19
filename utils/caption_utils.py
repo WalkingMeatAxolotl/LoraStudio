@@ -4,6 +4,8 @@ Caption 处理工具
 - 标准化格式（实现在 studio.services.caption_format，本模块只 re-export）
 - 分类 shuffle
 """
+from __future__ import annotations
+
 import json
 import random
 import sys
@@ -66,10 +68,17 @@ def build_caption_from_json(
         最终的 caption 字符串
     """
     tags_dict = json_data.get("tags", {})
-    
+    meta = json_data.get("meta") if isinstance(json_data.get("meta"), dict) else {}
+
     # 固定部分（不打乱、不 dropout）
     parts = []
-    
+
+    # 0. trigger word（meta.trigger）— Studio 在打标时注入，永远在第一位、
+    # 不参与 shuffle / dropout，等价于 .txt 模式 keep_tokens=1 的保护。
+    trigger = (meta.get("trigger") or "").strip() if isinstance(meta.get("trigger"), str) else ""
+    if trigger:
+        parts.append(trigger)
+
     # 1. quality
     quality = tags_dict.get("quality", [])
     if quality:
@@ -161,9 +170,14 @@ def load_and_build_caption(
     raw_json = load_caption_json(json_path)
     if raw_json is None:
         return None
-    
-    # 检查是否已经是标准格式
-    if "tags" in raw_json and "meta" in raw_json:
+
+    # 检查是否已经是标准格式：tags 必须是 dict（分类形态）+ 有 meta；
+    # 否则一律走 normalize（包括 Studio 写的 {"tags": [list], "meta": {trigger}}
+    # 这种简化形式 —— normalize 会把 tags list 搬到 tags.tags 字段，meta 保留）。
+    if (
+        isinstance(raw_json.get("tags"), dict)
+        and isinstance(raw_json.get("meta"), dict)
+    ):
         normalized = raw_json
     else:
         normalized = normalize_caption_json(raw_json)

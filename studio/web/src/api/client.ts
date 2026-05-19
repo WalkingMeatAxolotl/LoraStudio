@@ -551,6 +551,8 @@ export interface Version {
   created_at: number
   output_lora_path: string | null
   note: string | null
+  /** 触发词；由 Step 4 (Tagging) 写入，打标时 prepend 到每张 caption；空串=未启用。 */
+  trigger_word: string
   stats?: VersionStats
 }
 
@@ -1480,6 +1482,11 @@ export const api = {
       llm_overrides?:
         & { current_preset?: string }
         & Partial<Omit<LLMPreset, 'id' | 'label' | 'builtin' | 'api_key' | 'model_ids'>>
+      /**
+       * 触发词；空串 / undefined = 不启用。worker 端写 caption 时 prepend 为
+       * 第一个 tag，并同步落库到 version.trigger_word，后续 train 读出。
+       */
+      trigger_word?: string
     }
   ) =>
     req<Job>(`/api/projects/${pid}/versions/${vid}/tag`, {

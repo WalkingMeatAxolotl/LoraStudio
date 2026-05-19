@@ -632,6 +632,7 @@ class VersionUpdate(BaseModel):
     note: Optional[str] = None
     stage: Optional[str] = None
     config_name: Optional[str] = None
+    trigger_word: Optional[str] = None
 
 
 def _project_payload(p: dict[str, Any]) -> dict[str, Any]:
@@ -1644,6 +1645,9 @@ class TagJobRequest(BaseModel):
     wd14_overrides: Optional[Wd14Overrides] = None
     cltagger_overrides: Optional[CLTaggerOverrides] = None
     llm_overrides: Optional[LLMTaggerOverrides] = None
+    # 触发词；空串 / None = 不启用。打标时作为第一个 tag prepend 到 caption；
+    # 同时持久化到 version.trigger_word，后续 train 阶段从私有 yaml 读出。
+    trigger_word: Optional[str] = None
 
 
 class LLMModelsRefreshRequest(BaseModel):
@@ -1960,11 +1964,18 @@ def start_tag(pid: int, vid: int, body: TagJobRequest) -> dict[str, Any]:
         raise HTTPException(400, "output_format must be txt|json")
     _, v, _ = _version_train_dir_or_404(pid, vid)
 
+    # 触发词：先 strip，落到 version 表（持久化，TagEdit / Train 都能读），再
+    # 顺手放进 worker params。body.trigger_word=None 表示前端没传字段（不改
+    # version 现有值）；空串 "" 表示用户主动清空。
+    trigger_word = body.trigger_word.strip() if body.trigger_word is not None else None
+
     params: dict[str, Any] = {
         "tagger": body.tagger,
         "version_id": vid,
         "output_format": body.output_format,
     }
+    if trigger_word:
+        params["trigger_word"] = trigger_word
     # 通用：按 tagger 名取 `<name>_overrides` 字段并落到 params 同名键。
     # 仅保留用户实际填写的字段；空 dict 也不写。
     overrides_field = getattr(body, f"{body.tagger}_overrides", None)
@@ -1974,6 +1985,10 @@ def start_tag(pid: int, vid: int, body: TagJobRequest) -> dict[str, Any]:
             params[f"{body.tagger}_overrides"] = ov
 
     with db.connection_for() as conn:
+        if trigger_word is not None and trigger_word != (v.get("trigger_word") or ""):
+            updated = versions.update_version(conn, vid, trigger_word=trigger_word)
+            _publish_version_state(updated)
+            v = updated
         job = project_jobs.create_job(
             conn,
             project_id=pid,

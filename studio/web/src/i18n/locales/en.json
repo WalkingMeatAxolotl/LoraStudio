@@ -1207,7 +1207,9 @@
     "noImagesWithTag": "No images contain «{{tag}}»",
     "noImagesHint": "No images yet. Complete the curation and tagging steps first.",
     "selectedContaining": "Selected {{n}} images containing «{{tag}}»",
-    "savedToast": "Saved {{written}} images, restore point {{id}}"
+    "savedToast": "Saved {{written}} images, restore point {{id}}",
+    "triggerWord": "trigger",
+    "triggerWordHint": "Already written as the first token of every caption during Step 4 (Tagging). To change it, go back to Step 4, update the trigger word, and re-tag."
   },
   "download": {
     "tagEmpty": "Tag cannot be empty",
@@ -1420,7 +1422,10 @@
     "taggingEnqueued": "Queued #{{id}}",
     "taggingEnqueuedOverrides": " ({{n}} overrides)",
     "taggerUnavailable": "{{tagger}} unavailable: {{msg}}",
-    "cancelToast": "Cancelled"
+    "cancelToast": "Cancelled",
+    "triggerWord": "trigger word",
+    "triggerWordPlaceholder": "e.g. ohwx / mychar",
+    "triggerWordHint": "Prepended as the first tag of every caption during tagging; empty = disabled. Changing this and starting tagging will persist it to the current version."
   },
   "presets": {
     "loadSchemaFailed": "Failed to load schema: {{error}}",

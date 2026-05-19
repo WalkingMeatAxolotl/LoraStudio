@@ -244,6 +244,12 @@ export default function TagEditPage() {
       subtitle={t('tagEdit.subtitle')}
       actions={
         <>
+          {activeVersion.trigger_word && (
+            <span className="badge badge-neutral" title={t('tagEdit.triggerWordHint')}>
+              {t('tagEdit.triggerWord')}:{' '}
+              <code className="font-mono">{activeVersion.trigger_word}</code>
+            </span>
+          )}
           {stats && (
             <span className={allTagged ? 'badge badge-ok' : 'badge badge-neutral'}>
               {t('tagEdit.taggedBadge', { tagged: taggedTotal, total: trainTotal })}
