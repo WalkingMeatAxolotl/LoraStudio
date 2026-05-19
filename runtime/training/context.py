@@ -37,6 +37,10 @@ class TrainingContext:
     sample_dir: Optional[Path] = None
     wandb_monitor: Any = None         # observability.WandBMonitor
     monitor_server: Optional[bool] = None  # 旧名兼容：True=monitor_state.json 写入活跃
+    # supervisor 启动训练时通过 env LORA_TASK_ID 注入 queue task id；CLI 直接跑
+    # 时 env 不存在 → None → state_dir() fallback 到 task_unknown 子目录。
+    # 注意：跟 progress bar 的 task_id 字段（line ~80）是两回事，故意起不同名字。
+    lora_task_id: Optional[int] = None
 
     # ─── models_phase 填充 ───
     repo_root: Optional[Path] = None
@@ -84,6 +88,19 @@ class TrainingContext:
 
     # ─── 共用方法 ───
 
+    def state_dir(self) -> Path:
+        """周期 save / handle_interrupt 写 state 的目录，per-task 隔离。
+
+        ADR 0006 §5.3：同一 version 下多 task 跑 state 文件互相覆盖是 latent
+        bug，加 task_id 子目录隔离。env LORA_TASK_ID 没设（CLI 直接跑）时
+        fallback 到 task_unknown/。
+        """
+        assert self.output_dir is not None, "state_dir() called before bootstrap_phase"
+        tid = self.lora_task_id if self.lora_task_id is not None else "unknown"
+        d = self.output_dir / "state" / f"task_{tid}"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
     def emit(self, msg: str) -> None:
         """打印一条 user-facing 消息，按当前进度显示模式分流。
 
@@ -121,7 +138,7 @@ class TrainingContext:
             sys.exit(1)
         self.interrupted = True
         self.emit("\n检测到 Ctrl+C，正在保存训练状态...")
-        state_path = self.output_dir / f"training_state_step{self.global_step}.pt"
+        state_path = self.state_dir() / f"training_state_step{self.global_step}.pt"
         monitor_data = None
         if self.monitor_server:
             try:

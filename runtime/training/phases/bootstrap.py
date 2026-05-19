@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 from pathlib import Path
 
@@ -78,6 +79,14 @@ def run(ctx: TrainingContext) -> None:
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     ctx.sample_dir = ctx.output_dir / "samples"
     ctx.sample_dir.mkdir(exist_ok=True)
+    # supervisor 启动训练时通过 env LORA_TASK_ID 注入 queue task id（ADR 0006）。
+    # 用于 ctx.state_dir() 计算 per-task state 子目录；env 不存在时 fallback unknown。
+    _env_tid = os.environ.get("LORA_TASK_ID")
+    if _env_tid:
+        try:
+            ctx.lora_task_id = int(_env_tid)
+        except ValueError:
+            logger.warning(f"LORA_TASK_ID={_env_tid!r} 不是 int，按 unknown 处理")
     ctx.wandb_monitor = init_wandb_monitor(args, ctx.output_dir, ctx.config_path)
 
     # Loss 函数（mse / huber；通过 losses/ plugin registry 派发）

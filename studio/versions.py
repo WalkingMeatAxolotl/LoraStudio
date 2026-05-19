@@ -118,37 +118,66 @@ def list_lora_ckpts(vdir: Path) -> list[dict[str, Any]]:
     return items
 
 
+_STATE_FILE_RE = re.compile(r"training_state_(step|epoch)(\d+)\.pt$")
+
+
 def list_state_ckpts(vdir: Path) -> list[dict[str, Any]]:
-    """扫 versions/{label}/output/training_state_step*.pt，列所有断点续训状态文件。
+    """扫 version output/ 下所有断点续训 state 文件。
 
-    anima_train 输出命名约定（runtime/anima_train.py:2218, 2441）：
-      - training_state_step{N}.pt   （optimizer / RNG / loss 历史的完整 state）
+    扫描两个位置（ADR 0006 PR-1 路径迁移）：
+      - 旧路径：``output/training_state_step{N}.pt``（pre-PR-1 残留）
+      - 新路径：``output/state/task_<TID>/training_state_step{N}.pt``（PR-1+）
 
-    返回 [{step, label, path, mtime}]，按 step 降序（最新在前）。
-    给 Train 页的「从断点续训」picker 用。
+    两种粒度都看（PR-1 顺手修扫描漏 epoch 的旧 bug）：
+      - step  →  ``training_state_step{N}.pt``    label "step N"
+      - epoch →  ``training_state_epoch{N}.pt``   label "epoch N"
+
+    pause 文件（PR-2+ 的 ``pause_step_<N>.pt``）**不在此列**——picker 不应
+    暴露 pause 中间态。命名前缀天然过滤。
+
+    返回 [{step, label, path, mtime}]，step 降序，epoch 单独按 step（int 部分）
+    降序排在 step 项前后；UI 按 mtime/step 自己排即可。
     """
     output_dir = vdir / "output"
     if not output_dir.exists():
         return []
     items: list[dict[str, Any]] = []
-    for f in output_dir.glob("training_state_step*.pt"):
+    seen: set[str] = set()
+    # 同一相对路径不要进两次（理论上不会撞，但 glob 重叠 + symlink 兜底）。
+    candidates: list[Path] = []
+    candidates.extend(output_dir.glob("training_state_*.pt"))
+    state_root = output_dir / "state"
+    if state_root.exists():
+        candidates.extend(state_root.glob("task_*/training_state_*.pt"))
+    for f in candidates:
         if not f.is_file():
             continue
-        m = re.search(r"training_state_step(\d+)\.pt$", f.name)
+        m = _STATE_FILE_RE.search(f.name)
         if not m:
             continue
-        step = int(m.group(1))
+        key = str(f.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        kind = m.group(1)  # "step" or "epoch"
+        n = int(m.group(2))
         try:
             mtime = f.stat().st_mtime
         except OSError:
             mtime = 0.0
         items.append({
-            "step": step,
-            "label": f"step {step}",
+            "step": n if kind == "step" else 0,
+            "label": f"{kind} {n}",
             "path": str(f),
             "mtime": mtime,
+            "_kind": kind,  # 内部排序用，返回前剥掉
+            "_n": n,
         })
-    items.sort(key=lambda x: -x["step"])
+    # 先 step 段（按 step 降序），后 epoch 段（按 epoch 降序）。
+    items.sort(key=lambda x: (0 if x["_kind"] == "step" else 1, -x["_n"]))
+    for it in items:
+        it.pop("_kind", None)
+        it.pop("_n", None)
     return items
 
 

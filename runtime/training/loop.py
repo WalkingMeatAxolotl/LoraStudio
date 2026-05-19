@@ -270,7 +270,7 @@ def run(ctx: TrainingContext) -> None:
                 # 定期保存训练状态（断点续训）
                 save_state_every = getattr(args, "save_state_every", 0)
                 if save_state_every > 0 and ctx.global_step % save_state_every == 0:
-                    state_path = ctx.output_dir / f"training_state_step{ctx.global_step}.pt"
+                    state_path = ctx.state_dir() / f"training_state_step{ctx.global_step}.pt"
                     # 获取监控面板数据用于恢复 loss 曲线
                     monitor_data = None
                     if ctx.monitor_server:
@@ -329,7 +329,7 @@ def run(ctx: TrainingContext) -> None:
             # 定期保存训练状态（epoch 版）
             save_state_every_epochs = int(getattr(args, "save_state_every_epochs", 0) or 0)
             if save_state_every_epochs > 0 and ctx.current_epoch % save_state_every_epochs == 0:
-                state_path = ctx.output_dir / f"training_state_epoch{ctx.current_epoch}.pt"
+                state_path = ctx.state_dir() / f"training_state_epoch{ctx.current_epoch}.pt"
                 monitor_data = None
                 if ctx.monitor_server:
                     try:

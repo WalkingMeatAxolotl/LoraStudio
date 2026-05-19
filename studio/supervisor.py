@@ -540,7 +540,9 @@ class Supervisor:
         log_fp = open(log_path, "wb")
 
         cmd = self._cmd_builder(task, cfg_path)
-        proc = self._popen(cmd, log_fp)
+        # ADR 0006 PR-1：LORA_TASK_ID 注入让训练子进程把 state 文件写到
+        # output_dir/state/task_<TID>/ 子目录，避免同 version 多 task 互覆盖。
+        proc = self._popen(cmd, log_fp, extra_env={"LORA_TASK_ID": str(task["id"])})
 
         slot.proc = proc
         slot.kind = "task"
@@ -904,7 +906,12 @@ class Supervisor:
         })
 
     # ---- 子进程通用 -----------------------------------------------------------
-    def _popen(self, cmd: list[str], log_fp: Any) -> subprocess.Popen:
+    def _popen(
+        self,
+        cmd: list[str],
+        log_fp: Any,
+        extra_env: Optional[dict[str, str]] = None,
+    ) -> subprocess.Popen:
         creationflags = 0
         if os.name == "nt":
             creationflags = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
@@ -940,6 +947,8 @@ class Supervisor:
                     env.setdefault("WANDB_BASE_URL", wandb_cfg.base_url)
         except Exception:
             logger.exception("failed to load wandb settings")
+        if extra_env:
+            env.update(extra_env)
         return subprocess.Popen(
             cmd,
             stdout=log_fp,

@@ -115,7 +115,9 @@ def test_mixed_kinds_other_after_step_epoch(vdir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# list_state_ckpts —— 断点续训 picker 用，只扫 training_state_step*.pt
+# list_state_ckpts —— 断点续训 picker 用
+# ADR 0006 PR-1：扫描 output/ 顶层（旧）+ output/state/task_*/（新）双位置，
+# 同时覆盖 training_state_step*.pt（旧 bug 顺手修：也扫 epoch）。
 # ---------------------------------------------------------------------------
 
 
@@ -156,6 +158,98 @@ def test_state_ckpts_path_is_string(vdir: Path) -> None:
     items = list_state_ckpts(vdir)
     assert items[0]["path"].endswith("training_state_step42.pt")
     assert "mtime" in items[0]
+
+
+# ---- ADR 0006 PR-1: per-task 子目录路径 + epoch 顺手修 ---------------------
+
+
+def test_state_ckpts_scans_new_per_task_subdir(vdir: Path) -> None:
+    """PR-1 新路径 output/state/task_<TID>/ 也要扫到。"""
+    out = vdir / "output"
+    task_dir = out / "state" / "task_42"
+    task_dir.mkdir(parents=True)
+    (task_dir / "training_state_step100.pt").touch()
+    (task_dir / "training_state_step500.pt").touch()
+
+    items = list_state_ckpts(vdir)
+    steps = [it["step"] for it in items]
+    assert steps == [500, 100]
+    # path 应该是子目录下的，不是顶层
+    assert "task_42" in items[0]["path"]
+
+
+def test_state_ckpts_old_and_new_paths_both_scanned(vdir: Path) -> None:
+    """老用户已存在的顶层 .pt + 新跑的子目录 .pt 都能看到（向后兼容）。"""
+    out = vdir / "output"
+    (out / "training_state_step100.pt").touch()  # 老路径
+    task_dir = out / "state" / "task_7"
+    task_dir.mkdir(parents=True)
+    (task_dir / "training_state_step500.pt").touch()  # 新路径
+
+    items = list_state_ckpts(vdir)
+    steps = sorted(it["step"] for it in items)
+    assert steps == [100, 500]
+
+
+def test_state_ckpts_multi_task_isolated(vdir: Path) -> None:
+    """ADR §5.3：同 version 多 task 跑，state 文件按 task_id 隔离。"""
+    out = vdir / "output"
+    for tid, steps in [(1, [500, 1000]), (2, [200])]:
+        td = out / "state" / f"task_{tid}"
+        td.mkdir(parents=True)
+        for s in steps:
+            (td / f"training_state_step{s}.pt").touch()
+
+    items = list_state_ckpts(vdir)
+    # 全部 3 个文件都该被扫到
+    assert len(items) == 3
+    # 不同 task 的同 step 文件不会互相覆盖
+    paths = [it["path"] for it in items]
+    assert any("task_1" in p and "step500" in p for p in paths)
+    assert any("task_1" in p and "step1000" in p for p in paths)
+    assert any("task_2" in p and "step200" in p for p in paths)
+
+
+def test_state_ckpts_dedup_when_path_matches(vdir: Path) -> None:
+    """同一文件不会被两次 glob 重复入列。"""
+    out = vdir / "output"
+    # 文件在新位置；旧 glob 不会扫到——但加测试防 regression
+    task_dir = out / "state" / "task_3"
+    task_dir.mkdir(parents=True)
+    (task_dir / "training_state_step10.pt").touch()
+    items = list_state_ckpts(vdir)
+    assert len(items) == 1
+
+
+def test_state_ckpts_includes_epoch_state(vdir: Path) -> None:
+    """顺手修旧 bug：epoch 版 state 之前 picker 看不到，现在能看到。"""
+    out = vdir / "output"
+    (out / "training_state_step100.pt").touch()
+    (out / "training_state_epoch5.pt").touch()
+    (out / "training_state_epoch3.pt").touch()
+
+    items = list_state_ckpts(vdir)
+    labels = [it["label"] for it in items]
+    # step 在前（降序），epoch 在后（降序）
+    assert labels == ["step 100", "epoch 5", "epoch 3"]
+
+
+def test_state_ckpts_pause_files_not_included(vdir: Path) -> None:
+    """PR-2+ 引入的 pause_step_<N>.pt 文件不应混进 picker 列表。
+
+    本 PR (PR-1) 还没写 pause 文件，但提前验证 _STATE_FILE_RE 不匹配
+    pause_ 前缀，避免 PR-2 时反向回归。
+    """
+    out = vdir / "output"
+    task_dir = out / "state" / "task_9"
+    task_dir.mkdir(parents=True)
+    (task_dir / "training_state_step100.pt").touch()
+    (task_dir / "pause_step_200.pt").touch()       # PR-2+ 命名
+    (task_dir / "pause_step_200.config.json").touch()
+
+    items = list_state_ckpts(vdir)
+    assert len(items) == 1
+    assert items[0]["step"] == 100
 
 
 # ---------------------------------------------------------------------------
