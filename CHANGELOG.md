@@ -6,6 +6,24 @@
 
 ---
 
+## [0.9.1] — 2026-05-20
+
+修 ModelScope 缺包错误 + 修 v0.8.1 ZIP 用户卡住无法自动更新
+
+### 修复
+
+- **ModelScope 下载源开箱即用，不再需要手动 pip install modelscope**
+  services/model_downloader.py 的 ModelScope 路径之前只在用户切到魔搭下载源时才 lazy import，缺包就报"缺 modelscope（pip install modelscope）"让用户手动装。0.9.1 把 modelscope 加进 requirements.txt 必装，自动更新后即可，国内用户不再有这一步障碍。
+
+- **v0.8.1 ZIP 用户启动后无法从设置面板升级到新版本的问题已修**
+  v0.8.1 发版时漏同步 studio/web/package-lock.json 的 version 字段（shipped lockfile 写的是 0.8.0，但 package.json 是 0.8.1），ZIP 用户启动期 npm install 检测到 drift 自动修 lockfile，结果工作树 dirty，self-update preflight 拒绝执行，卡死无法升级。
+
+  已卡在 v0.8.1 的用户的解法：在 Studio 装目录跑 `git checkout studio/web/package-lock.json` 还原 lockfile 让工作树 clean，再点 设置 → 系统 → "确认更新 → v0.9.1" 即可。切到 v0.9.1 后 lockfile 已修正，以后启动不会再撞这个 bug。
+
+  防回归：tools/bump_version.py 现在也会同步 lockfile + 新加 verify-versions 子命令做跨文件 version drift 校验；新加 .github/workflows/version-check.yml CI gate，PR 时自动跑 verify-versions block drift PR。
+
+---
+
 ## [0.9.0] — 2026-05-20
 
 训练新增暂停 / 恢复 + huber loss / mixed_uniform timestep + 触发词自动写 caption + 全前端中英双语
