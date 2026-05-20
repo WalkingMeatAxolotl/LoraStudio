@@ -65,6 +65,7 @@ class TrainingContext:
     optimizer_type: str = "adamw"
     grad_clip: float = 0.0
     trainable_params: list = field(default_factory=list)
+    orthograd_config: Any = None   # utils.orthograd.OrthoGradConfig；None = disabled
     steps_per_epoch: Optional[int] = None
     total_steps: Optional[int] = None
     scheduler: Any = None
