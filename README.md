@@ -1,52 +1,68 @@
 # AnimaLoraStudio
 
-[![Version](https://img.shields.io/badge/version-0.9.0-blue)](CHANGELOG.md)
+[![中文](https://img.shields.io/badge/lang-%E4%B8%AD%E6%96%87-blue)](README.md) [![English](https://img.shields.io/badge/lang-English-lightgrey)](README.en.md) [![Version](https://img.shields.io/badge/version-0.9.0-blue)](CHANGELOG.md)
 
 **端到端流水线**：从 Booru 抓图 → 筛选 → 打标 → 正则集 → 训练 → 出图测试，全流程在一个浏览器面板里推进。专为 [Anima](https://huggingface.co/circlestone-labs/Anima)（Cosmos DiT 二次元特调）训练优化。
 
 ## 特性
 
-- **🧬 Project / Version 双层数据模型** — 每次训练对应一个 `Project` + 一个 `Version`；version 可 fork（共享 download，独立 train/reg/output），方便 A/B 调参不重抓数据
-- **📦 正则集自动生成（Booru 反向搜）** — 基于 train 集 tag 分布贪心搜 booru，按长宽比聚类拼出**匹配画风**的 reg 集；或 **AI 先验生成**：无 LoRA 直接用底模出图当 reg 集
-- **🧪 内置出图测试 + XY 矩阵评测**（v0.5 新）— 训完直接在 Studio 里扫 LoRA 权重 / step / sampler 等参数出对比图，不用切 ComfyUI
-- **🌐 Booru 池** — 统一双 token bucket（API 2 / CDN 5 req/s）+ 并发 worker + 429 sticky 退避，download 和 reg 共用
-- **🛠️ 环境自愈系统** — venv stale 检测 / `--reinstall` 救命 flag / 首装 GPU-aware torch / Windows 锁文件 defer / ONNX CUDA 失败自动降 CPU；少有同类工具做这一层
-- **🚀 一键加速后端切换**（v0.5 新）— Settings 里一键装 xformers / flash_attn wheel，三选一切 attention backend，训练 / 出图共用
-- **🔁 Preset 双向流** — version 私有 config 和全局 preset 池可 fork / save_as_preset，参数实验不污染基线
-- **🔄 webui 一键自更新**（v0.7 新）— Settings → 系统 → 版本卡片里 git pull + 重启 + 回滚全套，不用回命令行；master / dev 双通道并排，CHANGELOG 嵌入 + 4 项 pre-flight 检查（详见 [ADR 0002](docs/adr/0002-webui-self-update.md)）
-- **🧩 训练栈可扩展**（v0.7 新）— `runtime/training/` 子包 + 4 个 plugin registry（adapters / optimizers / schedulers / inference_samplers）+ `AdapterProtocol` hook（on_step_begin / regularization_loss / excludes_weight_decay）；加新变体走 3 步（写 build 函数 + 字典加行 + schema Literal）不动 phases / loop（详见 [ADR 0003](docs/adr/0003-anima-train-refactor.md) + [`runtime/training/README.md`](runtime/training/README.md)）
-- **🖼️ 图片预处理流水线**（v0.8 新）— 流水线插入「② 预处理」step：ESRGAN / Real-ESRGAN 等多放大器预设 + ModelScope/HF 双源、智能流水（大图直接 resize 跳过放大模型）、SSE 实时进度。单 manifest 单 grid + 状态徽章（详见 [ADR 0004](docs/adr/0004-preprocess-manifest.md)）
-- **🎲 InfoNoise 自适应训练**（v0.8 新）— 基于 I-MMSE 等价的反 CDF 时间步采样器，把抽样集中在信息量大的噪声窗口；走 `timestep_samplers/` plugin registry，默认关，存量训练零侵入
-- **⏸️ 暂停 / 恢复训练 + 队列挂起**（v0.9 新）— UI 上一键暂停 running task（保 LoRA "interrupted" + config snapshot freeze args），日后点恢复从最近 epoch 末 auto-backup 接续训练；队列挂起开关让 dispatcher 不拉新 pending，过夜 / 维护场景顺手用（详见 [ADR 0006](docs/adr/0006-queue-pause-resume.md) 含 Addendum 1 设计翻盘）
-- **🎯 caption 触发词自动写入**（v0.9 新）— Step 4 打标顶部填 trigger_word，落库 → tag worker 把 trigger 作为第一个 tag 注入每张 caption + 训练 runtime 自动注入 sample_prompt；终结「忘记加触发词导致白训」footgun
-- **🌍 前端中英双语**（v0.9 新）— 全前端 i18n（含 schema-driven label / description / disable hint）+ 首启语言选择 modal；Settings → 显示 → 语言 后续切换
+### 数据准备
+
+- **Booru 抓图集成**：原生支持 Gelbooru / Danbooru，包含 Cloudflare 兼容 UA、双 token bucket 速率限制、Danbooru 账号认证
+- **正则集自动生成**：基于训练集 tag 分布的 Booru 反向搜索 + 长宽比聚类；或使用底模直接生成（无需 LoRA）
+- **三种打标器**：WD14（本地 ONNX）、CLTagger（外部贡献，本地 ONNX）、LLM（OpenAI 兼容 API，支持长 caption）
+- **触发词自动注入**：在打标步骤填写一次，自动写入每张 caption 与训练采样图 prompt
+
+### 训练与实验管理
+
+- **Project / Version 双层模型**：单项目可包含多个 version，共享数据下载，独立维护配置 / 输出 / 正则集
+- **预设双向流**：训练配置可在 version 私有 config 与全局预设池之间互相 fork
+- **多任务队列**：支持任务排队、暂停（从最近 epoch 末保存进度）、恢复、队列调度挂起
+- **内置出图测试**：训练完成后直接在 Studio 内进行单图测试或 XY 矩阵评测，常驻推理 daemon 减少模型加载开销
+
+### 训练算法
+
+- **Loss 函数**：MSE / Huber，可配置权重曲线（min_snr / cosmap / detail_inv_t 等）
+- **Timestep 采样**：uniform / logit_normal / mode / mixed_uniform 等，含可配置 schedule shift
+- **InfoNoise 自适应采样（可选）**：基于 I-MMSE 的反 CDF 时间步采样器
+- **优化器**：AdamW / Prodigy / Prodigy+ScheduleFree
+- **Adapter**：LoRA + LyCORIS LoKr（走 [lycoris-lora](https://github.com/KohakuBlueleaf/LyCORIS) 官方库，含 DoRA / rs-LoRA / dropout）
+- **Attention backend**：xformers / flash_attn / PyTorch SDPA
+
+### 工程体验
+
+- **环境自愈**：首装自动选择 GPU 兼容 torch（cu118 至 cu130）、venv 与 requirements.txt 哈希比对自动同步、Windows 锁文件处理、ONNX CUDA 失败自动降级 CPU
+- **Web 界面自更新**：Settings 内支持 git pull、重启、回滚；master 稳定通道与 dev 滚动通道
+- **加速后端切换**：Settings 内一键安装 xformers / flash_attn wheel
+- **国际化**：内置中英双语界面，首次启动选择语言，Settings 内可切换
 
 ![Studio 训练页](docs/images/studio-train.png)
 
-### 训练核心 (`runtime/anima_train.py`)
+### 架构
 
-- LoRA + LyCORIS LoKr 双模式（走 [lycoris-lora](https://github.com/KohakuBlueleaf/LyCORIS) 官方库，含 DoRA / rs-LoRA / dropout；详见 [ADR 0001](docs/adr/0001-lokr-via-lycoris-lora.md)）
-- 三种 attention 后端：xformers / flash_attn / PyTorch SDPA，UI 切换或 CLI 指定
+- **训练核心** (`runtime/anima_train.py`) 与 Studio 后端解耦，支持独立 CLI 调用或由 Studio 作为 subprocess 拉起
+- **可扩展插件**：adapter / optimizer / scheduler / loss / timestep_sampler 五个 plugin registry，自定义变体需新增 builder 函数、字典注册与 schema Literal（详见 [`runtime/training/README.md`](runtime/training/README.md) 与 [ADR 0003](docs/adr/0003-anima-train-refactor.md)）
 
 ### Studio Web 工作台 (`studio/`)
 
-八步流水线 + 工具页：
+流水线 8 步 + 工具页：
 
-1. **下载** — Booru 抓取（Gelbooru / Danbooru，凭据进 Settings）+ 本地 jpg/png/zip 上传
-2. **预处理**（v0.8 新，可选）— 图片放大流水线：ESRGAN / Real-ESRGAN 等预设 + ModelScope/HF 双源 + SSE 实时进度
+1. **下载** — Booru 抓取 / 本地 jpg / png / zip 上传
+2. **预处理**（可选）— 图片放大流水线：ESRGAN / Real-ESRGAN 等多放大器预设，支持 ModelScope / HF 双源
 3. **筛选** — download / train 双面板，多选复制 / 移除，子文件夹管理
-4. **打标** — WD14 / **CLTagger**（v0.5 新，本地 ONNX）/ LLM（OpenAI compatible，含 JoyCaption / OpenAI / Anthropic 等 preset）三选；GPU EP 自动 fallback；顶部 **trigger_word** 输入（v0.9 新）启动后自动作为第一个 tag 写入每张 caption
-5. **标签编辑** — 缓存模式 + 还原点，批量加 / 删 / 替换；批量范围支持「当前筛选」（v0.8 新）
-6. **正则集**（可选）— Booru 反向搜（自动 WD14 打标 + AR 聚类）/ **AI 先验生成**（v0.5 新，无 LoRA）
-7. **训练** — preset 双向流，入队即开始；config 编辑 600ms debounce 自动落盘；Simple / Advanced 模式（v0.8 新）
-8. **测试出图**（v0.5 新）— 单图 / XY 矩阵 / 推理 daemon；prompt 可从训练集拉
+4. **打标** — WD14 / CLTagger / LLM 三选，GPU EP 自动 fallback；顶部 trigger_word 输入
+5. **标签编辑** — 缓存模式 + 还原点，批量加 / 删 / 替换
+6. **正则集**（可选）— Booru 反向搜 / AI 先验生成
+7. **训练** — 预设双向流，入队即开始；config 编辑自动落盘；Simple / Advanced 模式
+8. **测试出图** — 单图 / XY 矩阵 / 推理 daemon
 
-通用组件：
+通用面板：
+
 - 队列 / 任务详情（日志 / 监控 / 输出下载 / 全量 zip）
-- 监控页（React 原生 loss / lr 曲线 + 采样图条按 step 切换）
-- **Topbar 系统资源 pill**（v0.6 新）— CPU / GPU / MEM / VRAM 等宽 4 项实时刷新（pynvml → nvidia-ml-py，SSE 2.5s 增量推送）
-- Settings 7 tab（数据集 / 打标 / 训练 / 监控 / 测试 / 页面 / 系统）：凭据 / 模型一键下载 / PyTorch 一键重装 CUDA 版 / xformers / flash_attn 一键装 / HF / ModelScope 双源 / WandB / **webui 一键自更新**（v0.7 新）
-- 暗色 / 日间模式 + 字号密度切换
+- 实时训练监控（loss / lr 曲线 + 采样图按 step 切换）
+- Topbar 系统资源（CPU / GPU / 内存 / VRAM）
+- Settings（凭据 / 模型管理 / 加速后端 / WandB / 自更新 / 显示）
+- 暗色 / 日间模式与字号密度切换
 
 ---
 
@@ -63,7 +79,7 @@
 
 下面这些**不是** Studio 自动装的，得先准备好：
 
-- **NVIDIA GPU 驱动 + CUDA runtime**（**16 GB+ 显存推荐，12 GB 极限可跑**；A 卡 / Apple Silicon 不支持）
+- **NVIDIA GPU 驱动 + CUDA runtime**（**16 GB+ 显存推荐，8 GB 极限可跑**；A 卡 / Apple Silicon 不支持）
 - **Python 3.10+**（PATH 上能直接 `python` 调到）
 - **Node.js 18+**（前端构建用，PATH 上能 `npm`）
 - **Git**
@@ -81,19 +97,9 @@ studio.bat
 ./studio.sh
 ```
 
-首次运行会自动：建 `venv/` → 装 `requirements.txt` → 按 GPU 检测装 onnxruntime → 构建前端 → 起后端 → 自动开浏览器到 <http://127.0.0.1:8765/studio/>。
+首次运行会自动：建 `venv/` → 按 GPU 驱动检测装对应 CUDA torch（cu118 至 cu130）→ 装 `requirements.txt` → 按 GPU 检测装 onnxruntime → 构建前端 → 起后端 → 自动开浏览器到 <http://127.0.0.1:8765/studio/>。
 
-> ⚠️ `requirements.txt` 里 torch 没指 CUDA index，自举装的是 CPU torch。**首次跑完后**激活 venv 装 CUDA 版覆盖一遍：
->
-> ```bash
-> # Windows
-> .\venv\Scripts\activate
-> # Linux / macOS: source venv/bin/activate
->
-> pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu130
-> ```
->
-> （cu130 = CUDA 13.0；旧驱动按需换 cu128 / cu126 等。）
+> 如果驱动检测失败导致装了 CPU 版 torch，可在 Settings → 系统 → PyTorch 一键重装 CUDA 版；也可通过 `studio.bat --torch cu128`（或 `studio.sh --torch cu128`）显式指定。
 
 其它启动方式（等价于上面，便于直接 `python` 调）：
 
@@ -109,8 +115,6 @@ python -m studio test         # pytest + vitest
 打开后先去 **设置（Settings）→ Models**，点按钮一键下载训练所需的全部权重 + tokenizer。
 
 下载源默认走 `huggingface.co` 官方。国内用户如果直连慢，可以去 **Settings → 训练 → HuggingFace → endpoint** 切到「自定义 URL」粘贴自建反代，或者切到 **Settings → 训练 → 下载源 → ModelScope**（魔搭社区直连，需 `pip install modelscope`）。CLI 用户用 `python tools/download_models.py --endpoint URL` 或 `--modelscope` 覆盖。
-
-> 注：`hf-mirror.com` preset 暂从 UI 隐藏 —— 该社区反代服务端最近的改动让所有 `huggingface_hub` 版本都拿不到 `commit_hash`，导致下载失败（细节见 `docs/todo/hf-mirror-recheck.md`）。endpoint 字段本身仍接受任意 URL，恢复后我们会把 preset 加回来。
 
 下载内容（默认落到 `./models/`）：
 
@@ -145,11 +149,11 @@ WD14 打标模型不在这里——首次进 ③ 打标时自动从 HF 拉到 `m
 5. **④ 标签编辑**：批量加 / 删 / 替换；单图修；自动还原点
 6. **⑤ 正则集**：两种生成方式可选 ——
    - **Booru 反向搜**：基于 tag 分布反向搜 booru，自动 WD14 打标 + 分辨率 AR 聚类
-   - **AI 先验生成**：无 LoRA 直接用底模出图当 reg 集（v0.5 新）
+   - **AI 先验生成**：无 LoRA 直接用底模出图当 reg 集
 7. **⑥ 训练**：选 preset 复制进 version 私有 config，改参数（debounce 600ms 自动落盘，无需点保存），入队即开始训练。Picker 标签会显示「· 已自定义」表示和原预设已分叉，预设池不会被改
 8. 「队列」页查看任务，进**任务详情**看日志 / 监控 / 输出（含一键全量 zip 下载）
 
-训完后侧栏 **测试**（v0.5 新）：跑单图 / XY 矩阵 / 推理 daemon 评测 LoRA，prompt 可从训练集直接拉，不用切 ComfyUI 反复测。
+训完后侧栏 **测试**：跑单图 / XY 矩阵 / 推理 daemon 评测 LoRA，prompt 可从训练集直接拉，不用切 ComfyUI 反复测。
 
 输出的 LoRA 权重已经是 `lora_unet_*` 格式，**直接拖进 ComfyUI 即可**，不需要任何转换。
 
@@ -160,17 +164,17 @@ WD14 打标模型不在这里——首次进 ③ 打标时自动从 HF 拉到 `m
 ```
 AnimaLoraStudio/
 ├── runtime/                       # Anima 运行时核心（独立进程；Studio 通过 subprocess 拉起，也可单独 CLI 跑）
-│   ├── anima_train.py             # 训练入口（128 行 thin entry，编排 6 phase）
-│   ├── training/                  # 训练栈子包（ADR 0003）：context / phases / loop / sample_runner
-│   │   ├── adapters/              # plugin: lokr / loha / lora（AdapterProtocol 接入点）
+│   ├── anima_train.py             # 训练入口
+│   ├── training/                  # 训练栈子包：context / phases / loop / sample_runner
+│   │   ├── adapters/              # plugin: lokr / loha / lora
 │   │   ├── optimizers/            # plugin: adamw / prodigy / prodigy_plus_schedulefree
 │   │   ├── schedulers/            # plugin: cosine / cosine_with_restart / none
-│   │   ├── inference_samplers/    # plugin: er_sde（未注册名走 Euler 兜底）
+│   │   ├── inference_samplers/    # plugin: er_sde 等
 │   │   └── phases/                # bootstrap / models / dataset / optimizer / resume / finalize
 │   ├── anima_generate.py          # 出图：单图 / XY 矩阵
 │   ├── anima_daemon.py            # 推理 daemon：常驻 GPU 加载 LoRA 和底模
 │   ├── anima_reg_ai.py            # AI 先验生成：无 LoRA 直接用底模出 reg 集
-│   └── train_monitor.py           # 训练状态写入器（被 anima_train import 调）
+│   └── train_monitor.py           # 训练状态写入器
 ├── studio/                        # AnimaStudio Web 工作台（FastAPI + React）
 │   ├── server.py                  # 守护进程入口
 │   ├── services/                  # 业务逻辑（uploads / 打标 / 正则集 / inference_core /
@@ -180,10 +184,9 @@ AnimaLoraStudio/
 ├── tools/                         # 用户 CLI / 启动期 setup helper
 │   ├── download_models.py         # 一键下载主模型 / VAE / Qwen3 / T5 tokenizer
 │   ├── install_flash_attn.py      # flash_attn wheel 一键装
-│   ├── select_torch_index.py      # GPU-aware torch CUDA index 选择
-│   ├── check_requirements_changed.py  # venv stale 检测（被 studio.bat / studio.sh 调）
-│   ├── validate_local_models.py   # 验证本地 Qwen / T5 是否可离线加载
-│   └── bench_*.py                 # 性能诊断（dev only）
+│   ├── select_torch_index.py      # GPU-aware torch CUDA index 选择（启动期自动调）
+│   ├── check_requirements_changed.py  # venv stale 检测（启动期自动调）
+│   └── validate_local_models.py   # 验证本地 Qwen / T5 是否可离线加载
 ├── docs/                          # 三块：user-guide / architecture / adr（见 docs/README.md）
 ├── utils/                         # anima_train 共享 utility（model loader / optimizer / lycoris_adapter / ...）
 └── models/                        # 模型代码 + tokenizer 预置文件 + 大权重落点（混合）
@@ -195,7 +198,7 @@ AnimaLoraStudio/
     ├── diffusion_models/          # 用户下载的 Anima 主模型（gitignored）
     ├── vae/                       # 用户下载的 VAE 权重（gitignored）
     ├── wd14/                      # WD14 ONNX 模型（HF 自动下载，gitignored）
-    └── taeflux/                   # TAEFlux 中间步预览权重（v0.5，启动后台下载，gitignored）
+    └── taeflux/                   # TAEFlux 中间步预览权重（gitignored）
 ```
 
 运行时数据（gitignored）:
@@ -248,21 +251,13 @@ AnimaLoraStudio/
 
 ## 版本
 
-当前版本 **0.9.0**（见 [CHANGELOG.md](CHANGELOG.md)）。
-
-版本号唯一来源是 `studio/__init__.py:__version__`：
-
-- 后端：FastAPI app `version=__version__`，`/api/health` 返回
-- 前端：Sidebar 通过 `/api/health` 拉取，不再硬编码
-- `studio/web/package.json` 的 `version` 字段由发版工具同步
-
-发布新版本的 source of truth 是 [`release_notes.yaml`](release_notes.yaml)（不是 `CHANGELOG.md`，后者由工具派生）。流程：改 yaml → 跑 `python tools/bump_version.py bump --version X.Y.Z` 一键同步 `__init__.py` / `package.json` / `CHANGELOG.md` → 改 README badge + 当前版本句 → release PR。完整步骤见 [CONTRIBUTING.md](CONTRIBUTING.md) 的「Release 流程（Maintainer）」段。
+当前版本 **0.9.0**。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。Studio 内 Settings → 系统 → 版本卡片可一键升级到最新版本。
 
 ---
 
 ## 硬件要求
 
-- **GPU**：NVIDIA，**16 GB+ 显存推荐**（RTX 4060Ti 16G / 4070Ti / 4080 / 5070+ / 3090 / 4090 / 5090 等）；**12 GB 极限可跑**（4070 / 3060 12G 等，需关 sample 输出或减小 batch / 分辨率）。系统 GPU 占用低，VRAM 主要给训练；A 卡 / Apple Silicon 不支持
+- **GPU**：NVIDIA，**16 GB+ 显存推荐**（RTX 4060Ti 16G / 4070Ti / 4080 / 5070+ / 3090 / 4090 / 5090 等）；**8 GB 极限可跑**（部分笔记本 GPU 实测可行，需关 sample 输出 + 减小 batch / 分辨率，且训练速度明显下降）。系统 GPU 占用低，VRAM 主要给训练；A 卡 / Apple Silicon 不支持
 - **RAM**：16 GB+
 - **存储**：SSD 强烈推荐（latent cache + sample 输出 IO 频繁）
 
