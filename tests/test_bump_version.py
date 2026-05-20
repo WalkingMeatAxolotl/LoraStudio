@@ -201,6 +201,7 @@ def isolated_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, 
     yaml_path = tmp_path / "release_notes.yaml"
     init_path = tmp_path / "studio" / "__init__.py"
     pkg_path = tmp_path / "studio" / "web" / "package.json"
+    lock_path = tmp_path / "studio" / "web" / "package-lock.json"
     changelog_path = tmp_path / "CHANGELOG.md"
     init_path.parent.mkdir(parents=True)
     pkg_path.parent.mkdir(parents=True)
@@ -221,15 +222,32 @@ def isolated_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, 
         json.dumps({"name": "studio-web", "version": "0.6.0", "private": True}, indent=2),
         encoding="utf-8",
     )
+    # lockfile：模拟 npm 真实结构。version 两处（顶层 + packages[""]）+ deps 段
+    # 含其它 version 字段（用来确保正则 count=2 不会越界改 dep）
+    lock_path.write_text(
+        json.dumps({
+            "name": "studio-web",
+            "version": "0.6.0",
+            "lockfileVersion": 3,
+            "requires": True,
+            "packages": {
+                "": {"name": "studio-web", "version": "0.6.0", "dependencies": {"react": "^18.0.0"}},
+                "node_modules/react": {"version": "18.3.1"},
+            },
+        }, indent=2),
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(bv, "YAML_PATH", yaml_path)
     monkeypatch.setattr(bv, "STUDIO_INIT_PATH", init_path)
     monkeypatch.setattr(bv, "PACKAGE_JSON_PATH", pkg_path)
+    monkeypatch.setattr(bv, "PACKAGE_LOCK_PATH", lock_path)
     monkeypatch.setattr(bv, "CHANGELOG_PATH", changelog_path)
     monkeypatch.setattr(bv, "REPO_ROOT", tmp_path)
 
     return {
-        "yaml": yaml_path, "init": init_path, "pkg": pkg_path, "changelog": changelog_path,
+        "yaml": yaml_path, "init": init_path, "pkg": pkg_path, "lock": lock_path,
+        "changelog": changelog_path,
     }
 
 
@@ -246,6 +264,68 @@ def test_bump_syncs_init_and_package_json(
     # CHANGELOG.md 派生出来
     assert isolated_repo["changelog"].exists()
     assert "## [0.7.0]" in isolated_repo["changelog"].read_text(encoding="utf-8")
+
+
+def test_bump_syncs_package_lock_two_version_fields(
+    isolated_repo: dict[str, Path],
+) -> None:
+    """v0.8.1 漏 bump lockfile 卡死 ZIP 用户 self-update 的回归测试。
+
+    bump 后 lockfile 顶层 + packages[""] 两处 version 都同步到目标版本；deps 段
+    （node_modules/react.version="18.3.1"）不能被误改（正则 count=2 边界）。
+    """
+    rc = bv.main(["bump"])
+    assert rc == 0
+    lock = json.loads(isolated_repo["lock"].read_text(encoding="utf-8"))
+    assert lock["version"] == "0.7.0"
+    assert lock["packages"][""]["version"] == "0.7.0"
+    # dep 的 version 字段不能被改（正则 count=2 仅命中前两处）
+    assert lock["packages"]["node_modules/react"]["version"] == "18.3.1"
+
+
+def test_verify_versions_ok_after_bump(
+    isolated_repo: dict[str, Path],
+) -> None:
+    """bump 完跨 4 处 version 字段一致 → verify-versions 返 0。"""
+    assert bv.main(["bump"]) == 0
+    assert bv.main(["verify-versions"]) == 0
+
+
+def test_verify_versions_detects_drift(
+    isolated_repo: dict[str, Path], capsys: pytest.CaptureFixture[str],
+) -> None:
+    """模拟 v0.8.1 现场：package.json=0.8.1 / lockfile=0.8.0 → verify-versions 返 1 +
+    stderr 打印每处实际值。"""
+    isolated_repo["init"].write_text(
+        '__version__ = "0.8.1"\n', encoding="utf-8",
+    )
+    isolated_repo["pkg"].write_text(
+        json.dumps({"name": "studio-web", "version": "0.8.1"}, indent=2),
+        encoding="utf-8",
+    )
+    # lockfile 故意留 0.8.0（顶层 + packages[""] 都没跟上）
+    isolated_repo["lock"].write_text(
+        json.dumps({
+            "name": "studio-web", "version": "0.8.0", "lockfileVersion": 3,
+            "packages": {"": {"name": "studio-web", "version": "0.8.0"}},
+        }, indent=2),
+        encoding="utf-8",
+    )
+    rc = bv.main(["verify-versions"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "drift" in err.lower() or "FAIL" in err
+    # 实际值都报出来便于人工核对
+    assert "'0.8.1'" in err
+    assert "'0.8.0'" in err
+
+
+def test_verify_versions_fails_on_missing_file(
+    isolated_repo: dict[str, Path],
+) -> None:
+    """version 文件缺失 = drift（None ≠ 任何字符串）。防止漏检文件被静默放过。"""
+    isolated_repo["lock"].unlink()
+    assert bv.main(["verify-versions"]) == 1
 
 
 def test_bump_version_mismatch_rejected(

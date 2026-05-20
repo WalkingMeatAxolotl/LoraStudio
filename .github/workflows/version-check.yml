@@ -1,0 +1,30 @@
+name: version-check
+
+# 跨文件 version drift gate。v0.8.1 release 漏 bump package-lock.json，结果
+# npm install 启动期把 lockfile 改脏 → ZIP 用户 self-update preflight 卡 dirty
+# tree。这个 workflow 防同类回归。
+#
+# 跑两件事：
+#   1. release_notes.yaml schema 校验（validate）
+#   2. __init__.py / package.json / package-lock.json 四处 version 一致（verify-versions）
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - dev
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pyyaml
+        run: pip install pyyaml
+      - name: Validate release_notes.yaml schema
+        run: python tools/bump_version.py validate
+      - name: Verify version sync across __init__.py / package.json / lockfile
+        run: python tools/bump_version.py verify-versions
