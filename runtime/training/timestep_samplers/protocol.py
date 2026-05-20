@@ -49,3 +49,22 @@ class TimestepSamplerProtocol(Protocol):
     def status(self) -> dict:
         """暴露内部状态供 wandb 监控 / debug；自适应采样器 override 提供有意义信息。"""
         return {}
+
+    # ─── pause/resume 支持（ADR 0006 Addendum 1）：自适应采样器须 override，无状态采样器保持默认 no-op ───
+
+    def state_dict(self) -> dict:
+        """序列化内部状态用于断点续训。
+
+        无状态采样器（baseline / 纯分布）返回 {} —— save_training_state 跳过不存。
+        自适应采样器（InfoNoise 等）override 此方法导出 EMA / CDF / FIFO buffer，否则
+        resume 后会回到冷启动，已学到的 schedule 全部丢失。
+        """
+        return {}
+
+    def load_state_dict(self, state: dict) -> None:
+        """从 state_dict 恢复内部状态；无状态采样器保持默认 no-op。
+
+        实现者应在形状不匹配（如 K / B 改变）时 log warning 并保持冷启动，不要抛异常 ——
+        训练已经跑了几小时，resume 不应因为配置改了某个 hyperparameter 就崩溃。
+        """
+        return None

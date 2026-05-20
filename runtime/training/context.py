@@ -174,6 +174,7 @@ class TrainingContext:
                 state_path, self.injector, self.optimizer,
                 self.current_epoch, self.global_step, self.loss_history,
                 monitor_state=monitor_data, scheduler=self.scheduler,
+                timestep_sampler=self.timestep_sampler,
             )
             lora_path = self.output_dir / f"{self.args.output_name}_interrupted_step{self.global_step}.safetensors"
             self.injector.save(lora_path)

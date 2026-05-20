@@ -284,6 +284,7 @@ def run(ctx: TrainingContext) -> None:
                         save_training_state(
                             state_path, ctx.injector, ctx.optimizer, epoch, ctx.global_step,
                             ctx.loss_history, monitor_state=monitor_data, scheduler=ctx.scheduler,
+                            timestep_sampler=ctx.timestep_sampler,
                         )
                         # 同时保存 LoRA 权重
                         lora_path = ctx.output_dir / f"{args.output_name}_step{ctx.global_step}.safetensors"
@@ -341,6 +342,7 @@ def run(ctx: TrainingContext) -> None:
                     save_training_state(
                         state_path, ctx.injector, ctx.optimizer, epoch, ctx.global_step,
                         ctx.loss_history, monitor_state=monitor_data, scheduler=ctx.scheduler,
+                        timestep_sampler=ctx.timestep_sampler,
                     )
                     lora_path = ctx.output_dir / f"{args.output_name}_epoch{ctx.current_epoch}.safetensors"
                     if not lora_path.exists():
