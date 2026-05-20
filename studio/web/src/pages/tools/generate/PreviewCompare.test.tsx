@@ -51,8 +51,8 @@ describe('PreviewCompare', () => {
 
   it('shows axis labels for both samples (2D)', () => {
     renderCompare()
-    expect(screen.getByText(/Steps=20 · CFG Scale=3/)).toBeInTheDocument()
-    expect(screen.getByText(/Steps=30 · CFG Scale=5/)).toBeInTheDocument()
+    expect(screen.getByText(/步数=20 · CFG Scale=3/)).toBeInTheDocument()
+    expect(screen.getByText(/步数=30 · CFG Scale=5/)).toBeInTheDocument()
   })
 
   it('shows only X label when yDraft is null (1D)', () => {
@@ -60,8 +60,8 @@ describe('PreviewCompare', () => {
       samples: [makeSample(0, 0, 20, null), makeSample(1, 0, 25, null)],
       yDraft: null,
     })
-    expect(screen.getByText(/Steps=20$/)).toBeInTheDocument()
-    expect(screen.getByText(/Steps=25$/)).toBeInTheDocument()
+    expect(screen.getByText(/步数=20$/)).toBeInTheDocument()
+    expect(screen.getByText(/步数=25$/)).toBeInTheDocument()
     // 不应有 CFG Scale 文字
     expect(screen.queryByText(/CFG Scale/)).not.toBeInTheDocument()
   })
@@ -75,21 +75,21 @@ describe('PreviewCompare', () => {
   it('triggers onBack when Back to grid clicked', async () => {
     const user = userEvent.setup()
     const { onBack } = renderCompare()
-    await user.click(screen.getByText(/Back to grid/))
+    await user.click(screen.getByText(/返回网格/))
     expect(onBack).toHaveBeenCalled()
   })
 
   it('shows fallback message when selectedIndices are out of range', () => {
     renderCompare({ selectedIndices: [5, 7] })
-    expect(screen.getByText(/Selected samples are unavailable/)).toBeInTheDocument()
+    expect(screen.getByText(/所选样本已不可用/)).toBeInTheDocument()
     // 仍渲染返回按钮
-    expect(screen.getByText(/Back to grid/)).toBeInTheDocument()
+    expect(screen.getByText(/返回网格/)).toBeInTheDocument()
   })
 
   it('triggers onBack from fallback view too', async () => {
     const user = userEvent.setup()
     const { onBack } = renderCompare({ selectedIndices: [5, 7] })
-    await user.click(screen.getByText(/Back to grid/))
+    await user.click(screen.getByText(/返回网格/))
     expect(onBack).toHaveBeenCalled()
   })
 })
