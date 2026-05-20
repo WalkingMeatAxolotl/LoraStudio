@@ -937,6 +937,121 @@ def export_version_train_zip(
     )
 
 
+@app.get("/api/projects/{pid}/versions/{vid}/bundle.zip")
+def export_version_bundle(
+    pid: int,
+    vid: int,
+    background: BackgroundTasks,
+    train: bool = True,
+    train_captions: bool = True,
+    reg: bool = False,
+    reg_captions: bool = False,
+    config: bool = False,
+) -> FileResponse:
+    """按选项打包 bundle.zip（schema_version 2）。
+
+    查询参数：
+        train          是否包含训练集（默认 true）
+        train_captions 训练集是否包含 caption .txt（默认 true）
+        reg            是否包含正则集（默认 false）
+        reg_captions   正则集是否包含 caption .txt（默认 false）
+        config         是否包含本 version 私有训练配置（超参数，去除路径字段）
+    """
+    import tempfile
+
+    opts = train_io.BundleOptions(
+        train=train,
+        train_captions=train_captions,
+        reg=reg,
+        reg_captions=reg_captions,
+        include_config=config,
+    )
+
+    with db.connection_for() as conn:
+        v = versions.get_version(conn, vid)
+        if not v or v["project_id"] != pid:
+            raise HTTPException(404, f"版本不存在: id={vid}")
+        p = projects.get_project(conn, pid)
+        assert p is not None
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        tmp.close()
+        tmp_path = Path(tmp.name)
+        try:
+            train_io.export_bundle(conn, vid, tmp_path, opts)
+        except train_io.TrainIOError as exc:
+            tmp_path.unlink(missing_ok=True)
+            bus.publish({
+                "type": "version_bundle_zip_failed",
+                "project_id": pid,
+                "version_id": vid,
+                "error": str(exc),
+            })
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            tmp_path.unlink(missing_ok=True)
+            bus.publish({
+                "type": "version_bundle_zip_failed",
+                "project_id": pid,
+                "version_id": vid,
+                "error": str(exc),
+            })
+            raise
+
+    bus.publish({
+        "type": "version_bundle_zip_ready",
+        "project_id": pid,
+        "version_id": vid,
+    })
+    background.add_task(lambda: tmp_path.unlink(missing_ok=True))
+    archive_name = f"{p['slug']}-{v['label']}.bundle.zip"
+    return FileResponse(
+        tmp_path,
+        media_type="application/zip",
+        filename=archive_name,
+        background=background,
+    )
+
+
+@app.post("/api/projects/import-bundle")
+async def import_bundle_zip(file: UploadFile = File(...)) -> dict[str, Any]:
+    """上传 bundle.zip（v1/v2 均支持）→ 新建 project + v1，返回新项目。"""
+    import tempfile
+
+    from .paths import USER_PRESETS_DIR
+
+    if not file.filename:
+        raise HTTPException(400, "缺少上传文件")
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    try:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            tmp.write(chunk)
+        tmp.close()
+        tmp_path = Path(tmp.name)
+        with db.connection_for() as conn:
+            try:
+                result = train_io.import_bundle(conn, tmp_path, USER_PRESETS_DIR)
+            except train_io.TrainIOError as exc:
+                raise HTTPException(400, str(exc)) from exc
+    finally:
+        try:
+            Path(tmp.name).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    p = result["project"]
+    _publish_project_state(p)
+    _publish_version_state(result["version"])
+    return {
+        "project": _project_payload(p),
+        "version": result["version"],
+        "stats": result["stats"],
+    }
+
+
 @app.post("/api/projects/import-train")
 async def import_train_zip(file: UploadFile = File(...)) -> dict[str, Any]:
     """上传训练集 zip → 新建 project + v1（stage=tagging），返回新项目。"""

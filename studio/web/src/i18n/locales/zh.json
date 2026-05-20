@@ -490,6 +490,7 @@
     "created": "已创建 {{title}}",
     "movedToTrash": "已移到回收站: {{title}}",
     "imported": "已导入 {{title}}（{{image_count}} 张图，{{tagged_count}} 已打标）",
+    "importedBundle": "已导入 {{title}}（训练集 {{train_count}} 张，正则集 {{reg_count}} 张，预设 {{preset_count}} 个）",
     "importFailed": "导入失败: {{e}}",
     "confirmEmptyTrash": "物理删除所有回收站项目？此操作不可恢复。",
     "trashCleared": "清空了 {{n}} 个项目",
@@ -1196,7 +1197,14 @@
     "forkBlank": "从空白开始",
     "forkFromVersion": "从 {{label}} 复制",
     "forkNote": "将复制 train/、reg/、训练配置、解锁状态（output/、samples/ 不复制）",
-    "creatingBtn": "创建中..."
+    "creatingBtn": "创建中...",
+    "exportBundleTitle": "导出内容选择",
+    "exportBundleTrain": "训练集",
+    "exportBundleReg": "正则集",
+    "exportBundleCaptions": "包含 caption 文件 (.txt)",
+    "exportBundleConfig": "训练配置",
+    "exportBundleConfigHint": "（当前版本超参数，路径字段不含）",
+    "exportBundleAtLeastOne": "至少选择一项导出内容"
   },
   "tagEdit": {
     "title": "标签编辑",

@@ -95,12 +95,28 @@ export default function ProjectsPage() {
   const handleImportFile = async (file: File) => {
     setImporting(true)
     try {
-      const result = await api.importTrainProject(file)
+      // bundle.zip（v1/v2 均走 import-bundle；旧 train.zip 也兼容）
+      const result = await api.importBundle(file)
       const stats = result.stats
-      toast(
-        t('projects.imported', { title: result.project.title, image_count: stats.image_count, tagged_count: stats.tagged_count }),
-        'success',
-      )
+      const isBundleV2 = 'train_image_count' in stats
+      if (isBundleV2) {
+        toast(
+          t('projects.importedBundle', {
+            title: result.project.title,
+            train_count: stats.train_image_count,
+            reg_count: stats.reg_image_count,
+            preset_count: stats.preset_count,
+          }),
+          'success',
+        )
+      } else {
+        // 旧 v1 stats 结构（image_count / tagged_count）
+        const s = stats as unknown as { image_count: number; tagged_count: number }
+        toast(
+          t('projects.imported', { title: result.project.title, image_count: s.image_count, tagged_count: s.tagged_count }),
+          'success',
+        )
+      }
       navigate(`/projects/${result.project.id}`)
     } catch (e) {
       toast(t('projects.importFailed', { e }), 'error')

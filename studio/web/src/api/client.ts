@@ -1774,6 +1774,53 @@ export const api = {
    * 后端 publish version_train_zip_ready/_failed SSE 供前端清 "打包中..." 状态。 */
   versionTrainZipUrl: (pid: number, vid: number) =>
     `/api/projects/${pid}/versions/${vid}/train.zip`,
+
+  /** bundle.zip 导出直链（schema_version 2）。
+   * presets: 空 = 不含预设；["*"] = 全部；其他 = 指定名称列表。 */
+  versionBundleZipUrl: (
+    pid: number,
+    vid: number,
+    opts: {
+      train?: boolean
+      trainCaptions?: boolean
+      reg?: boolean
+      regCaptions?: boolean
+      includeConfig?: boolean
+    },
+  ): string => {
+    const p = new URLSearchParams()
+    p.set('train', opts.train !== false ? '1' : '0')
+    p.set('train_captions', opts.trainCaptions !== false ? '1' : '0')
+    p.set('reg', opts.reg ? '1' : '0')
+    p.set('reg_captions', opts.regCaptions ? '1' : '0')
+    if (opts.includeConfig) p.set('config', '1')
+    return `/api/projects/${pid}/versions/${vid}/bundle.zip?${p.toString()}`
+  },
+
+  /** 上传 bundle.zip（v1/v2 均支持）→ 新建 project + v1，返回新项目。 */
+  importBundle: async (file: File): Promise<{
+    project: ProjectDetail
+    version: Version
+    stats: {
+      train_image_count: number
+      train_tagged_count: number
+      reg_image_count: number
+      preset_count: number
+    }
+  }> => {
+    const fd = new FormData()
+    fd.append('file', file)
+    const resp = await fetch('/api/projects/import-bundle', { method: 'POST', body: fd })
+    if (!resp.ok) {
+      let detail = `${resp.status} ${resp.statusText}`
+      try {
+        const body = await resp.json()
+        if (body?.detail) detail = body.detail
+      } catch { /* ignore */ }
+      throw new Error(detail)
+    }
+    return resp.json()
+  },
   /** 上传训练集 zip → 新建 project + v1，返回新项目。 */
   importTrainProject: async (file: File): Promise<{
     project: ProjectDetail

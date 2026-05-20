@@ -490,6 +490,7 @@
     "created": "Created {{title}}",
     "movedToTrash": "Moved to trash: {{title}}",
     "imported": "Imported {{title}} ({{image_count}} images, {{tagged_count}} tagged)",
+    "importedBundle": "Imported {{title}} (train: {{train_count}}, reg: {{reg_count}}, presets: {{preset_count}})",
     "importFailed": "Import failed: {{e}}",
     "confirmEmptyTrash": "Permanently delete all trashed projects? This cannot be undone.",
     "trashCleared": "Cleared {{n}} projects",
@@ -1196,7 +1197,14 @@
     "forkBlank": "Start from scratch",
     "forkFromVersion": "Copy from {{label}}",
     "forkNote": "Copies train/, reg/, training config, and unlock state (output/, samples/ not copied)",
-    "creatingBtn": "Creating..."
+    "creatingBtn": "Creating...",
+    "exportBundleTitle": "Export bundle",
+    "exportBundleTrain": "Training set",
+    "exportBundleReg": "Regularization set",
+    "exportBundleCaptions": "Include caption files (.txt)",
+    "exportBundleConfig": "Training config",
+    "exportBundleConfigHint": "(hyperparams for this version, no path fields)",
+    "exportBundleAtLeastOne": "Select at least one item to export"
   },
   "tagEdit": {
     "title": "Tag edit",

@@ -6,6 +6,7 @@ import { useProjectCtxSetter } from '../../context/ProjectContext'
 import { useDialog } from '../../components/Dialog'
 import { useToast } from '../../components/Toast'
 import { useEventStream } from '../../lib/useEventStream'
+import ExportBundleDialog, { type BundleExportOpts } from '../../components/ExportBundleDialog'
 
 export default function ProjectLayout() {
   const { t } = useTranslation()
@@ -20,6 +21,7 @@ export default function ProjectLayout() {
   const [creating, setCreating] = useState(false)
   const [creatingBusy, setCreatingBusy] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [showExportDialog, setShowExportDialog] = useState(false)
   const projectRef = useRef<ProjectDetail | null>(null)
   projectRef.current = project
 
@@ -45,13 +47,14 @@ export default function ProjectLayout() {
     ) {
       void reload()
     } else if (
-      // train.zip 打包完成 / 失败 —— 后端 publish 后清 app-side "打包中..."
-      // 状态。<a> 直链已经把传输交给浏览器原生下载条；这里只管 prep 阶段反馈。
-      (evt.type === 'version_train_zip_ready' || evt.type === 'version_train_zip_failed') &&
+      (
+        evt.type === 'version_train_zip_ready' || evt.type === 'version_train_zip_failed' ||
+        evt.type === 'version_bundle_zip_ready' || evt.type === 'version_bundle_zip_failed'
+      ) &&
       evt.project_id === projectId
     ) {
       setExporting(false)
-      if (evt.type === 'version_train_zip_failed') {
+      if (evt.type === 'version_train_zip_failed' || evt.type === 'version_bundle_zip_failed') {
         const err = typeof evt.error === 'string' ? evt.error : '?'
         toast(t('layout.exportFailed', { error: err }), 'error')
       }
@@ -84,22 +87,31 @@ export default function ProjectLayout() {
 
   const handleExportTrain = useCallback(() => {
     if (!projectRef.current || exporting) return
+    setShowExportDialog(true)
+  }, [exporting])
+
+  const handleExportBundleConfirm = useCallback((opts: BundleExportOpts) => {
+    setShowExportDialog(false)
+    if (!projectRef.current) return
     const av = projectRef.current.versions.find(
       (v) => v.id === projectRef.current!.active_version_id
     ) ?? projectRef.current.versions[0] ?? null
     if (!av) return
     setExporting(true)
-    // <a download> 直链 —— 浏览器原生接管下载（进度条 / 暂停 / 切 tab 不中断）。
-    // app-side "打包中..." 由 version_train_zip_ready/_failed SSE 清。
-    // download 属性是兜底,后端 Content-Disposition.filename 优先。
-    const filename = `${projectRef.current.slug}-${av.label}.train.zip`
+    const filename = `${projectRef.current.slug}-${av.label}.bundle.zip`
     const a = document.createElement('a')
-    a.href = api.versionTrainZipUrl(projectRef.current.id, av.id)
+    a.href = api.versionBundleZipUrl(projectRef.current.id, av.id, {
+      train: opts.train,
+      trainCaptions: opts.trainCaptions,
+      reg: opts.reg,
+      regCaptions: opts.regCaptions,
+      includeConfig: opts.includeConfig,
+    })
     a.download = filename
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-  }, [exporting])
+  }, [])
 
   const handleDeleteVersion = useCallback(async (vid: number) => {
     if (!projectRef.current) return
@@ -154,6 +166,7 @@ export default function ProjectLayout() {
     })
   }, [project, activeVersion, reload, handleSelectVersion, handleExportTrain, handleDeleteVersion, exporting, setCtx])
 
+
   useEffect(() => {
     return () => { setCtx?.(null) }
   }, [setCtx])
@@ -185,6 +198,12 @@ export default function ProjectLayout() {
           busy={creatingBusy}
           onCancel={() => { if (creatingBusy) return; setCreating(false) }}
           onSubmit={handleCreateVersion}
+        />
+      )}
+      {showExportDialog && (
+        <ExportBundleDialog
+          onConfirm={handleExportBundleConfirm}
+          onCancel={() => setShowExportDialog(false)}
         />
       )}
     </div>
