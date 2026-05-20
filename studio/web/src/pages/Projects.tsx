@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { api, type ProjectStage, type ProjectSummary } from '../api/client'
@@ -35,7 +35,7 @@ export default function ProjectsPage() {
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState(false)
   const [importing, setImporting] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [showImportDialog, setShowImportDialog] = useState(false)
   const navigate = useNavigate()
   const { toast } = useToast()
   const { confirm } = useDialog()
@@ -92,37 +92,26 @@ export default function ProjectsPage() {
     }
   }
 
-  const handleImportFile = async (file: File) => {
+  const handleImportLocal = async (filename: string) => {
     setImporting(true)
     try {
-      // bundle.zip（v1/v2 均走 import-bundle；旧 train.zip 也兼容）
-      const result = await api.importBundle(file)
+      const result = await api.importBundleLocal(filename)
       const stats = result.stats
-      const isBundleV2 = 'train_image_count' in stats
-      if (isBundleV2) {
-        toast(
-          t('projects.importedBundle', {
-            title: result.project.title,
-            train_count: stats.train_image_count,
-            reg_count: stats.reg_image_count,
-            preset_count: stats.preset_count,
-          }),
-          'success',
-        )
-      } else {
-        // 旧 v1 stats 结构（image_count / tagged_count）
-        const s = stats as unknown as { image_count: number; tagged_count: number }
-        toast(
-          t('projects.imported', { title: result.project.title, image_count: s.image_count, tagged_count: s.tagged_count }),
-          'success',
-        )
-      }
+      toast(
+        t('projects.importedBundle', {
+          title: result.project.title,
+          train_count: stats.train_image_count,
+          reg_count: stats.reg_image_count,
+          preset_count: stats.preset_count,
+        }),
+        'success',
+      )
+      setShowImportDialog(false)
       navigate(`/projects/${result.project.id}`)
     } catch (e) {
       toast(t('projects.importFailed', { e }), 'error')
     } finally {
       setImporting(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -137,21 +126,11 @@ export default function ProjectsPage() {
         subtitle={t('projects.description')}
         actions={
           <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".zip,application/zip"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) void handleImportFile(f)
-              }}
-            />
             <button
               className="btn btn-secondary btn-sm"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => setShowImportDialog(true)}
               disabled={importing}
-              title={importing ? t('projects.uploadingZip') : t('projects.importZipHint')}
+              title={importing ? t('projects.importing') : t('projects.importZipHint')}
             >
               {importing ? t('projects.importing') : t('projects.importZip')}
             </button>
@@ -205,6 +184,132 @@ export default function ProjectsPage() {
           onSubmit={handleCreate}
         />
       )}
+
+      {showImportDialog && (
+        <DataExportsImportDialog
+          busy={importing}
+          onCancel={() => setShowImportDialog(false)}
+          onConfirm={handleImportLocal}
+        />
+      )}
+    </div>
+  )
+}
+
+type DataExportEntry = Awaited<ReturnType<typeof api.listDataExports>>[number]
+
+function formatFileSize(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
+  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`
+}
+
+function DataExportsImportDialog({
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  busy: boolean
+  onCancel: () => void
+  onConfirm: (filename: string) => void
+}) {
+  const { t } = useTranslation()
+  const [items, setItems] = useState<DataExportEntry[]>([])
+  const [selected, setSelected] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const list = await api.listDataExports()
+      setItems(list)
+      setSelected((current) => list.some((item) => item.filename === current) ? current : list[0]?.filename ?? '')
+      setError(null)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selected || busy) return
+    onConfirm(selected)
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/45"
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onCancel() }}
+    >
+      <form
+        onSubmit={submit}
+        className="bg-surface border border-dim rounded-xl p-7 flex flex-col gap-4 shadow-lg w-[90%] max-w-[620px]"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="m-0 text-xl font-semibold">{t('projects.importBundleTitle')}</h2>
+            <p className="mt-1 mb-0 text-sm text-fg-secondary">{t('projects.importBundleDescription')}</p>
+          </div>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void load()} disabled={loading || busy}>
+            {t('projects.importBundleRefresh')}
+          </button>
+        </div>
+
+        {error && (
+          <div className="px-3.5 py-2.5 rounded-md bg-err-soft border border-err text-err text-sm font-mono">
+            {t('projects.dataExportsLoadFailed', { e: error })}
+          </div>
+        )}
+
+        <div className="border border-subtle rounded-lg overflow-hidden max-h-[340px] overflow-y-auto">
+          <div className="grid grid-cols-[1fr_96px_150px] gap-3 px-3 py-2 text-xs text-fg-tertiary uppercase tracking-wider bg-overlay">
+            <span>{t('projects.importBundleFile')}</span>
+            <span>{t('projects.importBundleSize')}</span>
+            <span>{t('projects.importBundleModified')}</span>
+          </div>
+          {loading ? (
+            <div className="px-3 py-8 text-center text-sm text-fg-secondary">{t('projects.importBundleLoading')}</div>
+          ) : items.length === 0 ? (
+            <div className="px-3 py-8 text-center text-sm text-fg-secondary">{t('projects.importBundleEmpty')}</div>
+          ) : (
+            items.map((item) => {
+              const active = selected === item.filename
+              return (
+                <button
+                  type="button"
+                  key={item.filename}
+                  onClick={() => setSelected(item.filename)}
+                  onDoubleClick={() => { if (!busy) onConfirm(item.filename) }}
+                  className={`grid grid-cols-[1fr_96px_150px] gap-3 w-full px-3 py-2.5 text-left border-0 border-t border-subtle cursor-pointer ${active ? 'bg-accent/10 text-fg-primary' : 'bg-transparent text-fg-secondary hover:bg-overlay'}`}
+                >
+                  <span className="font-mono text-sm overflow-hidden text-ellipsis whitespace-nowrap">{item.filename}</span>
+                  <span className="text-sm">{formatFileSize(item.size)}</span>
+                  <span className="text-sm">{new Date(item.mtime * 1000).toLocaleString()}</span>
+                </button>
+              )
+            })
+          )}
+        </div>
+
+        {!selected && !loading && items.length > 0 && (
+          <p className="text-xs text-err m-0">{t('projects.selectBundleFirst')}</p>
+        )}
+
+        <div className="flex gap-2 justify-end">
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>{t('common.cancel')}</button>
+          <button type="submit" className="btn btn-primary" disabled={busy || loading || !selected}>
+            {busy ? t('projects.importing') : t('projects.importSelected')}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }

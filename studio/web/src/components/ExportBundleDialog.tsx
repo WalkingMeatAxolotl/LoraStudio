@@ -1,4 +1,4 @@
-// ExportBundleDialog — 选择 bundle.zip 导出内容后触发下载。
+// ExportBundleDialog — 选择 bundle.zip 导出内容后写入 data_exports。
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -42,9 +42,14 @@ export default function ExportBundleDialog({ onConfirm, onCancel }: Props) {
         onSubmit={handleSubmit}
         className="bg-elevated border border-dim rounded-lg w-[90%] max-w-[420px] p-6 flex flex-col gap-5 shadow-xl"
       >
-        <h2 className="m-0 text-lg font-semibold text-fg-primary">
-          {t('layout.exportBundleTitle')}
-        </h2>
+        <div>
+          <h2 className="m-0 text-lg font-semibold text-fg-primary">
+            {t('layout.exportBundleTitle')}
+          </h2>
+          <p className="mt-1 mb-0 text-sm text-fg-secondary">
+            {t('layout.exportBundleDestinationHint')}
+          </p>
+        </div>
 
         {/* 训练集 */}
         <div className="flex flex-col gap-2">
