@@ -150,6 +150,47 @@ class InfoNoiseScheduler:
             "internal_step": self._internal_step,
         }
 
+    # ─── pause/resume 支持（ADR 0006 Addendum 1）：保存自适应 schedule 防止 resume 丢 CDF ───
+    # 不保存 hyperparameter（K/B/N_warm/M/beta/...）—— 这些由 args 重建；只保存 *学到的* 状态。
+    # 但记录 K/B 让 load_state_dict 做形状校验，避免不同配置 ckpt 间错乱。
+
+    def state_dict(self) -> dict:
+        return {
+            "K": self.K,
+            "B": self.B,
+            "fifo": [list(buf) for buf in self._fifo],
+            "mse_ema": self._mse_ema.copy(),
+            "n_count": self._n_count.copy(),
+            "cdf_values": None if self._cdf_values is None else self._cdf_values.copy(),
+            "internal_step": int(self._internal_step),
+            "last_refresh_status": self._last_refresh_status,
+            "refresh_attempts": int(self._refresh_attempts),
+            "refresh_degraded_count": int(self._refresh_degraded_count),
+            "warned_cold_start": bool(self._warned_cold_start),
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        saved_K = int(state.get("K", self.K))
+        saved_B = int(state.get("B", self.B))
+        if saved_K != self.K or saved_B != self.B:
+            # 已经跑了几小时，配置改了不要崩 —— 退回冷启动让 warmup 重走。
+            logger.warning(
+                "InfoNoise resume: shape mismatch (saved K=%d B=%d, current K=%d B=%d) "
+                "—— 跳过 sampler state 加载，从冷启动重 warmup。",
+                saved_K, saved_B, self.K, self.B,
+            )
+            return
+        self._fifo = [deque(buf, maxlen=self.B) for buf in state["fifo"]]
+        self._mse_ema = np.asarray(state["mse_ema"], dtype=np.float64).copy()
+        self._n_count = np.asarray(state["n_count"], dtype=np.int32).copy()
+        cdf = state.get("cdf_values")
+        self._cdf_values = None if cdf is None else np.asarray(cdf, dtype=np.float64).copy()
+        self._internal_step = int(state.get("internal_step", 0))
+        self._last_refresh_status = str(state.get("last_refresh_status", "not_refreshed_yet"))
+        self._refresh_attempts = int(state.get("refresh_attempts", 0))
+        self._refresh_degraded_count = int(state.get("refresh_degraded_count", 0))
+        self._warned_cold_start = bool(state.get("warned_cold_start", False))
+
     def _refresh(self):
         self._refresh_attempts += 1
 

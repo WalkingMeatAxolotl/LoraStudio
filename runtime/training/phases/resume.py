@@ -62,6 +62,7 @@ def run(ctx: TrainingContext) -> None:
     if getattr(args, "resume_state", "") and Path(args.resume_state).exists():
         ctx.start_epoch, ctx.global_step, ctx.loss_history, saved_monitor_state = load_training_state(
             args.resume_state, ctx.injector, ctx.optimizer, ctx.scheduler,
+            timestep_sampler=ctx.timestep_sampler,
         )
         ctx.emit(f"从断点恢复训练: epoch={ctx.start_epoch}, step={ctx.global_step}")
 

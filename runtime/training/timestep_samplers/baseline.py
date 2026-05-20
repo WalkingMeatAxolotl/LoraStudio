@@ -52,6 +52,14 @@ class BaselineTimestepSampler:
             "timestep_schedule_shift": self.timestep_schedule_shift,
         }
 
+    # ─── pause/resume（ADR 0006 Addendum 1）：无状态采样器是真的无状态，no-op ───
+    # Protocol body 里的 default 仅给 type checker；运行时不分发，必须显式实现。
+    def state_dict(self) -> dict:
+        return {}
+
+    def load_state_dict(self, state: dict) -> None:
+        return None
+
 
 def build(args, total_steps) -> BaselineTimestepSampler:
     """按 args 构建 BaselineTimestepSampler。total_steps 此采样器用不到。"""
