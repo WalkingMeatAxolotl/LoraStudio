@@ -18,6 +18,8 @@ ENV/
 
 # Logs / local outputs
 output/
+data_exports/*
+!data_exports/*.md
 monitor_data/
 config/autosave/
 *.log

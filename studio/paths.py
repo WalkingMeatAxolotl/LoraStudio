@@ -10,6 +10,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # PP6.1 后全局 `monitor_data/` 已退役（监控状态走 per-task），不再保留常量 / 创建目录。
 OUTPUT_DIR = REPO_ROOT / "output"
 
+# 导出文件落地目录（dataset zip、preset bundle 等）
+DATA_EXPORTS = REPO_ROOT / "data_exports"
+
 # Studio 持久化（SQLite + 用户保存的 preset + 任务日志）
 STUDIO_DATA = REPO_ROOT / "studio_data"
 STUDIO_DB = STUDIO_DATA / "studio.db"
