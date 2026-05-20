@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { useTranslation } from 'react-i18next'
 
 export interface ImageGridItem {
   name: string
@@ -50,13 +51,14 @@ export default function ImageGrid({
   onActivate,
   clickMode = 'select',
   limit = 500,
-  emptyHint = '没有图片',
+  emptyHint,
   ariaLabel,
   columnsClass = DEFAULT_COLUMNS,
   activeName,
 }: Props) {
+  const { t } = useTranslation()
   if (items.length === 0) {
-    return <p className="text-fg-tertiary text-sm py-2">{emptyHint}</p>
+    return <p className="text-fg-tertiary text-sm py-2">{emptyHint ?? t('imageGrid.noImages')}</p>
   }
   const shown = items.slice(0, limit)
   const overflow = items.length - shown.length
@@ -89,7 +91,7 @@ export default function ImageGrid({
       })}
       {overflow > 0 && (
         <p className="col-span-full text-xs text-fg-tertiary mt-1">
-          仅显示前 {limit} 张（共 {items.length} 张）
+          {t('imageGrid.truncated', { n: limit, total: items.length })}
         </p>
       )}
     </div>
@@ -122,6 +124,7 @@ const Cell = memo(function Cell({
   onActivate?: (name: string) => void
   clickMode: 'select' | 'activate'
 }) {
+  const { t } = useTranslation()
   const handleCellClick = (e: React.MouseEvent) => {
     if (clickMode === 'activate' && onActivate && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       onActivate(item.name)
@@ -161,7 +164,7 @@ const Cell = memo(function Cell({
       <button
         type="button"
         onClick={handleSelectionClick}
-        aria-label={`${selected ? '取消选择' : '选择'} ${item.name}`}
+        aria-label={`${selected ? t('common.deselect') : t('common.select')} ${item.name}`}
         className={
           'absolute top-1 left-1 w-5 h-5 rounded-sm flex items-center justify-center text-[12px] font-bold transition-opacity ' +
           (selected
@@ -179,7 +182,7 @@ const Cell = memo(function Cell({
             e.stopPropagation()
             onPreview(item.name)
           }}
-          aria-label={`预览 ${item.name}`}
+          aria-label={`${t('common.preview')} ${item.name}`}
           className="absolute top-1 right-1 w-5 h-5 rounded-sm bg-black/60 text-white text-[11px] opacity-0 group-hover:opacity-100 hover:bg-black/80"
         >
           ⤢

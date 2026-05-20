@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { api, type CaptionEntry, type PresetSummary, type ProjectSummary } from '../api/client'
 import { useProjectCtx } from '../context/ProjectContext'
@@ -38,6 +39,7 @@ interface Props {
 }
 
 export default function CommandPalette({ open, onClose, anchorEl }: Props) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const ctx = useProjectCtx()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -45,24 +47,18 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
   const [query, setQuery] = useState('')
   const [activeIdx, setActiveIdx] = useState(0)
 
-  // ── 数据源 ──────────────────────────────────────────────────────────────
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [projectsLoaded, setProjectsLoaded] = useState(false)
 
   const [presets, setPresets] = useState<PresetSummary[]>([])
   const [presetsLoaded, setPresetsLoaded] = useState(false)
 
-  // 标签缓存：key = "${pid}:${vid}"
   const [captions, setCaptions] = useState<CaptionEntry[]>([])
   const [captionsCacheKey, setCaptionsCacheKey] = useState<string | null>(null)
   const [captionsLoading, setCaptionsLoading] = useState(false)
 
-  // ── 面板位置（锚定到搜索按钮下方） ──────────────────────────────────────
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({
-    position: 'fixed',
-    top: 56,
-    right: 20,
-    width: 520,
+    position: 'fixed', top: 56, right: 20, width: 520,
   })
 
   useLayoutEffect(() => {
@@ -76,12 +72,10 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
         width: Math.max(520, r.width + 200),
       })
     } else {
-      // 无锚点：默认右上角
       setPanelStyle({ position: 'fixed', top: 56, right: 20, width: 520 })
     }
   }, [open, anchorEl])
 
-  // ── 打开时聚焦 + 重置 ────────────────────────────────────────────────────
   useEffect(() => {
     if (open) {
       setQuery('')
@@ -93,10 +87,6 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
     }
   }, [open])
 
-  // 关闭时重置项目/预设（下次重新加载，保证数据新鲜）
-  // 标签缓存按 pid:vid 保留，翻页后仍有效
-
-  // ── 加载项目列表 ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!open || projectsLoaded) return
     let cancelled = false
@@ -108,7 +98,6 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
     return () => { cancelled = true }
   }, [open, projectsLoaded])
 
-  // ── 加载预设列表 ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!open || presetsLoaded) return
     let cancelled = false
@@ -120,7 +109,6 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
     return () => { cancelled = true }
   }, [open, presetsLoaded])
 
-  // ── 加载标签（query ≥ 2 字符 + 有版本上下文时触发） ─────────────────────
   const pid = ctx?.project?.id
   const vid = ctx?.activeVersion?.id
   const queryEnoughForTags = query.length >= 2
@@ -128,7 +116,7 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
   useEffect(() => {
     if (!open || !queryEnoughForTags || !pid || !vid) return
     const key = `${pid}:${vid}`
-    if (captionsCacheKey === key) return  // 已加载
+    if (captionsCacheKey === key) return
 
     let cancelled = false
     setCaptionsLoading(true)
@@ -144,59 +132,54 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
     return () => { cancelled = true }
   }, [open, queryEnoughForTags, pid, vid, captionsCacheKey])
 
-  // ── 构建可搜索条目（导航类） ─────────────────────────────────────────────
   const allItems = useMemo<Item[]>(() => {
     const items: Item[] = []
 
-    // 静态页面
-    items.push({ id: 'home',     label: '项目列表', sub: '首页',       group: '页面', path: '/' })
-    items.push({ id: 'queue',    label: '队列',     sub: '查看所有任务', group: '页面', path: '/queue' })
-    items.push({ id: 'presets',  label: '预设',     sub: '训练配置',    group: '页面', path: '/tools/presets' })
-    items.push({ id: 'monitor',  label: '监控',     sub: '训练监控面板', group: '页面', path: '/tools/monitor' })
-    items.push({ id: 'settings', label: '设置',     sub: '全局设置',    group: '页面', path: '/tools/settings' })
+    items.push({ id: 'home',     label: t('commandPalette.home'),     sub: t('commandPalette.homeSub'),     group: t('commandPalette.pages'), path: '/' })
+    items.push({ id: 'queue',    label: t('nav.queue'),               sub: t('commandPalette.queueSub'),    group: t('commandPalette.pages'), path: '/queue' })
+    items.push({ id: 'presets',  label: t('nav.presets'),             sub: t('commandPalette.presetsSub'), group: t('commandPalette.pages'), path: '/tools/presets' })
+    items.push({ id: 'monitor',  label: t('nav.monitor'),             sub: t('commandPalette.monitorSub'), group: t('commandPalette.pages'), path: '/tools/monitor' })
+    items.push({ id: 'settings', label: t('nav.settings'),            sub: t('commandPalette.settingsSub'), group: t('commandPalette.pages'), path: '/tools/settings' })
 
-    // 预设
     for (const p of presets) {
       items.push({
         id: `preset:${p.name}`,
         label: p.name,
-        sub: '训练预设',
-        group: '预设',
+        sub: t('commandPalette.presetItem'),
+        group: t('commandPalette.presets'),
         path: '/tools/presets',
       })
     }
 
-    // 项目
     for (const p of projects) {
       items.push({
         id: `project:${p.id}`,
         label: p.title || `#${p.id}`,
-        sub: p.slug ? `/${p.slug}` : `项目 #${p.id}`,
-        group: '项目',
+        sub: p.slug ? `/${p.slug}` : t('commandPalette.projectItem', { id: p.id }),
+        group: t('commandPalette.projects'),
         path: `/projects/${p.id}`,
       })
     }
 
-    // 当前项目步骤
     if (ctx) {
       const cpid = ctx.project.id
       const cvid = ctx.activeVersion?.id
-      items.push({ id: `overview:${cpid}`, label: '概览', sub: ctx.project.title, group: '当前项目', path: `/projects/${cpid}` })
-      items.push({ id: `download:${cpid}`, label: '下载', sub: ctx.project.title, group: '当前项目', path: `/projects/${cpid}/download` })
+      const group = t('commandPalette.currentProject')
+      items.push({ id: `overview:${cpid}`, label: t('nav.overview'), sub: ctx.project.title, group, path: `/projects/${cpid}` })
+      items.push({ id: `download:${cpid}`, label: t('nav.download'), sub: ctx.project.title, group, path: `/projects/${cpid}/download` })
       if (cvid) {
         const base = `/projects/${cpid}/v/${cvid}`
-        items.push({ id: `curate:${cpid}`,      label: '筛选',   sub: ctx.project.title, group: '当前项目', path: `${base}/curate` })
-        items.push({ id: `tag:${cpid}`,          label: '打标',   sub: ctx.project.title, group: '当前项目', path: `${base}/tag` })
-        items.push({ id: `edit:${cpid}`,         label: '标签编辑', sub: ctx.project.title, group: '当前项目', path: `${base}/edit` })
-        items.push({ id: `reg:${cpid}`,          label: '正则集', sub: ctx.project.title, group: '当前项目', path: `${base}/reg` })
-        items.push({ id: `train:${cpid}`,        label: '训练',   sub: ctx.project.title, group: '当前项目', path: `${base}/train` })
+        items.push({ id: `curate:${cpid}`, label: t('nav.curate'),   sub: ctx.project.title, group, path: `${base}/curate` })
+        items.push({ id: `tag:${cpid}`,    label: t('nav.tag'),      sub: ctx.project.title, group, path: `${base}/tag` })
+        items.push({ id: `edit:${cpid}`,   label: t('nav.tagEdit'),  sub: ctx.project.title, group, path: `${base}/edit` })
+        items.push({ id: `reg:${cpid}`,    label: t('nav.reg'),      sub: ctx.project.title, group, path: `${base}/reg` })
+        items.push({ id: `train:${cpid}`,  label: t('nav.train'),    sub: ctx.project.title, group, path: `${base}/train` })
       }
     }
 
     return items
-  }, [projects, presets, ctx])
+  }, [projects, presets, ctx, t])
 
-  // ── 过滤导航条目 ──────────────────────────────────────────────────────────
   const filteredNav = useMemo(() => {
     if (!query.trim()) return allItems
     const q = query.toLowerCase()
@@ -208,7 +191,6 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
     )
   }, [allItems, query])
 
-  // ── 标签搜索结果（仅当 query >= 2 且有项目版本） ──────────────────────────
   const tagItems = useMemo<Item[]>(() => {
     if (!queryEnoughForTags || !ctx?.activeVersion || captions.length === 0) return []
     const cpid = ctx.project.id
@@ -230,16 +212,14 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
       .map(([tag, count]) => ({
         id: `tag:${tag}`,
         label: tag,
-        sub: `${count} 张图`,
-        group: '标签',
+        sub: t('commandPalette.imageCount', { n: count }),
+        group: t('commandPalette.tags'),
         path: `/projects/${cpid}/v/${cvid}/edit`,
       }))
-  }, [captions, queryEnoughForTags, query, ctx])
+  }, [captions, queryEnoughForTags, query, ctx, t])
 
-  // ── 合并全部结果 ──────────────────────────────────────────────────────────
   const filtered = useMemo(() => [...filteredNav, ...tagItems], [filteredNav, tagItems])
 
-  // ── 按组分组 ──────────────────────────────────────────────────────────────
   const grouped = useMemo(() => {
     const map = new Map<string, Item[]>()
     for (const item of filtered) {
@@ -255,16 +235,11 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
     return out
   }, [grouped])
 
-  // ── 选中 ──────────────────────────────────────────────────────────────────
   const select = useCallback(
-    (item: Item) => {
-      navigate(item.path)
-      onClose()
-    },
+    (item: Item) => { navigate(item.path); onClose() },
     [navigate, onClose],
   )
 
-  // ── 键盘 ──────────────────────────────────────────────────────────────────
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -280,7 +255,6 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
     }
   }
 
-  // 滚动选中项入视野
   useEffect(() => {
     const el = listRef.current
     if (!el) return
@@ -292,10 +266,8 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
 
   return (
     <>
-      {/* 透明遮罩：仅用于点击外部关闭，不遮挡背景 */}
       <div className="fixed inset-0 z-40" onClick={onClose} />
 
-      {/* 浮窗面板 */}
       <div
         className="z-50 rounded-lg border border-subtle bg-overlay shadow-xl flex flex-col overflow-hidden"
         style={{
@@ -305,33 +277,31 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 搜索栏 */}
         <div className="flex items-center gap-2.5 px-4 py-3 border-b border-subtle">
           <span className="text-fg-tertiary">{SEARCH_ICON}</span>
           <input
             ref={inputRef}
             type="text"
             className="flex-1 bg-transparent border-none outline-none text-sm text-fg-primary placeholder:text-fg-tertiary"
-            placeholder="搜索页面、项目、预设、标签…"
+            placeholder={t('commandPalette.placeholder')}
             value={query}
             onChange={(e) => { setQuery(e.target.value); setActiveIdx(0) }}
             onKeyDown={handleKeyDown}
           />
           {captionsLoading && (
-            <span className="text-2xs text-fg-tertiary animate-pulse">搜索标签…</span>
+            <span className="text-2xs text-fg-tertiary animate-pulse">{t('commandPalette.searchingTags')}</span>
           )}
           <kbd className="kbd">esc</kbd>
         </div>
 
-        {/* 结果列表 */}
         <div ref={listRef} className="flex-1 overflow-y-auto p-1.5">
           {filtered.length === 0 ? (
-            <div className="text-sm text-fg-tertiary text-center py-8">无匹配结果</div>
+            <div className="text-sm text-fg-tertiary text-center py-8">{t('commandPalette.noResults')}</div>
           ) : (
             [...grouped.entries()].map(([group, items]) => (
               <div key={group} className="mb-1">
                 <div className="flex items-center gap-1.5 px-3 py-1.5">
-                  {group === '标签' && <span className="text-fg-tertiary">{TAG_ICON}</span>}
+                  {group === t('commandPalette.tags') && <span className="text-fg-tertiary">{TAG_ICON}</span>}
                   <span className="text-2xs text-fg-tertiary font-semibold uppercase tracking-wider">
                     {group}
                   </span>
@@ -367,13 +337,12 @@ export default function CommandPalette({ open, onClose, anchorEl }: Props) {
           )}
         </div>
 
-        {/* 底部提示 */}
         <div className="flex items-center gap-4 px-4 py-2 border-t border-subtle text-2xs text-fg-tertiary">
-          <span className="flex items-center gap-1"><kbd className="kbd">↑↓</kbd> 导航</span>
-          <span className="flex items-center gap-1"><kbd className="kbd">enter</kbd> 选择</span>
-          <span className="flex items-center gap-1"><kbd className="kbd">esc</kbd> 关闭</span>
+          <span className="flex items-center gap-1"><kbd className="kbd">↑↓</kbd> {t('commandPalette.navigate')}</span>
+          <span className="flex items-center gap-1"><kbd className="kbd">enter</kbd> {t('commandPalette.select')}</span>
+          <span className="flex items-center gap-1"><kbd className="kbd">esc</kbd> {t('commandPalette.close')}</span>
           {queryEnoughForTags && ctx?.activeVersion && (
-            <span className="ml-auto opacity-70">搜索 {captions.length} 张图的标签</span>
+            <span className="ml-auto opacity-70">{t('commandPalette.searchTagsHint', { n: captions.length })}</span>
           )}
         </div>
       </div>

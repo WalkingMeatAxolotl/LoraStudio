@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'react-router-dom'
 import { api, type ProjectDetail, type Version, type VersionStage } from '../api/client'
 import { getStoredTheme, toggleTheme, type Theme } from '../lib/theme'
@@ -15,12 +16,12 @@ import { getStoredTheme, toggleTheme, type Theme } from '../lib/theme'
  * STEPS 顺序：0 download / 1 preprocess / 2 curate / 3 tag / 4 edit / 5 reg / 6 train
  */
 const STAGE_TO_STEP_IDX: Record<VersionStage, number> = {
-  curating: 2,     // download+preprocess done?, curate active
-  tagging: 3,      // ...curate done, tag active
-  regularizing: 5, // ...tag+edit done, reg active
-  ready: 6,        // ...reg done, train active
-  training: 6,     // same, train running
-  done: 7,         // all steps done
+  curating: 2,
+  tagging: 3,
+  regularizing: 5,
+  ready: 6,
+  training: 6,
+  done: 7,
 }
 import { useProjectCtx } from '../context/ProjectContext'
 
@@ -36,7 +37,6 @@ const I = {
   chevL:   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 6l-6 6 6 6"/></svg>,
   chevR:   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 6l6 6-6 6"/></svg>,
   download:<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>,
-  // upscale / 预处理：左下小方块 + 向右上的箭头表示放大
   upscale: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="13" width="8" height="8" rx="1"/><path d="M14 10V4h-6"/><path d="M21 3 14 10"/></svg>,
   filter:  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18l-7 9v6l-4-2v-4z"/></svg>,
   tag:     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 12 12 20l-9-9V3h8z"/><circle cx="7" cy="7" r="1.5" fill="currentColor"/></svg>,
@@ -61,8 +61,6 @@ const STAGE_DOT: Record<VersionStage, string> = {
 
 // ── logo ───────────────────────────────────────────────────────────────────
 function Logo({ collapsed }: { collapsed: boolean }) {
-  // 版本号从 /api/health 拉，single source of truth 在 studio/__init__.py:__version__。
-  // 拉不到时回退不显示版本号（安静降级，不写死防漂移）。
   const [version, setVersion] = useState<string | null>(null)
   useEffect(() => {
     let alive = true
@@ -115,19 +113,15 @@ function NavItem({ to, label, icon, active, collapsed }: {
 
 // ── version panel ──────────────────────────────────────────────────────────
 function VersionPanel({ collapsed }: { collapsed: boolean }) {
+  const { t } = useTranslation()
   const ctx = useProjectCtx()
   if (!ctx) return null
   const { project, activeVersion, onSelectVersion, onCreateVersion, onExportTrain, onDeleteVersion, exporting } = ctx
 
-  // 折叠态：整个 VersionPanel 不渲染。
-  // 导出按钮原本在折叠态独占一行，混在 stepper 步骤图标之间容易误触
-  // （stepper 是导航，导出是触发下载，行为不一致）。需要导出时展开侧栏，
-  // actions 行里有「导出」按钮带标签。
   if (collapsed) return null
 
   return (
     <div className="rounded-md border border-subtle bg-overlay px-2 pt-2 pb-1.5 flex flex-col gap-1">
-      {/* Project name header */}
       <div className="px-0.5">
         <div className="font-semibold text-fg-primary text-sm">
           {project.title}
@@ -137,7 +131,6 @@ function VersionPanel({ collapsed }: { collapsed: boolean }) {
         </div>
       </div>
 
-      {/* Version list */}
       <div className="flex flex-col gap-px">
         {project.versions.map((v) => {
           const isActive = v.id === project.active_version_id
@@ -158,7 +151,7 @@ function VersionPanel({ collapsed }: { collapsed: boolean }) {
               {isActive && project.versions.length > 1 && (
                 <button
                   onClick={() => onDeleteVersion(v.id)}
-                  title="删除此版本（不可恢复）"
+                  title={t('sidebar.deleteVersionTitle')}
                   className="px-[5px] py-0.5 text-fg-tertiary text-xs bg-transparent border-none cursor-pointer rounded-sm hover:text-err transition-colors shrink-0"
                 >
                   ×
@@ -169,22 +162,21 @@ function VersionPanel({ collapsed }: { collapsed: boolean }) {
         })}
       </div>
 
-      {/* Actions row */}
       <div className="flex gap-1 mt-0.5">
         <button
           onClick={onCreateVersion}
           className="flex-1 flex items-center justify-center gap-1 py-1 px-1.5 text-xs text-fg-secondary bg-transparent border border-dashed border-dim rounded-sm cursor-pointer hover:bg-surface hover:text-accent transition-colors"
         >
-          {I.plus} 新版本
+          {I.plus} {t('sidebar.newVersion')}
         </button>
         <button
           onClick={onExportTrain}
           disabled={!activeVersion || exporting}
-          title={exporting ? '打包中...' : '导出当前版本训练集 (.zip)'}
+          title={exporting ? t('sidebar.exporting') : t('sidebar.deleteVersionTitle')}
           className={`flex items-center justify-center gap-1 py-1 px-2 text-xs text-fg-secondary bg-transparent border border-dim rounded-sm cursor-pointer hover:bg-surface hover:text-fg-primary transition-colors ${!activeVersion ? 'opacity-40' : ''}`}
         >
           {I.export}
-          {exporting ? '打包...' : '导出'}
+          {exporting ? t('sidebar.exporting') : t('sidebar.export')}
         </button>
       </div>
     </div>
@@ -192,16 +184,6 @@ function VersionPanel({ collapsed }: { collapsed: boolean }) {
 }
 
 // ── project stepper nav ────────────────────────────────────────────────────
-const STEPS = [
-  { key: 'download',   label: '下载',     idx: '1', icon: I.download, scope: 'project' as const },
-  { key: 'preprocess', label: '预处理（可选）', idx: '2', icon: I.upscale,  scope: 'project' as const },
-  { key: 'curate',     label: '筛选',     idx: '3', icon: I.filter,   scope: 'version' as const },
-  { key: 'tag',        label: '打标',     idx: '4', icon: I.tag,      scope: 'version' as const },
-  { key: 'edit',       label: '标签编辑', idx: '5', icon: I.edit,     scope: 'version' as const },
-  { key: 'reg',        label: '正则集（可选）', idx: '6', icon: I.reg,      scope: 'version' as const },
-  { key: 'train',      label: '训练',     idx: '7', icon: I.train,    scope: 'version' as const },
-]
-
 function ProjectStepperNav({ pid, activeVid, currentStep, project, version, collapsed }: {
   pid: string
   activeVid: string | null
@@ -210,16 +192,25 @@ function ProjectStepperNav({ pid, activeVid, currentStep, project, version, coll
   version: Version | null
   collapsed: boolean
 }) {
+  const { t } = useTranslation()
+
+  const STEPS = [
+    { key: 'download',   labelKey: 'nav.download',   idx: '1', icon: I.download, scope: 'project' as const },
+    { key: 'preprocess', labelKey: 'nav.preprocess',  idx: '2', icon: I.upscale,  scope: 'project' as const },
+    { key: 'curate',     labelKey: 'nav.curate',      idx: '3', icon: I.filter,   scope: 'version' as const },
+    { key: 'tag',        labelKey: 'nav.tag',         idx: '4', icon: I.tag,      scope: 'version' as const },
+    { key: 'edit',       labelKey: 'nav.tagEdit',     idx: '5', icon: I.edit,     scope: 'version' as const },
+    { key: 'reg',        labelKey: 'nav.reg',         idx: '6', icon: I.reg,      scope: 'version' as const },
+    { key: 'train',      labelKey: 'nav.train',       idx: '7', icon: I.train,    scope: 'version' as const },
+  ]
+
   const overviewActive = currentStep === null
   const stage: VersionStage = version?.stage ?? 'curating'
   const stageStepIdx = STAGE_TO_STEP_IDX[stage] ?? 0
   const stats = version?.stats
   const preprocessCount = project?.preprocess_image_count ?? 0
 
-  // 派生覆盖（stats / output_lora_path / preprocess_image_count）：让侧边
-  // 的勾勾跟数据真相走，不依赖后端 stage 跳转。
   const isStepDone = (key: string, idx: number): boolean => {
-    // preprocess 是可选阶段，状态完全靠产物数派生 — 跳过不误标 ✓。
     if (key === 'preprocess') return preprocessCount > 0
     if (idx < stageStepIdx) return true
     if (
@@ -246,19 +237,19 @@ function ProjectStepperNav({ pid, activeVid, currentStep, project, version, coll
 
   return (
     <div className="flex flex-col gap-px">
-      {/* 概览 */}
       <Link
         to={`/projects/${pid}`}
-        title={collapsed ? '概览' : undefined}
+        title={collapsed ? t('nav.overview') : undefined}
         className={linkCls(overviewActive) + ' mb-1'}
       >
         <span className={`w-5 h-5 rounded-full grid place-items-center text-[12px] shrink-0 ${overviewActive ? 'bg-accent-soft text-accent' : 'bg-overlay text-fg-tertiary'}`}>
           ≡
         </span>
-        {!collapsed && <span className="flex-1">概览</span>}
+        {!collapsed && <span className="flex-1">{t('nav.overview')}</span>}
       </Link>
 
       {STEPS.map((s, i) => {
+        const label = t(s.labelKey)
         const isActive = s.key === currentStep
         const isDone = isStepDone(s.key, i)
 
@@ -272,22 +263,19 @@ function ProjectStepperNav({ pid, activeVid, currentStep, project, version, coll
             ? 'bg-accent-soft text-accent'
             : 'bg-overlay text-fg-tertiary'
 
-        // 收起态用户决策："步骤依然保留 12345，通过绿色来表示完成"——
-        // 数字始终显示，done 走绿色 badge（bg-ok-soft + text-ok）；
-        // 展开态保留 ✓ 图标（旁边有文字标签，icon 更简洁）
         const inner = (
           <>
             <span className={`w-5 h-5 rounded-full grid place-items-center text-[10px] font-bold font-mono shrink-0 ${badgeCls}`}>
               {collapsed ? s.idx : (isDone ? I.check : s.idx)}
             </span>
-            {!collapsed && <span className="flex-1 text-left">{s.label}</span>}
+            {!collapsed && <span className="flex-1 text-left">{label}</span>}
             {!collapsed && isActive && <span className="dot dot-running" />}
           </>
         )
 
         if (!href) {
           return (
-            <span key={s.key} title={collapsed ? `${s.idx}. ${s.label}` : undefined}
+            <span key={s.key} title={collapsed ? `${s.idx}. ${label}` : undefined}
               className={linkCls(false) + ' opacity-40 cursor-default'}>
               {inner}
             </span>
@@ -298,7 +286,7 @@ function ProjectStepperNav({ pid, activeVid, currentStep, project, version, coll
           <Link
             key={s.key}
             to={href}
-            title={collapsed ? `${s.idx}. ${s.label}` : undefined}
+            title={collapsed ? `${s.idx}. ${label}` : undefined}
             className={linkCls(isActive)}
           >
             {inner}
@@ -311,6 +299,7 @@ function ProjectStepperNav({ pid, activeVid, currentStep, project, version, coll
 
 // ── theme toggle ───────────────────────────────────────────────────────────
 function ThemeToggle({ collapsed }: { collapsed: boolean }) {
+  const { t } = useTranslation()
   const [theme, setTheme] = useState<Theme>(() => getStoredTheme())
 
   const handleToggle = () => {
@@ -321,7 +310,7 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
   return (
     <button
       onClick={handleToggle}
-      title={isDark ? '切到日间模式' : '切到暗色模式'}
+      title={isDark ? t('sidebar.switchToLight') : t('sidebar.switchToDark')}
       className={[
         'flex items-center gap-2.5 rounded-md text-sm no-underline transition-colors bg-transparent border-none cursor-pointer w-full',
         collapsed ? 'py-[9px] px-0 justify-center' : 'py-2 px-3 justify-start',
@@ -329,7 +318,7 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
       ].join(' ')}
     >
       {isDark ? I.sun : I.moon}
-      {!collapsed && <span>{isDark ? '日间模式' : '暗色模式'}</span>}
+      {!collapsed && <span>{isDark ? t('sidebar.themeLight') : t('sidebar.themeDark')}</span>}
     </button>
   )
 }
@@ -338,18 +327,16 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
 const SIDEBAR_KEY = 'studio.sidebar.expanded'
 
 export default function Sidebar() {
+  const { t } = useTranslation()
   const location = useLocation()
   const ctx = useProjectCtx()
 
   const pid = location.pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null
   const urlVid = location.pathname.match(/\/v\/([^/]+)/)?.[1] ?? null
   const stepMatch = location.pathname.match(/\/v\/[^/]+\/([^/]+)$/)
-  // project-scope steps（download / preprocess）在 /projects/:pid/<key>，
-  // version-scope 在 /projects/:pid/v/:vid/<key>。
   const projectScopeStep = location.pathname.match(/^\/projects\/[^/]+\/(download|preprocess)$/)?.[1] ?? null
   const currentStep = stepMatch?.[1] ?? projectScopeStep
 
-  // Prefer active version from context; fall back to URL vid (handles page reload)
   const activeVid = ctx?.activeVersion?.id?.toString() ?? urlVid
 
   const inProject = pid !== null
@@ -361,9 +348,6 @@ export default function Sidebar() {
     } catch { return null }
   })
 
-  // 默认始终展开（用户手动折叠后 sessionStorage 持久,此后保持折叠）。
-  // 旧逻辑 `?? !inProject` 让进项目时自动折叠 — 用户反馈这会突然遮 sidebar
-  // 信息,违反「点项目 = 进入工作流」的预期。
   const expanded = expandedOverride ?? true
   const collapsed = !expanded
 
@@ -383,7 +367,6 @@ export default function Sidebar() {
       className="shrink-0 bg-sunken border-r border-subtle flex flex-col overflow-hidden h-full transition-[width] duration-[160ms] ease-in-out"
       style={{ width: collapsed ? 'var(--sidebar-collapsed-w)' : 'var(--sidebar-w)' }}
     >
-      {/* header / logo */}
       <div
         className={`flex items-center border-b border-subtle shrink-0 px-3.5 ${collapsed ? 'justify-center' : ''}`}
         style={{ height: 'var(--topbar-h)' }}
@@ -391,34 +374,30 @@ export default function Sidebar() {
         <Logo collapsed={collapsed} />
       </div>
 
-      {/* main nav */}
       <nav className={`flex-1 flex flex-col gap-0.5 overflow-hidden ${collapsed ? 'px-2 py-2.5' : 'px-2 py-3.5'}`}>
-        <NavItem to="/" label="项目" icon={I.folder} active={!inProject && location.pathname === '/'} collapsed={collapsed} />
-        <NavItem to="/queue" label="队列" icon={I.queue} active={isMain('/queue')} collapsed={collapsed} />
-        <NavItem to="/tools/generate" label="测试" icon={I.image} active={isMain('/tools/generate')} collapsed={collapsed} />
+        <NavItem to="/" label={t('nav.projects')} icon={I.folder} active={!inProject && location.pathname === '/'} collapsed={collapsed} />
+        <NavItem to="/queue" label={t('nav.queue')} icon={I.queue} active={isMain('/queue')} collapsed={collapsed} />
+        <NavItem to="/tools/generate" label={t('nav.generate')} icon={I.image} active={isMain('/tools/generate')} collapsed={collapsed} />
 
         {inProject && pid && (
           <div className="mt-2.5 flex flex-col gap-1">
-            {/* Version selector + export with project name embedded */}
             <VersionPanel collapsed={collapsed} />
-
             <ProjectStepperNav pid={pid} activeVid={activeVid} currentStep={currentStep} project={ctx?.project ?? null} version={ctx?.activeVersion ?? null} collapsed={collapsed} />
           </div>
         )}
       </nav>
 
-      {/* tools + toggle */}
       <div className={`border-t border-subtle flex flex-col gap-0.5 shrink-0 ${collapsed ? 'px-1.5 py-2' : 'p-2.5'}`}>
-        <NavItem to="/tools/presets" label="预设" icon={I.preset} active={isMain('/tools/presets')} collapsed={collapsed} />
-        <NavItem to="/tools/monitor" label="监控" icon={I.monitor} active={isMain('/tools/monitor')} collapsed={collapsed} />
-        <NavItem to="/tools/settings" label="设置" icon={I.cog} active={isMain('/tools/settings')} collapsed={collapsed} />
+        <NavItem to="/tools/presets" label={t('nav.presets')} icon={I.preset} active={isMain('/tools/presets')} collapsed={collapsed} />
+        <NavItem to="/tools/monitor" label={t('nav.monitor')} icon={I.monitor} active={isMain('/tools/monitor')} collapsed={collapsed} />
+        <NavItem to="/tools/settings" label={t('nav.settings')} icon={I.cog} active={isMain('/tools/settings')} collapsed={collapsed} />
         <ThemeToggle collapsed={collapsed} />
         <button
           onClick={toggle}
-          title={collapsed ? '展开' : '折叠'}
+          title={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
           className={`text-fg-tertiary bg-transparent border-none rounded cursor-pointer hover:bg-overlay transition-colors ${collapsed ? 'flex justify-center p-2 mt-1' : 'flex items-center gap-1.5 p-2 mt-1 text-xs'}`}
         >
-          {collapsed ? I.chevR : <>{I.chevL}<span>收起</span></>}
+          {collapsed ? I.chevR : <>{I.chevL}<span>{t('sidebar.collapseLabel')}</span></>}
         </button>
       </div>
     </aside>

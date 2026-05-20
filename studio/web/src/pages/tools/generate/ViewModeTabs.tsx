@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 /** 视图模式 tab：单图 / XY 矩阵。
  *
  * 用户决策：双图对比合并进 XY 模式内部（selectedIndices=2 时自动切到
@@ -11,6 +13,7 @@ export default function ViewModeTabs({
   mode: ViewMode
   onModeChange: (m: ViewMode) => void
 }) {
+  const { t } = useTranslation()
   const tab = (m: ViewMode, label: string) => (
     <button
       onClick={() => onModeChange(m)}
@@ -23,8 +26,8 @@ export default function ViewModeTabs({
   )
   return (
     <div className="flex items-center gap-1.5" role="tablist">
-      {tab('single', '单图')}
-      {tab('xy', 'XY 矩阵')}
+      {tab('single', t('generate.singleMode'))}
+      {tab('xy', t('generate.xyMode'))}
     </div>
   )
 }

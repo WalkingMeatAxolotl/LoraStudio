@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 /** 正向提示词输入。
  *
  * 之前支持多 prompt 轮换（"+ 添加 prompt"），用户决策"隐藏前端轮换功能"
@@ -7,6 +9,7 @@ export default function PromptList({ prompts, onChange }: {
   prompts: string[]
   onChange: (p: string[]) => void
 }) {
+  const { t } = useTranslation()
   // 当前只显示第一条 prompt；用户编辑时同步成 [value]
   const value = prompts[0] ?? ''
   return (
@@ -15,7 +18,7 @@ export default function PromptList({ prompts, onChange }: {
       rows={5}
       value={value}
       onChange={(e) => onChange([e.target.value])}
-      placeholder="输入正向提示词…"
+      placeholder={t('generate.positivePlaceholder')}
     />
   )
 }

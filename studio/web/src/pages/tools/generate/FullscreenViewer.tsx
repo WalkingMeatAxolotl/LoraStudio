@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 
 /** 全屏图片 modal：双击 grid cell / cell action 触发。
  *
@@ -28,6 +29,7 @@ export default function FullscreenViewer({
   onDown?: () => void
   shortcutHint?: string
 }) {
+  const { t } = useTranslation()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // P3：方向键在 input / textarea / contenteditable 内不抢焦点，
@@ -65,9 +67,9 @@ export default function FullscreenViewer({
     if (hasNext) dirs.push('→')
     if (hasUp) dirs.push('↑')
     if (hasDown) dirs.push('↓')
-    const nav = dirs.length > 0 ? `${dirs.join(' / ')} 切换 · ` : ''
-    return `${nav}ESC / 点击遮罩关闭`
-  }, [shortcutHint, hasPrev, hasNext, hasUp, hasDown])
+    const nav = dirs.length > 0 ? t('generate.fullscreenNavPrefix', { dirs: dirs.join(' / ') }) : ''
+    return `${nav}${t('generate.fullscreenCloseHint')}`
+  }, [shortcutHint, hasPrev, hasNext, hasUp, hasDown, t])
 
   return (
     <div
@@ -87,8 +89,8 @@ export default function FullscreenViewer({
             type="button"
             onClick={onUp}
             className="absolute top-4 left-1/2 -translate-x-1/2 z-10 rounded bg-black/45 px-4 py-2 text-slate-300 hover:text-white hover:bg-black/65 text-2xl"
-            aria-label="上一格"
-            title="上一格"
+            aria-label={t('generate.prevRow')}
+            title={t('generate.prevRow')}
           >
             ↑
           </button>
@@ -98,8 +100,8 @@ export default function FullscreenViewer({
             type="button"
             onClick={onPrev}
             className="absolute left-4 top-1/2 -translate-y-1/2 z-10 rounded bg-black/45 px-4 py-3 text-slate-300 hover:text-white hover:bg-black/65 text-4xl"
-            aria-label="左一格"
-            title="左一格"
+            aria-label={t('generate.prevCell')}
+            title={t('generate.prevCell')}
           >
             ‹
           </button>
@@ -109,8 +111,8 @@ export default function FullscreenViewer({
             type="button"
             onClick={onNext}
             className="absolute right-4 top-1/2 -translate-y-1/2 z-10 rounded bg-black/45 px-4 py-3 text-slate-300 hover:text-white hover:bg-black/65 text-4xl"
-            aria-label="右一格"
-            title="右一格"
+            aria-label={t('generate.nextCell')}
+            title={t('generate.nextCell')}
           >
             ›
           </button>
@@ -120,8 +122,8 @@ export default function FullscreenViewer({
             type="button"
             onClick={onDown}
             className="absolute bottom-12 left-1/2 -translate-x-1/2 z-10 rounded bg-black/45 px-4 py-2 text-slate-300 hover:text-white hover:bg-black/65 text-2xl"
-            aria-label="下一格"
-            title="下一格"
+            aria-label={t('generate.nextRow')}
+            title={t('generate.nextRow')}
           >
             ↓
           </button>

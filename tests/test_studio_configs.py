@@ -51,6 +51,15 @@ def test_schema_is_complete() -> None:
     assert "prodigy_plus_schedulefree" in getattr(optimizer_annotation, "__args__", ())
 
 
+def test_lokr_rank_allows_full_dimension_trigger() -> None:
+    payload = TrainingConfig().model_dump(mode="python")
+    payload["lora_type"] = "lokr"
+    payload["lora_rank"] = 50000
+    cfg = TrainingConfig.model_validate(payload)
+    assert cfg.lora_rank == 50000
+    assert "maximum" not in TrainingConfig.model_json_schema()["properties"]["lora_rank"]
+
+
 def test_schema_endpoint_returns_groups(client: TestClient) -> None:
     resp = client.get("/api/schema")
     assert resp.status_code == 200
@@ -99,6 +108,15 @@ def test_ppsf_accepts_none_scheduler() -> None:
     payload["lr_scheduler"] = "none"
     cfg = TrainingConfig.model_validate(payload)
     assert cfg.optimizer_type == "prodigy_plus_schedulefree"
+
+
+def test_prodigy_rejects_non_none_scheduler() -> None:
+    """普通 Prodigy 也固定常数学习率，不允许外部 scheduler。"""
+    payload = TrainingConfig().model_dump(mode="python")
+    payload["optimizer_type"] = "prodigy"
+    payload["lr_scheduler"] = "cosine"
+    with pytest.raises(Exception):
+        TrainingConfig.model_validate(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +211,7 @@ def test_download_invalid_name(client: TestClient) -> None:
 
 
 def test_import_yaml_roundtrip(client: TestClient, presets_dir: Path) -> None:
-    """上传 yaml → 拿回 config + suggested_name；不写盘。"""
+    """上传 yaml → 直接落盘到 suggested_name,返回 {name, path}。"""
     payload = _payload()
     payload["epochs"] = 9
     yaml_bytes = yaml.safe_dump(payload, allow_unicode=True).encode("utf-8")
@@ -204,13 +222,13 @@ def test_import_yaml_roundtrip(client: TestClient, presets_dir: Path) -> None:
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["config"]["epochs"] == 9
-    assert body["suggested_name"] == "my-run"
-    # 不写盘：磁盘上不该多出 my-run.yaml
-    assert not (presets_dir / "my-run.yaml").exists()
+    assert body["name"] == "my-run"
+    # 落盘：磁盘上应出现 my-run.yaml,内容可读回
+    assert (presets_dir / "my-run.yaml").exists()
+    assert client.get("/api/presets/my-run").json()["epochs"] == 9
 
 
-def test_import_json_also_works(client: TestClient) -> None:
+def test_import_json_also_works(client: TestClient, presets_dir: Path) -> None:
     """yaml.safe_load 是 JSON superset，旧的 .json 导出也能直接 import。"""
     import json as json_mod
     payload = _payload()
@@ -220,7 +238,8 @@ def test_import_json_also_works(client: TestClient) -> None:
         files={"file": ("legacy.json", json_mod.dumps(payload).encode(), "application/json")},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["config"]["epochs"] == 3
+    assert resp.json()["name"] == "legacy"
+    assert client.get("/api/presets/legacy").json()["epochs"] == 3
 
 
 def test_import_rejects_unknown_field(client: TestClient) -> None:
@@ -242,18 +261,54 @@ def test_import_rejects_malformed_yaml(client: TestClient) -> None:
     assert resp.status_code in (400, 422)
 
 
-def test_import_sanitizes_suggested_name(client: TestClient) -> None:
-    """文件名带空格 / 中文 / 特殊字符 → suggested_name 走 [A-Za-z0-9_-] 白名单。"""
+def test_import_sanitizes_suggested_name(client: TestClient, presets_dir: Path) -> None:
+    """文件名带空格 / 中文 / 特殊字符 → 名字走 [A-Za-z0-9_-] 白名单后落盘。"""
     yaml_bytes = yaml.safe_dump(_payload()).encode("utf-8")
     resp = client.post(
         "/api/presets/import",
         files={"file": ("我的 preset (v2).yaml", yaml_bytes, "application/yaml")},
     )
     assert resp.status_code == 200
-    suggested = resp.json()["suggested_name"]
+    name = resp.json()["name"]
     # 白名单：[A-Za-z0-9_-]+，非匹配字符压成 '-'，首尾 strip
-    assert all(c.isalnum() or c in "_-" for c in suggested)
-    assert "v2" in suggested
+    assert all(c.isalnum() or c in "_-" for c in name)
+    assert "v2" in name
+    assert (presets_dir / f"{name}.yaml").exists()
+
+
+def test_import_returns_409_on_conflict(
+    client: TestClient, presets_dir: Path
+) -> None:
+    """同名 preset 已存在 → 409 + body 含 config / suggested_name 给前端重用。
+
+    不写盘 —— 让 ImportConflictDialog 让用户选覆盖/另存为再走 PUT /api/presets/{name}。
+    """
+    yaml_bytes = yaml.safe_dump(_payload()).encode("utf-8")
+
+    # 先占名
+    resp1 = client.post(
+        "/api/presets/import",
+        files={"file": ("clash.yaml", yaml_bytes, "application/yaml")},
+    )
+    assert resp1.status_code == 200
+    on_disk_mtime = (presets_dir / "clash.yaml").stat().st_mtime
+
+    # 再上传同名 → 409
+    payload2 = _payload()
+    payload2["epochs"] = 42  # 内容不同,确保识别"未覆盖"
+    yaml_bytes2 = yaml.safe_dump(payload2).encode("utf-8")
+    resp2 = client.post(
+        "/api/presets/import",
+        files={"file": ("clash.yaml", yaml_bytes2, "application/yaml")},
+    )
+    assert resp2.status_code == 409, resp2.text
+    detail = resp2.json()["detail"]
+    assert isinstance(detail, dict)
+    assert detail["suggested_name"] == "clash"
+    assert detail["config"]["epochs"] == 42
+    # 没覆盖原文件
+    assert (presets_dir / "clash.yaml").stat().st_mtime == on_disk_mtime
+    assert client.get("/api/presets/clash").json()["epochs"] != 42
 
 
 # ---------------------------------------------------------------------------

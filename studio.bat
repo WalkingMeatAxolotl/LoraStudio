@@ -106,6 +106,7 @@ if exist "venv\Scripts\python.exe" (
     echo [studio] No venv detected. Creating venv\ via `!BOOTSTRAP_PY!` -- first run may take a few minutes...
     !BOOTSTRAP_PY! -m venv venv || (echo studio.bat: failed to create venv 1>&2 & goto :fail)
     set PYTHON=venv\Scripts\python.exe
+
     !PYTHON! -m pip install --upgrade pip -i https://mirrors.cloud.tencent.com/pypi/simple/ || (echo studio.bat: failed to upgrade pip 1>&2 & goto :fail)
 
     REM GPU-aware torch first install (PR-S1a). Without this, requirements.txt's

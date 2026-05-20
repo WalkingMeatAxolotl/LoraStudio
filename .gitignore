@@ -68,8 +68,11 @@ dataset/
 
 # Misc
 nul
-AGENTS.md
-CLAUDE.md
+# Root-level AI agent files — gitignored so contributors can put personal
+# config / @docs/AGENTS.md import here without conflicting with the repo.
+# Project 公约 lives at docs/AGENTS.md (NOT ignored — note the leading /).
+/AGENTS.md
+/CLAUDE.md
 
 # 本地解压的设计稿原始目录（已整理进 mockup/）
 1/

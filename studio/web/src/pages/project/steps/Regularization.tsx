@@ -1,4 +1,6 @@
+import type { TFunction } from 'i18next'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Trans, useTranslation } from 'react-i18next'
 import { useOutletContext } from 'react-router-dom'
 import {
   api,
@@ -47,6 +49,7 @@ const ADVANCED_DEFAULTS: AdvancedParams = {
 }
 
 export default function RegularizationPage() {
+  const { t } = useTranslation()
   const { project, activeVersion, reload } = useOutletContext<Ctx>()
   const { toast } = useToast()
   const { confirm } = useDialog()
@@ -99,9 +102,9 @@ export default function RegularizationPage() {
       const s = await api.getRegStatus(project.id, vid)
       setReg(s)
     } catch (e) {
-      toast(`加载 reg 状态失败: ${e}`, 'error')
+      toast(t('reg.loadFailed', { error: String(e) }), 'error')
     }
-  }, [project.id, vid, toast])
+  }, [project.id, vid, t, toast])
 
   const refreshTrainTags = useCallback(async () => {
     if (!vid) return
@@ -202,7 +205,7 @@ export default function RegularizationPage() {
   const handleAiGenerate = async () => {
     if (!vid) return
     if (trainImageCount <= 0) {
-      toast('train 还没有图片，请先完成 Step 1（下载）或 Step 2（筛选）', 'error')
+      toast(t('reg.noTrainForAi'), 'error')
       return
     }
     setAiBusy(true)
@@ -219,9 +222,9 @@ export default function RegularizationPage() {
         incremental: aiIncremental,
         attention_backend: aiBackend,
       }
-      const t = await api.enqueueRegPrior(project.id, vid, body)
-      setAiTask(t)
-      toast(`先验生成任务 #${t.id} 已入队`, 'success')
+      const task = await api.enqueueRegPrior(project.id, vid, body)
+      setAiTask(task)
+      toast(t('reg.aiEnqueued', { id: task.id }), 'success')
     } catch (e) {
       toast(String(e), 'error')
       setAiBusy(false)
@@ -231,7 +234,7 @@ export default function RegularizationPage() {
   const startBuild = async (incremental = false) => {
     if (!vid) return
     if (trainImageCount <= 0) {
-      toast('train 还没有图片，先去 ① 整理 / ② 下载', 'error')
+      toast(t('reg.noTrainForBuild'), 'error')
       return
     }
     const body: RegBuildRequest = {
@@ -245,7 +248,7 @@ export default function RegularizationPage() {
       const j = await api.startRegBuild(project.id, vid, body)
       setJob(j)
       setLogs([])
-      toast(incremental ? `已入队补足 #${j.id}` : `已入队 #${j.id}`, 'success')
+      toast(t(incremental ? 'reg.enqueuedIncremental' : 'reg.enqueued', { id: j.id }), 'success')
     } catch (e) {
       toast(String(e), 'error')
     }
@@ -253,10 +256,10 @@ export default function RegularizationPage() {
 
   const onDelete = async () => {
     if (!vid) return
-    if (!(await confirm('删除当前 reg 集？这是不可恢复的（meta + 所有图片都会清掉）。', { tone: 'danger', okText: '删除' }))) return
+    if (!(await confirm(t('reg.confirmDelete'), { tone: 'danger', okText: t('reg.deleteOkText') }))) return
     try {
       await api.deleteReg(project.id, vid)
-      toast('已删除', 'success')
+      toast(t('reg.deleted'), 'success')
       setReg(null)
       void refreshReg()
       void reload()
@@ -271,26 +274,26 @@ export default function RegularizationPage() {
       if (!reg || !vid) return
       const path = reg.files[idx]
       setPreviewIdx(idx)
-      setPreviewCaption('加载中...')
+      setPreviewCaption(t('reg.captionLoading'))
       try {
         const r = await api.getRegCaption(project.id, vid, path)
-        setPreviewCaption(r.tags.length ? r.tags.join(', ') : '(无 caption)')
+        setPreviewCaption(r.tags.length ? r.tags.join(', ') : t('reg.captionEmpty'))
       } catch (e) {
-        setPreviewCaption(`加载失败: ${e}`)
+        setPreviewCaption(t('reg.captionFailed', { error: String(e) }))
       }
     },
-    [reg, vid, project.id]
+    [reg, vid, project.id, t]
   )
 
   if (!activeVersion || !vid) {
-    return <p className="text-fg-tertiary p-6">请先选择 / 创建一个版本</p>
+    return <p className="text-fg-tertiary p-6">{t('reg.noVersion')}</p>
   }
 
   return (
     <StepShell
       idx={5}
-      title="正则集"
-      subtitle="基于 train tag 拉正则图，镜像结构到 reg/"
+      title={t('steps.reg.title')}
+      subtitle={t('steps.reg.subtitle')}
       actions={
         activeTab === 'ai' ? (
           <button
@@ -298,7 +301,7 @@ export default function RegularizationPage() {
             disabled={isLive || trainImageCount <= 0}
             className="btn btn-primary"
           >
-            {isLive ? '生成中…' : '先验生成'}
+            {isLive ? t('reg.generatingBtn') : t('reg.aiGenerateBtn')}
           </button>
         ) : (
           <button
@@ -306,7 +309,7 @@ export default function RegularizationPage() {
             disabled={isLive || trainImageCount <= 0}
             className="btn btn-primary"
           >
-            {isLive ? '生成中…' : '开始生成'}
+            {isLive ? t('reg.generatingBtn') : t('reg.startBuildBtn')}
           </button>
         )
       }
@@ -327,19 +330,19 @@ export default function RegularizationPage() {
         <TabButton
           active={activeTab === 'config'}
           onClick={() => setActiveTab('config')}
-          label="设置 & 日志"
+          label={t('reg.tabConfig')}
           badge={isLive ? 'live' : undefined}
         />
         <TabButton
           active={activeTab === 'images'}
           onClick={() => setActiveTab('images')}
-          label="图片"
+          label={t('reg.tabImages')}
           badge={reg && reg.image_count > 0 ? String(reg.image_count) : undefined}
         />
         <TabButton
           active={activeTab === 'ai'}
           onClick={() => setActiveTab('ai')}
-          label="先验生成"
+          label={t('reg.tabAi')}
           badge={aiBusy ? 'live' : aiTask?.status === 'done' ? '✓' : undefined}
         />
       </div>
@@ -364,7 +367,7 @@ export default function RegularizationPage() {
         <div className="flex flex-col gap-3 min-h-0 flex-1 overflow-y-auto">
           <section className="rounded-md border border-subtle bg-surface px-3.5 py-2.5 flex flex-col gap-2.5 shrink-0">
             <div className="flex flex-wrap items-center gap-2.5 text-xs">
-              <span className="text-fg-tertiary">来源</span>
+              <span className="text-fg-tertiary">{t('reg.source')}</span>
               <select
                 value={apiSource}
                 onChange={(e) => setApiSource(e.target.value as 'gelbooru' | 'danbooru')}
@@ -375,9 +378,9 @@ export default function RegularizationPage() {
               </select>
               <span className="text-fg-tertiary">|</span>
               <span className="text-fg-tertiary">
-                目标数量{' '}
+                {t('reg.targetCount')}{' '}
                 <span className="font-mono text-fg-primary font-medium">{trainImageCount}</span>
-                <span className="text-fg-tertiary">（镜像 train）</span>
+                <span className="text-fg-tertiary">{t('reg.mirrorTrain')}</span>
               </span>
               <span className="text-fg-tertiary">|</span>
               <label className="flex items-center gap-1 cursor-pointer">
@@ -386,13 +389,13 @@ export default function RegularizationPage() {
                   checked={autoTag}
                   onChange={(e) => setAutoTag(e.target.checked)}
                 />
-                <span className="text-fg-secondary">拉完后自动 WD14 打标</span>
+                <span className="text-fg-secondary">{t('reg.autoTagLabel')}</span>
               </label>
               <button
                 onClick={() => setAdvancedOpen((v) => !v)}
                 className="text-fg-tertiary bg-transparent border-none cursor-pointer text-xs"
               >
-                {advancedOpen ? '⌃ 进阶' : '⌄ 进阶'}
+                {advancedOpen ? t('reg.advancedOpen') : t('reg.advancedClosed')}
               </button>
               <span className="flex-1" />
             </div>
@@ -415,7 +418,7 @@ export default function RegularizationPage() {
               onCancel={async () => {
                 try {
                   await api.cancelJob(job.id)
-                  toast('已取消', 'success')
+                  toast(t('reg.cancelToast'), 'success')
                 } catch (e) {
                   toast(String(e), 'error')
                 }
@@ -441,10 +444,10 @@ export default function RegularizationPage() {
             textAlign: 'center', gap: 6,
           }}>
             <div style={{ fontSize: 'var(--t-md)', color: 'var(--fg-secondary)', fontWeight: 500 }}>
-              还没有 reg 集
+              {t('reg.emptyRegTitle')}
             </div>
             <div style={{ fontSize: 'var(--t-xs)' }}>
-              在「设置 &amp; 日志」配置后点击右上角「开始生成」
+              {t('reg.emptyRegHint')}
             </div>
           </section>
         )
@@ -532,30 +535,31 @@ function RegStatusBar({
   onTopUp: () => void
   disabled: boolean
 }) {
+  const { t } = useTranslation()
   if (!reg) {
     return (
       <section className="rounded-sm border border-subtle bg-surface px-2.5 py-1.5 text-xs text-fg-tertiary shrink-0">
-        加载中...
+        {t('reg.statusLoading')}
       </section>
     )
   }
   if (!reg.exists) {
     return (
       <section className="rounded-sm border border-subtle bg-surface px-2.5 py-1.5 text-xs text-fg-tertiary shrink-0">
-        当前版本 reg 集：<span className="text-fg-tertiary">不存在</span>
+        {t('reg.statusNotExist')}
       </section>
     )
   }
   const m = reg.meta
-  const ago = m ? formatAgo(m.generated_at) : '?'
+  const ago = m ? formatAgo(m.generated_at, t) : '?'
   const shortfall = m ? m.target_count - m.actual_count : 0
   const canTopUp = m !== null && shortfall > 0
   return (
     <section className="rounded-sm border border-subtle bg-surface px-3 py-2 flex flex-col gap-1 shrink-0">
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-fg-secondary">
-          reg 集存在：
-          <span className="font-mono text-ok font-medium">{reg.image_count} 张</span>
+          {t('reg.statusExists')}
+          <span className="font-mono text-ok font-medium">{t('reg.nImages', { n: reg.image_count })}</span>
         </span>
         {m && (
           <>
@@ -565,7 +569,7 @@ function RegStatusBar({
             </span>
             <span className="text-fg-tertiary">·</span>
             <span className="text-fg-tertiary">
-              {m.generation_method === 'ai_base' ? '先验生成' : m.api_source}
+              {m.generation_method === 'ai_base' ? t('reg.statusAiGen') : m.api_source}
             </span>
             <span className="text-fg-tertiary">·</span>
             <span className="text-fg-tertiary">
@@ -579,14 +583,14 @@ function RegStatusBar({
             {m.failed_tags.length > 0 && (
               <span
                 className="text-warn"
-                title={`搜索失败的 tag: ${m.failed_tags.join(', ')}`}
+                title={t('reg.failedTagsTitle', { tags: m.failed_tags.join(', ') })}
               >
-                · {m.failed_tags.length} 失败 tag
+                {t('reg.failedTags', { n: m.failed_tags.length })}
               </span>
             )}
             {m.incremental_runs > 0 && (
-              <span className="text-fg-tertiary" title="补足跑过的次数">
-                · 补足 ×{m.incremental_runs}
+              <span className="text-fg-tertiary" title={t('reg.topUpCountTitle')}>
+                {t('reg.topUpCount', { n: m.incremental_runs })}
               </span>
             )}
           </>
@@ -597,9 +601,9 @@ function RegStatusBar({
             onClick={onTopUp}
             disabled={disabled}
             className="btn btn-sm text-accent bg-accent-soft border-accent"
-            title={`保留已下 ${m!.actual_count} 张，补足 ${shortfall} 张`}
+            title={t('reg.topUpTitle', { actual: m!.actual_count, shortfall })}
           >
-            补足 +{shortfall}
+            {t('reg.topUpBtn', { n: shortfall })}
           </button>
         )}
         <button
@@ -607,27 +611,33 @@ function RegStatusBar({
           disabled={disabled}
           className="btn btn-sm bg-err-soft text-err border-err"
         >
-          清空
+          {t('reg.deleteBtn')}
         </button>
       </div>
 
       {m && (
         <div className="flex flex-wrap items-center gap-2 text-2xs text-fg-tertiary">
-          <span>分辨率聚类：</span>
+          <span>{t('reg.clusteringLabel')}</span>
           {m.postprocess_clusters !== null ? (
             <span
               className="text-fg-secondary"
-              title={`方法 ${m.postprocess_method}，max_crop ${m.postprocess_max_crop_ratio}`}
+              title={t('reg.clusteringValueTitle', {
+                method: m.postprocess_method,
+                ratio: m.postprocess_max_crop_ratio,
+              })}
             >
-              {m.postprocess_clusters} 类（{m.postprocess_method},{' '}
-              max_crop {m.postprocess_max_crop_ratio}）
+              {t('reg.clusteringValue', {
+                n: m.postprocess_clusters,
+                method: m.postprocess_method,
+                ratio: m.postprocess_max_crop_ratio,
+              })}
             </span>
           ) : (
             <span
               className="text-fg-tertiary"
-              title="分辨率差异过大或未启用 — 训练靠 bucketing 处理"
+              title={t('reg.clusteringNoneTitle')}
             >
-              未聚类
+              {t('reg.clusteringNone')}
             </span>
           )}
         </div>
@@ -643,16 +653,16 @@ function AdvancedPanel({
   value: AdvancedParams
   onChange: (v: AdvancedParams) => void
 }) {
+  const { t } = useTranslation()
   const set = <K extends keyof AdvancedParams>(k: K, v: AdvancedParams[K]) =>
     onChange({ ...value, [k]: v })
   return (
     <div className="rounded-sm border border-subtle bg-sunken px-3.5 py-2.5 flex flex-col gap-2.5 text-xs">
       <p className="text-2xs text-fg-tertiary m-0">
-        保持默认即可
+        {t('reg.advancedDefaults')}
       </p>
 
-      {/* 选图 */}
-      <Group label="选图">
+      <Group label={t('reg.selectImages')}>
         <label className="flex items-center gap-1 cursor-pointer">
           <input
             type="checkbox"
@@ -661,22 +671,21 @@ function AdvancedPanel({
           />
           <span
             className="text-fg-secondary"
-            title="候选只取偶数索引，避免相邻相似图（默认 ✓）"
+            title={t('reg.skipSimilarTitle')}
           >
             skip_similar
           </span>
         </label>
       </Group>
 
-      {/* 长宽比过滤 */}
-      <Group label="长宽比过滤">
+      <Group label={t('reg.aspectFilter')}>
         <label className="flex items-center gap-1 cursor-pointer">
           <input
             type="checkbox"
             checked={value.aspect_ratio_filter_enabled}
             onChange={(e) => set('aspect_ratio_filter_enabled', e.target.checked)}
           />
-          <span className="text-fg-secondary">启用</span>
+          <span className="text-fg-secondary">{t('reg.aspectFilterEnable')}</span>
         </label>
         {value.aspect_ratio_filter_enabled && (
           <>
@@ -717,15 +726,14 @@ function AdvancedPanel({
               />
             </label>
             <span className="text-2xs text-fg-tertiary">
-              过滤极端长宽比图（例：0.5–2.0 = 1:2 到 2:1）
+              {t('reg.aspectFilterHint')}
             </span>
           </>
         )}
       </Group>
 
-      {/* 后处理 */}
-      <Group label="后处理">
-        <span className="text-fg-tertiary">方法</span>
+      <Group label={t('reg.postprocess')}>
+        <span className="text-fg-tertiary">{t('reg.postprocessMethod')}</span>
         <select
           value={value.postprocess_method}
           onChange={(e) =>
@@ -733,9 +741,9 @@ function AdvancedPanel({
           }
           className="input px-1.5 py-px text-xs"
         >
-          <option value="smart">smart（缩放+居中裁，推荐）</option>
-          <option value="stretch">stretch（拉伸，可能变形）</option>
-          <option value="crop">crop（先裁后缩）</option>
+          <option value="smart">{t('reg.postprocessSmart')}</option>
+          <option value="stretch">{t('reg.postprocessStretch')}</option>
+          <option value="crop">{t('reg.postprocessCrop')}</option>
         </select>
         <label className="flex items-center gap-1">
           <span className="text-fg-tertiary">max_crop</span>
@@ -753,7 +761,7 @@ function AdvancedPanel({
             }
             className="input input-mono"
             style={{ width: 64, padding: '2px 4px' }}
-            title="单聚类内最大允许裁剪比例（默认 0.1 = 10%）"
+            title={t('reg.maxCropTitle')}
           />
         </label>
       </Group>
@@ -805,13 +813,14 @@ function AiNumField({
 }
 
 function AiTaskStatus({ task }: { task: Task | null }) {
+  const { t } = useTranslation()
   if (!task) return null
   const label =
-    task.status === 'done' ? '已完成' :
-    task.status === 'running' ? '生成中' :
-    task.status === 'failed' ? '失败' :
-    task.status === 'pending' ? '排队中' :
-    task.status === 'canceled' ? '已取消' : task.status
+    task.status === 'done' ? t('reg.aiStatusDone') :
+    task.status === 'running' ? t('reg.aiStatusRunning') :
+    task.status === 'failed' ? t('reg.aiStatusFailed') :
+    task.status === 'pending' ? t('reg.aiStatusPending') :
+    task.status === 'canceled' ? t('reg.aiStatusCanceled') : task.status
   const cls =
     task.status === 'done' ? 'badge badge-ok' :
     task.status === 'running' ? 'badge badge-info' :
@@ -821,7 +830,7 @@ function AiTaskStatus({ task }: { task: Task | null }) {
       <span className={cls}>{label}</span>
       <span className="caption font-mono">#{task.id}</span>
       {task.status === 'done' && (
-        <span className="text-xs text-fg-tertiary">已写入 reg 对应子目录</span>
+        <span className="text-xs text-fg-tertiary">{t('reg.aiWritten')}</span>
       )}
       {task.status === 'failed' && task.error_msg && (
         <span className="text-xs text-err">{task.error_msg}</span>
@@ -857,22 +866,25 @@ function AiGenPanel({
   task: Task | null
   trainImageCount: number
 }) {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col gap-3 min-h-0 flex-1 overflow-y-auto">
       <section className="rounded-md border border-subtle bg-surface px-3.5 py-3 flex flex-col gap-3 shrink-0 text-sm">
         <p className="text-2xs text-fg-tertiary m-0 leading-relaxed">
-          用 base 模型对每张训练图的 tag 反向出对照图作为正则集。让训练损失同时见到
-          base 分布，把不该学的概念推回去。每张训练图（共{' '}
-          <span className="font-mono text-fg-primary">{trainImageCount}</span>
-          {' '}张）对应生成 1 张正则图，写入{' '}
-          <span className="font-mono">reg/{'{subfolder}'}/</span>。
-          排除 tag 与左侧「Booru」共用，修改后两边同步。
+          <Trans
+            i18nKey="reg.aiDescription"
+            values={{ n: trainImageCount }}
+            components={{
+              count: <span className="font-mono text-fg-primary" />,
+              path: <span className="font-mono" />,
+            }}
+          />
         </p>
 
         <ExcludeTagsPicker trainTags={trainTags} excluded={excluded} onToggle={onToggle} />
 
         <div className="flex flex-col gap-1">
-          <label className="caption">负面提示词</label>
+          <label className="caption">{t('reg.negPrompt')}</label>
           <textarea
             className="input font-mono text-sm resize-y"
             rows={2}
@@ -882,14 +894,14 @@ function AiGenPanel({
         </div>
 
         <div className="flex gap-2">
-          <AiNumField label="宽度" value={width} onChange={onWidthChange} min={256} max={4096} step={64} />
-          <AiNumField label="高度" value={height} onChange={onHeightChange} min={256} max={4096} step={64} />
+          <AiNumField label={t('reg.widthLabel')} value={width} onChange={onWidthChange} min={256} max={4096} step={64} />
+          <AiNumField label={t('reg.heightLabel')} value={height} onChange={onHeightChange} min={256} max={4096} step={64} />
         </div>
         <div className="flex gap-2">
-          <AiNumField label="步数" value={steps} onChange={onStepsChange} min={1} max={150} />
+          <AiNumField label={t('reg.stepsLabel')} value={steps} onChange={onStepsChange} min={1} max={150} />
           <AiNumField label="CFG Scale" value={cfg} onChange={onCfgChange} min={0} max={20} step={0.5} />
         </div>
-        <AiNumField label="种子（0=随机）" value={seed} onChange={onSeedChange} min={0} />
+        <AiNumField label={t('reg.seedLabel')} value={seed} onChange={onSeedChange} min={0} />
 
         <div className="flex flex-wrap gap-3 items-end">
           <label className="flex items-center gap-1.5 cursor-pointer text-xs">
@@ -898,10 +910,10 @@ function AiGenPanel({
               checked={incremental}
               onChange={(e) => onIncrementalChange(e.target.checked)}
             />
-            <span className="text-fg-secondary">补足模式（跳过 reg 子目录中已有对应文件名前缀的图）</span>
+            <span className="text-fg-secondary">{t('reg.incrementalLabel')}</span>
           </label>
           <div className="flex flex-col gap-1">
-            <label className="caption text-2xs">加速</label>
+            <label className="caption text-2xs">{t('reg.backendLabel')}</label>
             <select
               className="input text-xs py-1"
               value={backend}
@@ -909,7 +921,7 @@ function AiGenPanel({
             >
               <option value="flash_attn">Flash Attention</option>
               <option value="xformers">xformers</option>
-              <option value="none">无（SDPA）</option>
+              <option value="none">{t('reg.backendNone')}</option>
             </select>
           </div>
         </div>
@@ -929,6 +941,7 @@ function ExcludeTagsPicker({
   excluded: Set<string>
   onToggle: (tag: string) => void
 }) {
+  const { t } = useTranslation()
   const [draft, setDraft] = useState('')
   const trainTagSet = useMemo(
     () => new Set(trainTags.map((t) => t.tag)),
@@ -964,22 +977,22 @@ function ExcludeTagsPicker({
       {showTrainList ? (
         <div>
           <p className="text-2xs text-fg-tertiary m-0 mb-1">
-            排除 train top tag：
+            {t('reg.excludeTrainTitle')}
           </p>
           <div className="flex flex-wrap gap-1">
-            {trainTags.map((t) => {
-              const on = excluded.has(t.tag)
+            {trainTags.map((tagInfo) => {
+              const on = excluded.has(tagInfo.tag)
               return (
                 <button
-                  key={t.tag}
-                  onClick={() => onToggle(t.tag)}
+                  key={tagInfo.tag}
+                  onClick={() => onToggle(tagInfo.tag)}
                   className={`px-2 py-0.5 rounded-sm border text-2xs font-mono cursor-pointer transition-colors duration-150 ${
                     on ? 'border-warn bg-warn-soft text-warn' : 'border-dim bg-sunken text-fg-secondary'
                   }`}
-                  title={on ? '点击取消排除' : '点击加入排除'}
+                  title={on ? t('reg.excludeUnclick') : t('reg.excludeClick')}
                 >
-                  {on ? '✕' : '+'} {t.tag}{' '}
-                  <span className="opacity-50">×{t.count}</span>
+                  {on ? '✕' : '+'} {tagInfo.tag}{' '}
+                  <span className="opacity-50">×{tagInfo.count}</span>
                 </button>
               )
             })}
@@ -987,13 +1000,13 @@ function ExcludeTagsPicker({
         </div>
       ) : (
         <p className="text-xs text-fg-tertiary m-0">
-          train 还没有 tag 分布。也可以仅靠下方「自定义排除」继续。
+          {t('reg.excludeNoTags')}
         </p>
       )}
 
       <div>
         <p className="text-2xs text-fg-tertiary m-0 mb-1">
-          自定义排除：
+          {t('reg.excludeCustomTitle')}
         </p>
         <div className="flex items-center gap-1.5">
           <input
@@ -1005,7 +1018,7 @@ function ExcludeTagsPicker({
                 addCustom()
               }
             }}
-            placeholder="输入 tag，回车添加"
+            placeholder={t('reg.excludePlaceholder')}
             className="input flex-1 text-xs"
           />
           <button
@@ -1013,22 +1026,22 @@ function ExcludeTagsPicker({
             disabled={!draft.trim()}
             className="btn btn-secondary btn-sm"
           >
-            + 添加
+            {t('reg.excludeAdd')}
           </button>
         </div>
         {customTags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
-            {customTags.map((t) => (
+            {customTags.map((tag) => (
               <span
-                key={t}
+                key={tag}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border border-warn bg-warn-soft text-warn text-2xs font-mono"
-                title="自定义排除（点 × 移除）"
+                title={t('reg.excludeCustomRemoveTitle')}
               >
-                {t}
+                {tag}
                 <button
-                  onClick={() => onToggle(t)}
+                  onClick={() => onToggle(tag)}
                   className="text-warn opacity-70 cursor-pointer bg-transparent border-none p-0 text-xs"
-                  aria-label={`移除 ${t}`}
+                  aria-label={t('reg.excludeCustomRemoveAria', { tag })}
                 >
                   ×
                 </button>
@@ -1052,6 +1065,7 @@ function RegPreview({
   reg: RegStatus
   onPick: (idx: number) => void
 }) {
+  const { t } = useTranslation()
   // reg.files 是相对 reg/ 的路径（含子文件夹镜像 train，例如 "5_concept/2001.png"）
   const items = useMemo(
     () =>
@@ -1081,8 +1095,8 @@ function RegPreview({
   return (
     <section className="rounded-md border border-subtle bg-surface p-2 flex-1 min-h-0 overflow-y-auto">
       <p className="text-2xs text-fg-tertiary px-1 pb-1 m-0">
-        reg/（共 {reg.image_count} 张）— 点击查看大图；勾选 / Shift·Ctrl 点击多选
-        {selected.size > 0 && <span className="text-accent"> · 已选 {selected.size}</span>}
+        {t('reg.regPreviewTitle', { n: reg.image_count })}
+        {selected.size > 0 && <span className="text-accent">{t('reg.regPreviewSelected', { n: selected.size })}</span>}
       </p>
       <ImageGrid
         items={items}
@@ -1109,11 +1123,11 @@ function regOrigUrl(pid: number, vid: number, rel: string): string {
   return api.versionThumbUrl(pid, vid, 'reg', name, folder, 768)
 }
 
-function formatAgo(unix: number): string {
+function formatAgo(unix: number, t: TFunction): string {
   const now = Date.now() / 1000
   const dt = now - unix
-  if (dt < 60) return '刚刚'
-  if (dt < 3600) return `${Math.floor(dt / 60)} 分钟前`
-  if (dt < 86400) return `${Math.floor(dt / 3600)} 小时前`
-  return `${Math.floor(dt / 86400)} 天前`
+  if (dt < 60) return t('reg.agoJustNow')
+  if (dt < 3600) return t('reg.agoMinutes', { n: Math.floor(dt / 60) })
+  if (dt < 86400) return t('reg.agoHours', { n: Math.floor(dt / 3600) })
+  return t('reg.agoDays', { n: Math.floor(dt / 86400) })
 }

@@ -11,6 +11,7 @@
  */
 import { api } from '../../../api/client'
 import type { XYAxisType } from '../../../api/client'
+import i18n from '../../../i18n'
 import { formatAxisValue } from './xy'
 
 interface ExportSample {
@@ -41,7 +42,7 @@ export async function exportXYMatrix(input: ExportInput): Promise<void> {
   const xLen = xValues.length
   const yLen = Math.max(yValues.length, 1)
   if (xLen === 0 || samples.length === 0) {
-    throw new Error('没有可导出的 XY 数据')
+    throw new Error(i18n.t('generate.noExportableXyData'))
   }
 
   // 加载所有 cell 图
@@ -55,7 +56,7 @@ export async function exportXYMatrix(input: ExportInput): Promise<void> {
     } catch { /* skip 失败的 cell */ }
   }))
   if (imgsByPos.size === 0) {
-    throw new Error('所有 cell 图都加载失败（可能原图已释放）')
+    throw new Error(i18n.t('generate.allCellsLoadFailed'))
   }
 
   // 第一张图决定 cell 尺寸（保留原始分辨率）
@@ -76,7 +77,7 @@ export async function exportXYMatrix(input: ExportInput): Promise<void> {
   canvas.width = totalW
   canvas.height = totalH
   const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('canvas 2d 不可用')
+  if (!ctx) throw new Error(i18n.t('generate.canvas2dUnavailable'))
 
   ctx.fillStyle = '#15140f'  // 同 design tokens 的 bg-canvas dark
   ctx.fillRect(0, 0, totalW, totalH)
@@ -122,7 +123,7 @@ export async function exportXYMatrix(input: ExportInput): Promise<void> {
   // toBlob → 下载
   return new Promise<void>((resolve, reject) => {
     canvas.toBlob((b) => {
-      if (!b) { reject(new Error('canvas.toBlob 返回 null')); return }
+      if (!b) { reject(new Error(i18n.t('generate.canvasToBlobNull'))); return }
       const url = URL.createObjectURL(b)
       const a = document.createElement('a')
       a.href = url

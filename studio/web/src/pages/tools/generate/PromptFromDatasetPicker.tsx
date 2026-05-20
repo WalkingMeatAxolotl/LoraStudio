@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api, type CaptionEntry, type ProjectSummary } from '../../../api/client'
 import { useLocalStorageState } from '../../../lib/useLocalStorageState'
 
@@ -49,6 +50,7 @@ export default function PromptFromDatasetPicker({
   onChange: (next: DatasetPick | null) => void
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   // 一次性 migrate 旧 anima.* key 到 studio: 命名（PR #66 P1-4 约定）；module 顶部
   // 调用即可，没必要进 useEffect —— 没读 / 写 React state 副作用，只动 localStorage。
   if (typeof window !== 'undefined') {
@@ -150,22 +152,22 @@ export default function PromptFromDatasetPicker({
     >
       {/* header */}
       <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold text-fg-secondary shrink-0">从训练集选 prompt</span>
+        <span className="text-xs font-semibold text-fg-secondary shrink-0">{t('generate.datasetPromptTitle')}</span>
         <span className="flex-1" />
         {value && (
           <button
             onClick={() => onChange(null)}
             className="btn btn-ghost btn-sm text-2xs text-fg-tertiary"
-            title="清除已选 caption（× 只关闭面板）"
+            title={t('generate.clearDatasetPickTitle')}
           >
-            清空
+            {t('generate.clearDatasetPick')}
           </button>
         )}
         <button
           onClick={onClose}
           className="btn btn-ghost btn-sm text-fg-tertiary px-1.5"
-          title="关闭面板（保留已选）"
-          aria-label="关闭"
+          title={t('generate.closeDatasetPickerTitle')}
+          aria-label={t('common.close')}
         >
           ×
         </button>
@@ -177,9 +179,9 @@ export default function PromptFromDatasetPicker({
           className="input text-xs flex-1"
           value={pid ?? ''}
           onChange={(e) => setPid(e.target.value ? Number(e.target.value) : null)}
-          aria-label="选项目"
+          aria-label={t('generate.selectProjectAria')}
         >
-          <option value="">选项目…</option>
+          <option value="">{t('generate.selectProject')}</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>{p.title}</option>
           ))}
@@ -189,9 +191,9 @@ export default function PromptFromDatasetPicker({
           value={vid ?? ''}
           onChange={(e) => setVid(e.target.value ? Number(e.target.value) : null)}
           disabled={versions.length === 0}
-          aria-label="选版本"
+          aria-label={t('generate.selectVersionAria')}
         >
-          <option value="">选版本…</option>
+          <option value="">{t('generate.selectVersion')}</option>
           {versions.map((v) => (
             <option key={v.id} value={v.id}>{v.label}</option>
           ))}
@@ -202,7 +204,7 @@ export default function PromptFromDatasetPicker({
       <input
         type="text"
         className="input text-xs"
-        placeholder="搜索文件名 / tag…"
+        placeholder={t('generate.searchFilenameTag')}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         disabled={!pid || !vid || captions.length === 0}
@@ -212,9 +214,9 @@ export default function PromptFromDatasetPicker({
 
       {/* caption 列表 */}
       <div className="flex flex-col gap-px overflow-y-auto" style={{ maxHeight: 240 }}>
-        {loading && <div className="text-2xs text-fg-tertiary">加载中…</div>}
+        {loading && <div className="text-2xs text-fg-tertiary">{t('common.loading')}</div>}
         {!loading && pid && vid && captions.length === 0 && !error && (
-          <div className="text-2xs text-fg-tertiary">该版本没有 caption</div>
+          <div className="text-2xs text-fg-tertiary">{t('generate.noCaptions')}</div>
         )}
         {!loading && filtered.map((c) => {
           const k = `${c.folder}/${c.name}`
@@ -242,16 +244,14 @@ export default function PromptFromDatasetPicker({
         })}
       </div>
 
-      {/* 已选 tags 只读区：永远渲染，方便用户看出当前 picker 处于「无选」还是「有选」状态。
-       *  独立于上方「正向」textarea，生成时由 caller 把 tags 接到 prompt 末尾。 */}
-      <label className="caption block mt-1">已选 tags（点「生成」时接在正向之后）</label>
+      <label className="caption block mt-1">{t('generate.selectedDatasetTagsLabel')}</label>
       <textarea
         className="input w-full font-mono text-xs resize-y"
         rows={3}
         value={tagsText}
         readOnly
-        placeholder="还没选 caption — 点上方列表里的一行激活"
-        aria-label="已选 caption 的 tags（只读）"
+        placeholder={t('generate.selectedDatasetTagsPlaceholder')}
+        aria-label={t('generate.selectedDatasetTagsAria')}
       />
     </div>
   )

@@ -43,6 +43,8 @@ class InfoNoiseScheduler:
         N_min: int = 50,
         baseline_shift: float = 3.0,
         baseline_mode: str = "logit_normal",
+        baseline_mix_low_prob: float = 0.0,
+        baseline_timestep_schedule_shift: float = 1.0,
     ):
         self.K = K
         self.N_warm = N_warm
@@ -54,6 +56,8 @@ class InfoNoiseScheduler:
         self.N_min = N_min
         self.baseline_shift = baseline_shift
         self.baseline_mode = baseline_mode
+        self.baseline_mix_low_prob = baseline_mix_low_prob
+        self.baseline_timestep_schedule_shift = baseline_timestep_schedule_shift
         self._internal_step = 0
 
         sigma_min = t_min / (1.0 - t_min)
@@ -90,7 +94,14 @@ class InfoNoiseScheduler:
         # 而不是写死 logit_normal_shift。复用 training.timestep_sampling.sample_t
         # 避免分叉两份分布逻辑。
         from training.timestep_sampling import sample_t
-        return sample_t(bs, device, mode=self.baseline_mode, shift=self.baseline_shift)
+        return sample_t(
+            bs,
+            device,
+            mode=self.baseline_mode,
+            shift=self.baseline_shift,
+            mix_low_prob=self.baseline_mix_low_prob,
+            timestep_schedule_shift=self.baseline_timestep_schedule_shift,
+        )
 
     def record(self, t: torch.Tensor, raw_mse: torch.Tensor):
         """记录 per-sample 原始 MSE（不含任何 loss weight）到对应 bin。"""
@@ -138,6 +149,47 @@ class InfoNoiseScheduler:
             "refresh_degraded_count": self._refresh_degraded_count,
             "internal_step": self._internal_step,
         }
+
+    # ─── pause/resume 支持（ADR 0006 Addendum 1）：保存自适应 schedule 防止 resume 丢 CDF ───
+    # 不保存 hyperparameter（K/B/N_warm/M/beta/...）—— 这些由 args 重建；只保存 *学到的* 状态。
+    # 但记录 K/B 让 load_state_dict 做形状校验，避免不同配置 ckpt 间错乱。
+
+    def state_dict(self) -> dict:
+        return {
+            "K": self.K,
+            "B": self.B,
+            "fifo": [list(buf) for buf in self._fifo],
+            "mse_ema": self._mse_ema.copy(),
+            "n_count": self._n_count.copy(),
+            "cdf_values": None if self._cdf_values is None else self._cdf_values.copy(),
+            "internal_step": int(self._internal_step),
+            "last_refresh_status": self._last_refresh_status,
+            "refresh_attempts": int(self._refresh_attempts),
+            "refresh_degraded_count": int(self._refresh_degraded_count),
+            "warned_cold_start": bool(self._warned_cold_start),
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        saved_K = int(state.get("K", self.K))
+        saved_B = int(state.get("B", self.B))
+        if saved_K != self.K or saved_B != self.B:
+            # 已经跑了几小时，配置改了不要崩 —— 退回冷启动让 warmup 重走。
+            logger.warning(
+                "InfoNoise resume: shape mismatch (saved K=%d B=%d, current K=%d B=%d) "
+                "—— 跳过 sampler state 加载，从冷启动重 warmup。",
+                saved_K, saved_B, self.K, self.B,
+            )
+            return
+        self._fifo = [deque(buf, maxlen=self.B) for buf in state["fifo"]]
+        self._mse_ema = np.asarray(state["mse_ema"], dtype=np.float64).copy()
+        self._n_count = np.asarray(state["n_count"], dtype=np.int32).copy()
+        cdf = state.get("cdf_values")
+        self._cdf_values = None if cdf is None else np.asarray(cdf, dtype=np.float64).copy()
+        self._internal_step = int(state.get("internal_step", 0))
+        self._last_refresh_status = str(state.get("last_refresh_status", "not_refreshed_yet"))
+        self._refresh_attempts = int(state.get("refresh_attempts", 0))
+        self._refresh_degraded_count = int(state.get("refresh_degraded_count", 0))
+        self._warned_cold_start = bool(state.get("warned_cold_start", False))
 
     def _refresh(self):
         self._refresh_attempts += 1
@@ -209,10 +261,14 @@ def build(args, total_steps: Optional[int]) -> InfoNoiseScheduler:
         N_min=int(getattr(args, "infonoise_N_min", 50) or 50),
         baseline_shift=float(getattr(args, "timestep_shift", 3.0) or 3.0),
         baseline_mode=str(getattr(args, "timestep_sampling", "logit_normal") or "logit_normal"),
+        baseline_mix_low_prob=float(getattr(args, "timestep_mix_low_prob", 0.0) or 0.0),
+        baseline_timestep_schedule_shift=float(getattr(args, "timestep_schedule_shift", 1.0) or 1.0),
     )
     logger.info(
         f"InfoNoise 已启用：K={scheduler.K}, N_warm={scheduler.N_warm}, "
         f"M={scheduler.M}, B={scheduler.B}, beta={scheduler.beta}, "
-        f"baseline={scheduler.baseline_mode}(shift={scheduler.baseline_shift})"
+        f"baseline={scheduler.baseline_mode}(shift={scheduler.baseline_shift}, "
+        f"mix_low_prob={scheduler.baseline_mix_low_prob}, "
+        f"timestep_schedule_shift={scheduler.baseline_timestep_schedule_shift})"
     )
     return scheduler

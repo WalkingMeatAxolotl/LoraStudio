@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { api, type DownloadFile } from '../api/client'
 
 interface Props {
@@ -13,10 +14,11 @@ export default function FileList({
   bucket = 'download',
   items,
   onPreview,
-  emptyHint = '还没有图片',
+  emptyHint,
 }: Props) {
+  const { t } = useTranslation()
   if (items.length === 0) {
-    return <p className="text-fg-tertiary text-sm">{emptyHint}</p>
+    return <p className="text-fg-tertiary text-sm">{emptyHint ?? t('fileList.empty')}</p>
   }
   return (
     <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-1.5">

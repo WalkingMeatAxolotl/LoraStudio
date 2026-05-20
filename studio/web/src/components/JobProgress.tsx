@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Job } from '../api/client'
 
 interface Props {
@@ -16,6 +17,7 @@ const STATUS_COLOR: Record<Job['status'], string> = {
 }
 
 export default function JobProgress({ job, logs, onCancel }: Props) {
+  const { t } = useTranslation()
   const logRef = useRef<HTMLPreElement>(null)
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -56,7 +58,7 @@ export default function JobProgress({ job, logs, onCancel }: Props) {
             onClick={onCancel}
             className="btn btn-ghost btn-sm text-err hover:bg-err-soft"
           >
-            取消
+            {t('common.cancel')}
           </button>
         )}
       </header>
@@ -64,7 +66,7 @@ export default function JobProgress({ job, logs, onCancel }: Props) {
         ref={logRef}
         className="p-3 text-[11px] font-mono text-fg-secondary bg-sunken max-h-72 overflow-y-auto whitespace-pre-wrap"
       >
-        {logs.length === 0 ? '(等待日志...)' : logs.slice(-1000).join('\n')}
+        {logs.length === 0 ? t('jobProgress.waitingLogs') : logs.slice(-1000).join('\n')}
       </pre>
     </section>
   )

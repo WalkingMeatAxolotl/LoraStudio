@@ -14,6 +14,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   tags: string[]
@@ -32,6 +33,7 @@ const parseLine = (raw: string): string[] =>
 export default function TagEditor({
   tags, natural, onChange, onSave, saving, dirty,
 }: Props) {
+  const { t } = useTranslation()
   const [draft, setDraft] = useState('')
   const tagsJoined = useMemo(() => tags.join(', '), [tags])
   const [mode, setMode] = useState<Mode>(natural ? 'text' : 'chip')
@@ -104,7 +106,7 @@ export default function TagEditor({
         <textarea
           value={tags[0] ?? ''}
           onChange={(e) => onChange([e.target.value])}
-          placeholder="自然语言 caption..."
+          placeholder={t('tagEditor.naturalPlaceholder')}
           className="input input-mono text-sm flex-1 resize-none"
         />
         {onSave && (
@@ -113,7 +115,7 @@ export default function TagEditor({
             onClick={onSave}
             className={`self-start ${dirty ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}`}
           >
-            {saving ? '保存中...' : dirty ? '保存' : '已保存'}
+            {saving ? t('common.saving') : dirty ? t('common.save') : t('saveBar.saved')}
           </button>
         )}
       </div>
@@ -124,10 +126,10 @@ export default function TagEditor({
     <div className="flex flex-col gap-1.5 flex-1 min-h-0">
       {/* mode switch */}
       <div className="flex items-center gap-1.5 text-xs shrink-0">
-        <ModeBtn active={mode === 'chip'} onClick={switchToChip}>chip</ModeBtn>
-        <ModeBtn active={mode === 'text'} onClick={switchToText}>文本</ModeBtn>
+        <ModeBtn active={mode === 'chip'} onClick={switchToChip}>{t('tagEditor.modeChip')}</ModeBtn>
+        <ModeBtn active={mode === 'text'} onClick={switchToText}>{t('tagEditor.modeText')}</ModeBtn>
         <span className="flex-1" />
-        <span className="text-fg-tertiary">{tags.length} tag</span>
+        <span className="text-fg-tertiary">{t('tagEditor.tagCount', { n: tags.length })}</span>
       </div>
 
       {/* content area — both modes use flex:1 so no height jitter */}
@@ -141,7 +143,7 @@ export default function TagEditor({
             <SortableContext items={tags} strategy={rectSortingStrategy}>
               <div className="flex flex-wrap gap-1 overflow-y-auto flex-1 min-h-0 content-start py-1">
                 {tags.length === 0 && (
-                  <span className="text-xs text-fg-tertiary">还没有标签</span>
+                  <span className="text-xs text-fg-tertiary">{t('tagEditor.empty')}</span>
                 )}
                 {tags.map((t) => (
                   <SortableChip key={t} id={t} onRemove={() => removeTag(t)} />
@@ -160,7 +162,7 @@ export default function TagEditor({
                   removeTag(tags[tags.length - 1])
                 }
               }}
-              placeholder="添加标签后按 Enter / 逗号"
+              placeholder={t('tagEditor.addPlaceholder')}
               className="input input-mono text-xs flex-1"
             />
             {onSave && (
@@ -169,7 +171,7 @@ export default function TagEditor({
                 onClick={onSave}
                 className={dirty ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
               >
-                {saving ? '保存中...' : dirty ? '保存' : '已保存'}
+                {saving ? t('common.saving') : dirty ? t('common.save') : t('saveBar.saved')}
               </button>
             )}
           </div>
@@ -180,18 +182,18 @@ export default function TagEditor({
             value={textBuf}
             onChange={(e) => setTextBuf(e.target.value)}
             onBlur={commitText}
-            placeholder="逗号 / 换行分隔，失焦自动同步"
+            placeholder={t('tagEditor.textPlaceholder')}
             className="input input-mono text-xs flex-1 resize-none"
           />
           <div className="flex items-center gap-1.5 shrink-0">
-            <button onClick={commitText} className="btn btn-ghost btn-sm">同步</button>
+            <button onClick={commitText} className="btn btn-ghost btn-sm">{t('tagEditor.sync')}</button>
             {onSave && (
               <button
                 disabled={saving || !dirty}
                 onClick={async () => { commitText(); await onSave() }}
                 className={dirty ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
               >
-                {saving ? '保存中...' : dirty ? '保存' : '已保存'}
+                {saving ? t('common.saving') : dirty ? t('common.save') : t('saveBar.saved')}
               </button>
             )}
           </div>
@@ -227,6 +229,7 @@ function ModeBtn({ active, onClick, children }: {
  * 拖拽起点,点 × 反而触发拖拽。
  */
 function SortableChip({ id, onRemove }: { id: string; onRemove: () => void }) {
+  const { t } = useTranslation()
   const {
     attributes, listeners, setNodeRef, transform, transition, isDragging,
   } = useSortable({ id })
@@ -248,7 +251,7 @@ function SortableChip({ id, onRemove }: { id: string; onRemove: () => void }) {
       <button
         onPointerDown={(e) => e.stopPropagation()}
         onClick={onRemove}
-        aria-label={`删除 ${id}`}
+        aria-label={t('tagEditor.deleteTag', { tag: id })}
         className="bg-transparent border-none text-fg-tertiary hover:text-err cursor-pointer p-0 text-sm leading-none"
       >
         ×

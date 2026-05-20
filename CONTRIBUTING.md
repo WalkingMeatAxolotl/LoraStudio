@@ -353,6 +353,8 @@ tests/       后端 pytest + 前端 vitest（前端测试在 studio/web/src/**/*
 
 ## 给 AI agent 的额外说明
 
+**AI agent 接到本仓库任务时必读** [`docs/AGENTS.md`](docs/AGENTS.md) — 代码质量、一致性、可维护性、AI 协作的完整公约（含开工前对齐协议、单一权威源清单、陷阱清单、PR 自检）。本节是简版速查。
+
 如果你是 Claude Code / Cursor / 类似 agent 在帮 maintainer 或 contributor 干活：
 
 **遵守的**：

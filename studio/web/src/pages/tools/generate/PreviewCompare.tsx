@@ -1,15 +1,16 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api, type MonitorState } from '../../../api/client'
 import FullscreenViewer from './FullscreenViewer'
-import { AXIS_LABELS, formatAxisValue, type XYAxisDraft } from './xy'
+import { axisLabel, formatAxisValue, type XYAxisDraft } from './xy'
 
 type Sample = NonNullable<MonitorState['samples']>[number]
 
 function labelOf(s: Sample, xDraft: XYAxisDraft, yDraft: XYAxisDraft | null): string {
   if (!s.xy) return ''
-  const x = `${AXIS_LABELS[xDraft.axis]}=${formatAxisValue(xDraft.axis, String(s.xy.xv ?? ''))}`
+  const x = `${axisLabel(xDraft.axis)}=${formatAxisValue(xDraft.axis, String(s.xy.xv ?? ''))}`
   if (yDraft && s.xy.yv != null) {
-    return `${x} · ${AXIS_LABELS[yDraft.axis]}=${formatAxisValue(yDraft.axis, String(s.xy.yv))}`
+    return `${x} · ${axisLabel(yDraft.axis)}=${formatAxisValue(yDraft.axis, String(s.xy.yv))}`
   }
   return x
 }
@@ -29,6 +30,7 @@ export default function PreviewCompare({
   yDraft: XYAxisDraft | null
   onBack: () => void
 }) {
+  const { t } = useTranslation()
   const [aIdx, bIdx] = selectedIndices
   const sampleA = samples[aIdx]
   const sampleB = samples[bIdx]
@@ -39,10 +41,10 @@ export default function PreviewCompare({
     return (
       <div className="flex flex-col gap-3 flex-1 min-h-0">
         <button onClick={onBack} className="self-start btn btn-ghost btn-sm text-xs">
-          ← 返回网格
+          {t('generate.backToGrid')}
         </button>
         <div className="flex-1 grid place-items-center rounded-md border border-subtle bg-sunken text-fg-tertiary text-sm">
-          所选样本已不可用 —— 重新在网格里选 2 张
+          {t('generate.selectedSamplesUnavailable')}
         </div>
       </div>
     )
@@ -62,10 +64,10 @@ export default function PreviewCompare({
           onClick={onBack}
           className="btn btn-ghost btn-sm text-xs text-fg-secondary"
         >
-          ← 返回网格 / 清空选择
+          {t('generate.backToGridClear')}
         </button>
         <span className="text-2xs text-fg-tertiary">
-          双击图片全屏查看
+          {t('generate.doubleClickFullscreen')}
         </span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 flex-1 min-h-0">
@@ -81,7 +83,7 @@ export default function PreviewCompare({
             <button
               onDoubleClick={() => setFullscreenSide(side)}
               className="flex-1 min-h-0 flex items-center justify-center bg-sunken rounded-md border border-subtle p-0 cursor-zoom-in"
-              title="双击全屏"
+              title={t('generate.doubleClickFullscreenTitle')}
             >
               <img
                 src={url}
@@ -103,7 +105,7 @@ export default function PreviewCompare({
           hasNext
           onPrev={() => setFullscreenSide((s) => (s === 'B' ? 'A' : 'B'))}
           onNext={() => setFullscreenSide((s) => (s === 'A' ? 'B' : 'A'))}
-          shortcutHint={`← / → 切换 ${fullscreenSide === 'A' ? 'A→B' : 'B→A'} · ESC 关闭`}
+          shortcutHint={t('generate.compareShortcutHint', { direction: fullscreenSide === 'A' ? 'A→B' : 'B→A' })}
         />
       )}
     </div>

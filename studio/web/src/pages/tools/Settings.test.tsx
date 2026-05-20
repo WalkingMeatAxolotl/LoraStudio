@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import { DialogProvider } from '../../components/Dialog'
 import { ToastProvider } from '../../components/Toast'
 import SettingsPage from './Settings'
@@ -44,7 +45,14 @@ const initialServerState = {
         model: '',
         model_ids: [],
         endpoint: 'chat_completions',
-        prompt: 'Return JSON captions for anime style LoRA training.',
+        messages: [
+          {
+            type: 'text',
+            role: 'system',
+            content: 'Return JSON captions for anime style LoRA training.',
+          },
+          { type: 'image', role: 'user', content: '' },
+        ],
         output_format: 'json',
         temperature: 0.2,
         max_tokens: 700,
@@ -53,6 +61,9 @@ const initialServerState = {
         max_image_mb: 5,
         timeout: 60,
         max_retries: 3,
+        concurrency: 1,
+        requests_per_second: 0,
+        max_requests_per_minute: 0,
       },
       {
         id: 'joycaption',
@@ -63,7 +74,10 @@ const initialServerState = {
         model: 'fancyfeast/llama-joycaption-beta-one-hf-llava',
         model_ids: [],
         endpoint: 'chat_completions',
-        prompt: 'Descriptive Caption',
+        messages: [
+          { type: 'text', role: 'system', content: 'Descriptive Caption' },
+          { type: 'image', role: 'user', content: '' },
+        ],
         output_format: 'text',
         temperature: 0.6,
         max_tokens: 300,
@@ -72,6 +86,9 @@ const initialServerState = {
         max_image_mb: 5,
         timeout: 60,
         max_retries: 3,
+        concurrency: 1,
+        requests_per_second: 0,
+        max_requests_per_minute: 0,
       },
     ],
   },
@@ -101,7 +118,7 @@ const initialServerState = {
     blacklist_tags: [],
     batch_size: 8,
   },
-  models: { root: null, selected_anima: '1.0' },
+  models: { root: null, selected_anima: '1.0', selected_upscaler: '4x-AnimeSharp', auto_sync_paths: true },
   queue: { allow_gpu_during_train: false },
 }
 
@@ -212,11 +229,13 @@ afterEach(() => {
 
 function renderPage() {
   return render(
-    <ToastProvider>
-      <DialogProvider>
-        <SettingsPage />
-      </DialogProvider>
-    </ToastProvider>
+    <MemoryRouter>
+      <ToastProvider>
+        <DialogProvider>
+          <SettingsPage />
+        </DialogProvider>
+      </ToastProvider>
+    </MemoryRouter>
   )
 }
 
@@ -253,5 +272,18 @@ describe('SettingsPage (PP0)', () => {
       // 只有 user_id 被改动；api_key 仍是 *** ⇒ 不应该出现在 body 里
       expect(body).toEqual({ gelbooru: { user_id: 'bob' } })
     })
+  })
+
+  it('shows LLM request pool controls on the tagging settings tab', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '打标' }))
+    await user.click(screen.getByText('高级参数'))
+
+    expect(screen.getByText('Concurrency')).toBeInTheDocument()
+    expect(screen.getByText('Requests/sec')).toBeInTheDocument()
+    expect(screen.getByText('Max/min')).toBeInTheDocument()
+    expect(screen.getAllByText('0 = no limit').length).toBeGreaterThanOrEqual(2)
   })
 })

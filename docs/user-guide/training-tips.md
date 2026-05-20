@@ -103,9 +103,19 @@ Flow Matching 训练里每个 step 要从 `(0, 1)` 区间采一个 `t` 来构造
 | `uniform` | 均匀采样，覆盖结构端到细节端 | 想让模型对所有 noise level 同样关注 |
 | `logit_normal_low` | logit-normal 反向 shift，偏向低噪声/细节端 | 细节强化、风格 LoRA |
 | `mode` | SD3 mode-distribution，集中在某个 sigma 附近 | 论文实验复现 |
+| `mixed_uniform_low` | 每样本独立按 `timestep_mix_low_prob` 概率走 `logit_normal_low`，其余走 uniform | 想细节强化但保留 uniform 覆盖度 |
+| `mixed_uniform_logit` | 同上但偏置端走 `logit_normal` | 想轻度推高噪声但保留 uniform 覆盖度 |
 
 **`timestep_shift`**：仅 `logit_normal` / `mode` 用。`>1` 偏向高噪声（结构端），`<1` 偏向
 细节端。默认 `3.0` 是 SD3 经验值。
+
+**`timestep_mix_low_prob`**：仅 `mixed_uniform_*` 用，其他 mode 忽略。`0` = 全 uniform，
+`1` = 全偏置端；典型 `0.15-0.30`。
+
+**`timestep_schedule_shift`**：作用于**最终 t**（采样完成后再做一次 SD3/FLUX shifted
+schedule 偏移，公式 `t' = (t·s) / (1 + (s-1)·t)`，Möbius 变换）；跟 `timestep_shift`
+不同：后者作用于 logit-normal 内部的 sigmoid 后 u 值。默认 `1.0` 是恒等。`>1` 整体
+推向高噪声端；`<1` 偏低噪声端。可跟任意 mode 叠加。
 
 ### Loss Weighting（损失加权）
 
@@ -116,8 +126,28 @@ Flow Matching 训练里每个 step 要从 `(0, 1)` 区间采一个 `t` 来构造
 |------|------|----------|
 | `none` | 默认，纯 MSE | — |
 | `min_snr` | **强烈推荐**。SD3 论文方案，缓解 t→1 端的 loss 主导 | `min_snr_gamma` 默认 5.0，可在 3.0~7.0 调 |
-| `detail_inv_t` | 细节强化，损失 ∝ 1/(t+ε) | 慎用，可能让训练发散 |
+| `detail_inv_t` | 细节强化，损失 ∝ 1/(t+ε)，clamp 到 `[detail_inv_t_min, detail_inv_t_max]` | 默认 `[1, 5]` 跟历史一致；雾蒙蒙/低饱和画风建议 `max=3`，激进细节 `max=8` |
 | `cosmap` | SD3 风格 cosine mapping | 实验性 |
+
+**`detail_inv_t_min` / `detail_inv_t_max`**：detail_inv_t 加权曲线的下/上限（默认 `1` / `5`）。
+- `detail_inv_t_min` 必须 ≥ `1.0`——因为 `1/t` 在 `t∈(0,1)` 时恒 > 1，下限 < 1.0 是配置死区。
+- `detail_inv_t_min > detail_inv_t_max` 时启动期 schema 校验直接报错（fail-fast）。
+- 升 `max` 让低 t（细节端）权重更激进，但 Prodigy 用户注意：单样本权重过大易主导 `d` 估计，
+  建议同时开 `weight_cap_ratio=5`。
+
+### Loss 函数（0.8.x 新增）
+
+`loss_type` 默认 `mse`（与历史 bit-for-bit 一致）。可选 `huber`：
+
+| 字段 | 默认 | 说明 |
+|------|------|------|
+| `loss_type` | `mse` | 选 `huber` 对 outlier 鲁棒，缓解极端 sample 的梯度爆炸 |
+| `huber_c` | `0.15` | huber δ 系数（仅 `loss_type=huber`）；典型 `0.1–0.3`，控制 quad/linear 转折点 |
+
+**何时用 huber**：训练时偶发 NaN / loss 跳变剧烈、或数据集有少量极端 sample 时。
+EDM/Karras 论文里 δ=0.15 是常用经验值。
+
+**注意**：启用 huber 后 InfoNoise 仍收到纯 MSE（解耦设计），所以两者可同时开。
 
 ### InfoNoise 自适应采样器（0.7.1 新增）
 

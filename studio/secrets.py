@@ -176,6 +176,10 @@ class LLMPresetConfig(BaseModel):
     # 重试 / 超时
     timeout: int = 60
     max_retries: int = 3
+    # 请求池 / 节流
+    concurrency: int = 1
+    requests_per_second: float = 0.0
+    max_requests_per_minute: int = 0
 
     @model_validator(mode="before")
     @classmethod
@@ -205,6 +209,15 @@ class LLMPresetConfig(BaseModel):
         self.max_tokens = max(64, int(self.max_tokens or 700))
         self.timeout = max(5, int(self.timeout or 60))
         self.max_retries = max(1, int(self.max_retries or 3))
+        self.concurrency = max(1, min(8, int(self.concurrency or 1)))
+        self.requests_per_second = max(
+            0.0,
+            min(60.0, float(self.requests_per_second or 0.0)),
+        )
+        self.max_requests_per_minute = max(
+            0,
+            min(3600, int(self.max_requests_per_minute or 0)),
+        )
         self.max_side = max(64, int(self.max_side or 1280))
         self.jpeg_quality = max(1, min(100, int(self.jpeg_quality or 85)))
         self.max_image_mb = max(0.1, float(self.max_image_mb or 5.0))
@@ -377,10 +390,16 @@ class ModelsConfig(BaseModel):
     - `selected_upscaler`：预处理默认放大器。可为预设 label（如 "4x-AnimeSharp"）
       或自定义/上传的文件名（如 "my-anime-model.pth"）。空串/None → 用
       DEFAULT_UPSCALER 兜底。
+    - `auto_sync_paths`：fork 预设到 version 时，是否自动用全局模型路径覆盖
+      预设里的 4 个模型字段（transformer / vae / text_encoder / t5_tokenizer）。
+      ON（默认）→ 多数用户：永不碰 4 字段，fork 始终用 Settings 全局值；
+      4 字段在项目页 / 预设页 UI 上 disabled。
+      OFF → 独立模型用户：fork 时尊重预设值，4 字段可编辑 + picker。
     """
     root: Optional[str] = None
     selected_anima: str = "1.0"
     selected_upscaler: str = "4x-AnimeSharp"
+    auto_sync_paths: bool = True
 
 
 class GenerateConfig(BaseModel):
@@ -563,6 +582,9 @@ def _migrate_legacy_schema(raw: dict[str, Any]) -> dict[str, Any]:
     old_max_tokens = _get("max_tokens", 700)
     old_timeout = _get("timeout", 60)
     old_max_retries = _get("max_retries", 3)
+    old_concurrency = _get("concurrency", 1)
+    old_requests_per_second = _get("requests_per_second", 0.0)
+    old_max_requests_per_minute = _get("max_requests_per_minute", 0)
     old_max_side = _get("max_side", 1280)
     old_jpeg_quality = _get("jpeg_quality", 85)
     old_max_image_mb = _get("max_image_mb", 5.0)
@@ -588,6 +610,9 @@ def _migrate_legacy_schema(raw: dict[str, Any]) -> dict[str, Any]:
             "max_image_mb": old_max_image_mb,
             "timeout": old_timeout,
             "max_retries": old_max_retries,
+            "concurrency": old_concurrency,
+            "requests_per_second": old_requests_per_second,
+            "max_requests_per_minute": old_max_requests_per_minute,
         }
 
     new_presets: list[dict[str, Any]] = []
@@ -662,6 +687,9 @@ def _migrate_legacy_schema(raw: dict[str, Any]) -> dict[str, Any]:
             "max_image_mb": 5.0,
             "timeout": 60,
             "max_retries": 3,
+            "concurrency": 1,
+            "requests_per_second": 0.0,
+            "max_requests_per_minute": 0,
             "id": "user_joycaption",
             "label": "JoyCaption（自定义 prompt）",
             "builtin": False,

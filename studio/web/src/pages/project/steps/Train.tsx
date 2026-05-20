@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useOutletContext } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import {
   api,
   type ConfigData,
@@ -38,6 +39,7 @@ interface Ctx {
 }
 
 export default function TrainPage() {
+  const { t } = useTranslation()
   const { project, activeVersion, reload } = useOutletContext<Ctx>()
   const { toast } = useToast()
   const { confirm, prompt } = useDialog()
@@ -49,6 +51,7 @@ export default function TrainPage() {
   const [config, setConfig] = useState<ConfigData | null>(null)
   const [reg, setReg] = useState<RegStatus | null>(null)
   const [busy, setBusy] = useState(false)
+  const [autoSyncPaths, setAutoSyncPaths] = useState<boolean>(true)
 
   /** 已落盘的 config JSON 快照，dirty 判断的 baseline。 */
   const savedJsonRef = useRef<string | null>(null)
@@ -97,14 +100,15 @@ export default function TrainPage() {
       setConfigSync(r.config)
       savedJsonRef.current = JSON.stringify(r.config)
     } catch (e) {
-      toast(`加载训练配置失败: ${e}`, 'error')
+      toast(t('train.loadConfigFailed', { error: e }), 'error')
     }
-  }, [project.id, vid, toast, setConfigSync])
+  }, [project.id, vid, toast, setConfigSync, t])
 
   useEffect(() => {
-    api.schema().then(setSchema).catch((e) => toast(`schema 加载失败: ${e}`, 'error'))
+    api.schema().then(setSchema).catch((e) => toast(t('train.loadSchemaFailed', { error: e }), 'error'))
     api.listPresets().then(setPresets).catch(() => setPresets([]))
-  }, [toast])
+    api.getSecrets().then((s) => setAutoSyncPaths(s.models?.auto_sync_paths ?? true)).catch(() => {})
+  }, [toast, t])
 
   useEffect(() => {
     void refreshConfig()
@@ -117,24 +121,69 @@ export default function TrainPage() {
   }, [project.id, vid])
 
 
-  // 全局模型路径仍然灰显 readonly（值来自 Settings.models 配置；version 维度
-  // 改了没意义）。PP10.4 起项目特定字段（data_dir 等）改成可编辑：fork preset
-  // 时仍然预填项目路径，但用户后续可以自由改（接续训练填 resume_lora 之类）。
-  const disabledFields = GLOBAL_MODEL_FIELDS
+  // auto_sync_paths ON（默认 / 多数用户）：4 个模型路径字段 disabled，fork 时
+  // 后端自动用 Settings 全局值覆盖；OFF（独立模型用户）：字段可编辑 + reset
+  // 按钮，fork 时尊重预设里的绝对路径。
+  const disabledFields = autoSyncPaths ? GLOBAL_MODEL_FIELDS : []
   const disabledHints = useMemo(() => {
-    const h: Record<string, string> = {}
-    for (const f of GLOBAL_MODEL_FIELDS) h[f] = '自动 · 全局设置'
+    const h: Record<string, React.ReactNode> = {}
+    if (autoSyncPaths) {
+      const node = (
+        <>
+          {t('train.globalAutoLockedPrefix')} ·{' '}
+          <Link
+            to="/tools/settings?section=models"
+            className="underline text-warn hover:opacity-80"
+          >
+            {t('train.globalAutoLockedLink')}
+          </Link>
+        </>
+      )
+      for (const f of GLOBAL_MODEL_FIELDS) h[f] = node
+    }
     return h
-  }, [])
+  }, [t, autoSyncPaths])
   // 项目特定字段（data_dir / reg_data_dir / output_dir 等）：值由项目预填，但
   // 不锁定，挂「自动 · 项目设置」徽章让用户知道这是预填的，不是预设里来的。
+  // toggle OFF 时全局模型字段也挂 hint「默认来自 Settings · 可改」。
   const autoHints = useMemo(() => {
     const h: Record<string, string> = {}
     for (const f of configResp?.project_specific_fields ?? []) {
-      if (!GLOBAL_MODEL_FIELDS.includes(f)) h[f] = '自动 · 项目设置'
+      if (!GLOBAL_MODEL_FIELDS.includes(f)) h[f] = t('train.projectAutoHint')
+    }
+    if (!autoSyncPaths) {
+      for (const f of GLOBAL_MODEL_FIELDS) h[f] = t('train.globalAutoEditableHint')
     }
     return h
-  }, [configResp?.project_specific_fields])
+  }, [configResp?.project_specific_fields, t, autoSyncPaths])
+
+  // toggle OFF 时给 4 个模型字段加「↺ 重置为全局默认」按钮。值取自
+  // configResp.project_specific_defaults（后端已用 default_paths_for_new_version
+  // 算好的绝对路径）。
+  const makeResetSuffixes = useCallback(
+    (formValues: ConfigData | null, setForm: (v: ConfigData) => void): Record<string, React.ReactNode> => {
+      if (autoSyncPaths) return {}
+      const psd = configResp?.project_specific_defaults
+      if (!psd || !formValues) return {}
+      const out: Record<string, React.ReactNode> = {}
+      for (const f of GLOBAL_MODEL_FIELDS) {
+        const dv = psd[f]
+        if (typeof dv !== 'string' || !dv) continue
+        out[f] = (
+          <button
+            type="button"
+            onClick={() => setForm({ ...formValues, [f]: dv })}
+            className="btn btn-ghost btn-sm shrink-0"
+            title={t('train.resetToGlobalDefaultTitle')}
+          >
+            {t('train.resetToGlobalDefault')}
+          </button>
+        )
+      }
+      return out
+    },
+    [autoSyncPaths, configResp?.project_specific_defaults, t],
+  )
 
   /** 落盘 cfg。串行化保证：如果上一次 save 还在飞，等它跑完再决定是否要再
    * save；这样多次 setConfig + debounce 不会丢任何一次的内容。
@@ -171,7 +220,7 @@ export default function TrainPage() {
     if (JSON.stringify(config) === savedJsonRef.current) return
     debounceTimerRef.current = setTimeout(() => {
       debounceTimerRef.current = null
-      void persistConfig(config).catch((e) => toast(`保存失败：${e}`, 'error'))
+      void persistConfig(config).catch((e) => toast(t('train.saveFailed', { error: e }), 'error'))
     }, 600)
     return () => {
       if (debounceTimerRef.current) {
@@ -179,7 +228,7 @@ export default function TrainPage() {
         debounceTimerRef.current = null
       }
     }
-  }, [config, persistConfig, toast])
+  }, [config, persistConfig, toast, t])
 
   // 卸载时（路由切走）如果还有 dirty 没落盘 → fire-and-forget 把 PUT 发出去。
   // fetch 一旦发起，浏览器会继续送，不需要 await。catch 静默以免 cleanup 抛出。
@@ -201,8 +250,8 @@ export default function TrainPage() {
   useEffect(() => {
     if (!pickerOpen) return
     const onDocClick = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (pickerPopRef.current?.contains(t) || pickerAnchorRef.current?.contains(t)) return
+      const target = e.target as Node
+      if (pickerPopRef.current?.contains(target) || pickerAnchorRef.current?.contains(target)) return
       setPickerOpen(false)
     }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPickerOpen(false) }
@@ -215,15 +264,15 @@ export default function TrainPage() {
   }, [pickerOpen])
 
   if (!activeVersion || !vid) {
-    return <p className="text-fg-tertiary p-6">请先选择 / 创建一个版本</p>
+    return <p className="text-fg-tertiary p-6">{t('train.noVersion')}</p>
   }
 
   const onForkPreset = async (name: string) => {
     if (!name) return
     if (configResp?.has_config) {
       const ok = await confirm(
-        `重置为预设 ${name} 的配置？当前 version 的所有自定义内容会丢失。`,
-        { tone: 'warn', okText: '重置' },
+        t('train.confirmReset', { name }),
+        { tone: 'warn', okText: t('train.resetOkText') },
       )
       if (!ok) return
     }
@@ -233,7 +282,7 @@ export default function TrainPage() {
       // refreshConfig 刷本页 config state；reload 刷父级 activeVersion，
       // 主表单字段才会同步显示新预设的内容。
       await Promise.all([refreshConfig(), reload()])
-      toast(`已重置为预设 ${name} 的配置`, 'success')
+      toast(t('train.resetSuccess', { name }), 'success')
     } catch (e) {
       toast(String(e), 'error')
     } finally {
@@ -242,12 +291,12 @@ export default function TrainPage() {
   }
 
   const onSaveAsPreset = async () => {
-    const name = await prompt('预设名（会自动清掉项目特定字段如 data_dir）', {
+    const name = await prompt(t('train.promptPresetName'), {
       placeholder: 'my-preset',
       validate: (v) => {
-        const t = v.trim()
-        if (!t) return '不能为空'
-        if (!PRESET_NAME_RE.test(t)) return '仅允许字母 / 数字 / _ / -'
+        const trimmed = v.trim()
+        if (!trimmed) return t('train.nameEmpty')
+        if (!PRESET_NAME_RE.test(trimmed)) return t('train.nameInvalid')
         return null
       },
     })
@@ -258,20 +307,20 @@ export default function TrainPage() {
       await api.saveVersionConfigAsPreset(project.id, vid, trimmed, false)
       const list = await api.listPresets()
       setPresets(list)
-      toast(`已保存为预设 ${trimmed}`, 'success')
+      toast(t('train.savedAsPreset', { name: trimmed }), 'success')
     } catch (e) {
       const msg = String(e)
       if (msg.includes('已存在')) {
-        const overwrite = await confirm(`预设 ${trimmed} 已存在，覆盖？`, {
+        const overwrite = await confirm(t('train.alreadyExists', { name: trimmed }), {
           tone: 'danger',
-          okText: '覆盖',
+          okText: t('train.overwriteOkText'),
         })
         if (overwrite) {
           try {
             await api.saveVersionConfigAsPreset(project.id, vid, trimmed, true)
             const list = await api.listPresets()
             setPresets(list)
-            toast(`已覆盖预设 ${trimmed}`, 'success')
+            toast(t('train.overwritePreset', { name: trimmed }), 'success')
           } catch (e2) {
             toast(String(e2), 'error')
           }
@@ -325,30 +374,37 @@ export default function TrainPage() {
 
   const saveNewPreset = async () => {
     const name = newPresetName.trim()
-    if (!name) { setNewNameError('请输入名字'); return }
+    if (!name) { setNewNameError(t('train.nameEmpty')); return }
     if (!PRESET_NAME_RE.test(name)) {
-      setNewNameError('仅允许字母 / 数字 / _ / -'); return
+      setNewNameError(t('train.nameInvalid')); return
     }
     if (!newPresetConfig || !vid) return
     if (presets.some((p) => p.name === name)) {
-      const overwrite = await confirm(`预设 ${name} 已存在，覆盖？`, {
+      const overwrite = await confirm(t('train.alreadyExists', { name }), {
         tone: 'danger',
-        okText: '覆盖',
+        okText: t('train.overwriteOkText'),
       })
       if (!overwrite) return
     }
     setBusy(true)
     try {
-      // 全局预设池不带项目 / 机器数据：项目特定字段 + 全局模型路径清回 schema
-      // 默认。fork 时后端会再注入项目/全局值，所以 version config 仍然正确。
+      // 全局预设池不带项目数据：项目特定字段清回 schema 默认。
+      // 4 个模型字段：toggle ON 时清成当前 Settings 算的绝对路径（保持
+      // yaml 写盘统一绝对，且不带本机自定义路径出去）；toggle OFF 时原样
+      // 保留绝对路径（独立模型用户的主动设置）。
       // 跟 services/presets.py:save_version_config_as_preset 的清理逻辑对齐。
       const schemaDefaults = defaultsFromSchema(schema)
-      const fieldsToReset = [
-        ...(configResp?.project_specific_fields ?? []),
-        ...GLOBAL_MODEL_FIELDS,
-      ]
       const cleaned: ConfigData = { ...newPresetConfig }
-      for (const f of fieldsToReset) cleaned[f] = schemaDefaults[f]
+      for (const f of configResp?.project_specific_fields ?? []) {
+        if (GLOBAL_MODEL_FIELDS.includes(f)) continue
+        cleaned[f] = schemaDefaults[f]
+      }
+      if (autoSyncPaths) {
+        const psd = configResp?.project_specific_defaults ?? {}
+        for (const f of GLOBAL_MODEL_FIELDS) {
+          if (typeof psd[f] === 'string' && psd[f]) cleaned[f] = psd[f]
+        }
+      }
       await api.savePreset(name, cleaned)
       const desc = newPresetDesc.trim()
       if (desc) {
@@ -364,7 +420,7 @@ export default function TrainPage() {
       // 同步显示新预设的内容。
       await Promise.all([refreshConfig(), reload()])
       setCreatingPreset(false)
-      toast(`已创建预设 ${name} 并应用到当前 version`, 'success')
+      toast(t('train.createdPreset', { name }), 'success')
     } catch (e) {
       toast(String(e), 'error')
     } finally {
@@ -374,7 +430,7 @@ export default function TrainPage() {
 
   const onEnqueue = async () => {
     if (!configResp?.has_config) {
-      toast('先选预设', 'error')
+      toast(t('train.noPresetError'), 'error')
       return
     }
     setBusy(true)
@@ -395,8 +451,8 @@ export default function TrainPage() {
       if (cur && JSON.stringify(cur) !== savedJsonRef.current) {
         await persistConfig(cur)
       }
-      const t = await api.enqueueVersionTraining(project.id, vid)
-      toast(`已入队 #${t.id}，去 /queue 查看进度`, 'success')
+      const task = await api.enqueueVersionTraining(project.id, vid)
+      toast(t('train.enqueuedNav', { id: task.id }), 'success')
       void reload()
       navigate('/queue')
     } catch (e) {
@@ -409,15 +465,15 @@ export default function TrainPage() {
   return (
     <StepShell
       idx={6}
-      title="训练"
-      subtitle="选预设 → 编辑 config → 入队训练"
+      title={t('steps.train.title')}
+      subtitle={t('steps.train.subtitle')}
       actions={
         <button
           onClick={() => void onEnqueue()}
           disabled={busy || !configResp?.has_config}
           className="btn btn-primary"
         >
-          开始训练
+          {t('train.startTrainBtn')}
         </button>
       }
     >
@@ -447,19 +503,19 @@ export default function TrainPage() {
                 busy ? 'cursor-default' : 'cursor-pointer',
               ].join(' ')}
               title={configResp?.has_config
-                ? '当前 version 私有配置；点击展开选预设作为起点重置'
-                : '点击选预设作为起点创建当前 version 配置'}
+                ? t('train.pickerTitleConfigured')
+                : t('train.pickerTitleEmpty')}
             >
               <span className="text-[10px] uppercase tracking-[0.08em] text-fg-tertiary font-semibold">
-                配置
+                {t('train.configChip')}
               </span>
               <span className={[
                 'text-md font-semibold flex-1 text-left truncate',
                 configResp?.has_config ? 'text-fg-primary' : 'text-fg-tertiary',
               ].join(' ')}>
                 {configResp?.has_config
-                  ? `${project.title} / ${activeVersion.label} 配置`
-                  : '未配置 — 选预设作为起点'}
+                  ? t('train.scopedConfigLabel', { title: project.title, label: activeVersion.label })
+                  : t('train.notConfiguredLabel')}
               </span>
               <span className="text-fg-tertiary text-md">▾</span>
             </button>
@@ -467,9 +523,9 @@ export default function TrainPage() {
               onClick={() => void onSaveAsPreset()}
               disabled={busy || !configResp?.has_config}
               className="btn btn-ghost btn-sm"
-              title="把当前 version 配置另存为一个全局预设"
+              title={t('train.saveAsPresetTitle')}
             >
-              另存为新预设
+              {t('train.saveAsPreset')}
             </button>
 
             {/* popover */}
@@ -477,7 +533,7 @@ export default function TrainPage() {
               <div
                 ref={pickerPopRef}
                 role="dialog"
-                aria-label="切换预设"
+                aria-label={t('train.presetLabel')}
                 className="absolute top-[calc(100%+6px)] left-0 w-[480px] max-h-[480px] overflow-hidden rounded-md border border-subtle bg-surface shadow-lg flex flex-col z-50"
               >
                 {/* search */}
@@ -491,7 +547,7 @@ export default function TrainPage() {
                     <input
                       autoFocus
                       className="input w-full pl-7 text-sm"
-                      placeholder="筛选预设…"
+                      placeholder={t('train.filterPresets')}
                       value={pickerSearch}
                       onChange={(e) => setPickerSearch(e.target.value)}
                     />
@@ -514,7 +570,7 @@ export default function TrainPage() {
                           'bg-transparent text-sm font-semibold',
                         ].join(' ')}
                       >
-                        + 新建预设
+                        {t('train.newPreset')}
                       </button>
                     )}
                     {filteredPresets.map((p) => {
@@ -533,7 +589,7 @@ export default function TrainPage() {
                         >
                           <div className="text-sm font-mono font-semibold truncate text-fg-primary">{p.name}</div>
                           <div className="text-xs text-fg-tertiary mt-0.5">
-                            读取此预设参数
+                            {t('train.readPresetParams')}
                           </div>
                         </button>
                       )
@@ -541,7 +597,7 @@ export default function TrainPage() {
                   </div>
                   {presets.length > 0 && filteredPresets.length === 0 && (
                     <div className="text-fg-tertiary text-sm text-center py-4">
-                      没有匹配「{pickerSearch}」
+                      {t('train.noMatch', { search: pickerSearch })}
                     </div>
                   )}
                 </div>
@@ -557,7 +613,7 @@ export default function TrainPage() {
                   <div className="rounded-md border border-subtle bg-surface px-3.5 py-2.5">
                     <div className="flex gap-2.5">
                       <label className="flex-1 flex flex-col gap-1">
-                        <span className="text-sm font-medium text-fg-secondary">预设名称</span>
+                        <span className="text-sm font-medium text-fg-secondary">{t('train.presetName')}</span>
                         <input
                           autoFocus
                           className="input input-mono font-mono"
@@ -571,10 +627,10 @@ export default function TrainPage() {
                         )}
                       </label>
                       <label className="flex-[1.5] flex flex-col gap-1">
-                        <span className="text-sm font-medium text-fg-secondary">描述 / 副标题</span>
+                        <span className="text-sm font-medium text-fg-secondary">{t('train.presetDesc')}</span>
                         <input
                           className="input"
-                          placeholder="（可选）显示在预设卡片上的副标题"
+                          placeholder={t('train.descPlaceholder')}
                           value={newPresetDesc}
                           onChange={(e) => setNewPresetDesc(e.target.value)}
                           disabled={busy}
@@ -591,6 +647,7 @@ export default function TrainPage() {
                       disabledFields={disabledFields}
                       disabledHints={disabledHints}
                       autoHints={autoHints}
+                      fieldSuffixes={makeResetSuffixes(newPresetConfig, setNewPresetConfig)}
                       advancedMode={advancedMode}
                     />
                   </div>
@@ -601,23 +658,23 @@ export default function TrainPage() {
                       disabled={busy}
                       className="btn btn-primary"
                     >
-                      {busy ? '保存中…' : '创建并套用到当前 version'}
+                      {busy ? t('train.savingBtn') : t('train.createAndApply')}
                     </button>
                     <button
                       onClick={cancelCreatePreset}
                       disabled={busy}
                       className="btn btn-ghost"
                     >
-                      取消
+                      {t('common.cancel')}
                     </button>
                   </div>
                 </div>
               </section>
             ) : configResp === null || !schema ? (
-              <ConfigSkeleton label="加载训练配置中" />
+              <ConfigSkeleton label={t('train.loadingConfig')} />
             ) : !configResp.has_config ? (
               <div className="flex-1 flex items-center justify-center text-fg-tertiary text-sm rounded-md border border-dashed border-dim">
-                请从上方预设卡片选择一个，复制进当前 version 后即可编辑配置。
+                {t('train.noConfigHint')}
               </div>
             ) : config ? (
               <section className="flex-1 min-h-0 overflow-y-auto pr-1">
@@ -628,14 +685,14 @@ export default function TrainPage() {
                       onClick={() => !advancedMode || toggleAdvancedMode()}
                       className={`px-3 py-1 transition-colors ${!advancedMode ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-subtle'}`}
                     >
-                      简单
+                      {t('train.simpleMode')}
                     </button>
                     <button
                       type="button"
                       onClick={() => advancedMode || toggleAdvancedMode()}
                       className={`px-3 py-1 transition-colors ${advancedMode ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-subtle'}`}
                     >
-                      高级
+                      {t('train.advancedMode')}
                     </button>
                   </div>
                 </div>
@@ -646,11 +703,12 @@ export default function TrainPage() {
                   disabledFields={disabledFields}
                   disabledHints={disabledHints}
                   autoHints={autoHints}
+                  fieldSuffixes={makeResetSuffixes(config, setConfigSync)}
                   advancedMode={advancedMode}
                 />
               </section>
             ) : (
-              <ConfigSkeleton label="加载训练配置中" />
+              <ConfigSkeleton label={t('train.loadingConfig')} />
             )}
           </div>
 
@@ -701,6 +759,7 @@ function DatasetStatsPanel({
   reg: RegStatus | null
   config: ConfigData | null
 }) {
+  const { t } = useTranslation()
   const trainFolders = activeVersion?.stats?.train_folders ?? []
   const regFolders = useMemo(
     () => (reg && reg.exists ? aggregateRegFolders(reg.files) : []),
@@ -741,14 +800,14 @@ function DatasetStatsPanel({
       <div className="rounded-md border border-subtle bg-surface px-3 py-2.5">
         <div className="flex items-center gap-1.5 mb-2.5">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
-          <span className="caption uppercase tracking-[0.06em] text-xs">训练集参数</span>
+          <span className="caption uppercase tracking-[0.06em] text-xs">{t('train.statsTitle')}</span>
         </div>
 
         <FolderSection
           title="train/"
           folders={trainFolders}
           effective={trainEffective}
-          empty="无训练图"
+          empty={t('train.noTrainImages')}
         />
 
         <div className="h-2" />
@@ -757,29 +816,29 @@ function DatasetStatsPanel({
           title="reg/"
           folders={regFolders}
           effective={regEffective}
-          empty={reg && !reg.exists ? '未生成' : '无正则图'}
+          empty={reg && !reg.exists ? t('train.regNotBuilt') : t('train.noRegImages')}
         />
 
         {/* 总计 + 步数估算（不含 AR bucketing 误差） */}
         <div className="mt-2.5 pt-2 border-t border-subtle flex flex-col gap-1 text-xs">
-          <Row label="有效样本/epoch" value={String(totalEffective)} bold />
+          <Row label={t('train.effectiveSamples')} value={String(totalEffective)} bold />
           {stepsPerEpoch !== null && (
             <Row
               label={`÷ batch × ga (${bs} × ${ga})`}
-              value={`≈ ${stepsPerEpoch} 步/epoch`}
+              value={`≈ ${stepsPerEpoch} steps/epoch`}
               dim
             />
           )}
           {naturalTotal !== null && (
             <Row
               label={`× epochs (${epochs})`}
-              value={`≈ ${naturalTotal} 步`}
+              value={`≈ ${naturalTotal} steps`}
               dim
             />
           )}
           {finalTotal !== null && (
             <Row
-              label={maxStepsTruncates ? `max_steps 上限 ${maxSteps}` : '总步数'}
+              label={maxStepsTruncates ? t('train.maxStepsLabel', { n: maxSteps }) : t('train.totalSteps')}
               value={`≈ ${finalTotal}`}
               bold
             />
@@ -820,7 +879,7 @@ function FolderSection({
               <div
                 key={f.name}
                 className="flex items-baseline gap-1.5 text-xs font-mono text-fg-secondary pl-1"
-                title={`${f.name}：${repeat} repeat × ${f.image_count} 图 = ${eff}`}
+                title={`${f.name}：${repeat} repeat × ${f.image_count} = ${eff}`}
               >
                 <span className="text-fg-tertiary">{label}</span>
                 <span className="flex-1 border-b border-dotted border-subtle self-end mb-1" />

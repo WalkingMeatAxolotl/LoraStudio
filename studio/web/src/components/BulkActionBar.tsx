@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import TagAutocomplete from './TagAutocomplete'
 import { useToast } from './Toast'
 
@@ -12,7 +13,6 @@ interface Props {
   tagSuggestions?: string[]
   defaultScope?: ScopeKind
   onClearSelection?: () => void
-  // filter/select controls (moved from sidebar)
   filterTag: string
   onFilterTagChange: (v: string) => void
   filteredKeys: string[]
@@ -26,6 +26,7 @@ export default function BulkActionBar({
   tagSuggestions = [], defaultScope = 'selected', onClearSelection,
   filterTag, onFilterTagChange, filteredKeys, totalCount, filteredCount, onSelectAll,
 }: Props) {
+  const { t } = useTranslation()
   const { toast } = useToast()
   const [openOp, setOpenOp] = useState<Op | null>(null)
   const [scope, setScope] = useState<ScopeKind>(defaultScope)
@@ -52,10 +53,10 @@ export default function BulkActionBar({
     if (keys.length === 0) {
       toast(
         scope === 'selected'
-          ? '当前没有选中文件'
+          ? t('bulkAction.noFiles')
           : scope === 'filtered'
-            ? '当前筛选结果为空'
-            : '当前没有图片',
+            ? t('bulkAction.noFilteredFiles')
+            : t('bulkAction.noImages'),
         'error',
       )
       return
@@ -64,7 +65,7 @@ export default function BulkActionBar({
 
     if (op === 'add' || op === 'remove') {
       const ts = parseTags(tagsInput)
-      if (ts.length === 0) { toast('请输入至少一个 tag', 'error'); return }
+      if (ts.length === 0) { toast(t('bulkAction.enterTag'), 'error'); return }
       for (const k of keys) {
         const cur = cache.get(k) ?? []
         if (op === 'add') {
@@ -80,7 +81,7 @@ export default function BulkActionBar({
       }
     } else if (op === 'replace') {
       const o = oldTag.trim(); const n = newTag.trim()
-      if (!o || !n) { toast('replace 需要 old / new', 'error'); return }
+      if (!o || !n) { toast(t('bulkAction.replaceNeedsOldNew'), 'error'); return }
       for (const k of keys) {
         const cur = cache.get(k) ?? []
         if (!cur.includes(o)) continue
@@ -102,9 +103,9 @@ export default function BulkActionBar({
       }
     }
 
-    if (updates.size === 0) { toast(`${op}：无改动`, 'success'); closePopover(); return }
+    if (updates.size === 0) { toast(t('bulkAction.noChanges', { op }), 'success'); closePopover(); return }
     onApply(updates)
-    toast(`${op} 完成（${updates.size} 张待保存）`, 'success')
+    toast(t('bulkAction.applyDone', { op, n: updates.size }), 'success')
     closePopover()
   }
 
@@ -114,19 +115,17 @@ export default function BulkActionBar({
     (scope === 'filtered' && filteredKeys.length === 0) ||
     (scope === 'all' && cache.size === 0)
   const filteredScopeLabel = filterTag
-    ? `当前筛选（${filteredCount}）`
-    : `当前列表（${filteredCount}）`
+    ? t('bulkAction.scopeFiltered', { n: filteredCount })
+    : t('bulkAction.scopeCurrentList', { n: filteredCount })
 
   return (
     <div className="rounded-md border border-subtle bg-surface px-3 py-2 flex flex-col gap-1.5 text-xs shrink-0">
-      {/* Main row: filter + select + bulk ops */}
       <div className="flex items-center gap-1.5 flex-wrap">
-        {/* Filter section */}
         <TagAutocomplete
           value={filterTag}
           onChange={onFilterTagChange}
           suggestions={tagSuggestions}
-          placeholder="搜索 tag（精确）"
+          placeholder={t('bulkAction.searchTag')}
           style={{ width: 180 }}
         />
         {filterTag && (
@@ -144,63 +143,59 @@ export default function BulkActionBar({
 
         <span className="text-dim">|</span>
 
-        {/* Selection section */}
         <button
           onClick={onSelectAll}
           disabled={filteredCount === 0}
           className="btn btn-ghost btn-sm"
         >
-          全选
+          {t('common.selectAll')}
         </button>
         <button
           onClick={onClearSelection}
           disabled={selectedKeys.length === 0}
           className="btn btn-ghost btn-sm"
         >
-          清空 ({selectedKeys.length})
+          {t('bulkAction.clearSelection', { n: selectedKeys.length })}
         </button>
 
         <span className="text-dim">|</span>
 
-        {/* Scope + bulk ops section */}
-        <span className="text-fg-tertiary">范围</span>
+        <span className="text-fg-tertiary">{t('bulkAction.scope')}</span>
         <select
           value={scope}
           onChange={(e) => setScope(e.target.value as ScopeKind)}
           className="input"
           style={{ fontSize: 'var(--t-xs)', padding: '2px 8px' }}
         >
-          <option value="selected">当前选中（{selectedKeys.length}）</option>
+          <option value="selected">{t('bulkAction.scopeSelected', { n: selectedKeys.length })}</option>
           <option value="filtered" disabled={filteredCount === 0}>{filteredScopeLabel}</option>
-          <option value="all">全部图片（{totalCount}）</option>
+          <option value="all">{t('bulkAction.scopeAllCount', { n: totalCount })}</option>
         </select>
 
         <span className="text-dim">|</span>
 
-        <OpBtn label="+ 加 tag" active={openOp === 'add'} disabled={opDisabled}
+        <OpBtn label={t('bulkAction.addTag')} active={openOp === 'add'} disabled={opDisabled}
           onClick={() => setOpenOp(openOp === 'add' ? null : 'add')} />
-        <OpBtn label="- 删 tag" active={openOp === 'remove'} disabled={opDisabled}
+        <OpBtn label={t('bulkAction.removeTag')} active={openOp === 'remove'} disabled={opDisabled}
           onClick={() => setOpenOp(openOp === 'remove' ? null : 'remove')} />
-        <OpBtn label="↔ replace" active={openOp === 'replace'} disabled={opDisabled}
+        <OpBtn label={t('bulkAction.replace')} active={openOp === 'replace'} disabled={opDisabled}
           onClick={() => setOpenOp(openOp === 'replace' ? null : 'replace')} />
-        <OpBtn label="dedupe" disabled={opDisabled} onClick={() => apply('dedupe')} />
+        <OpBtn label={t('bulkAction.dedupe')} disabled={opDisabled} onClick={() => apply('dedupe')} />
 
         <span className="flex-1" />
 
         {selectedKeys.length > 0 && (
           <span className="text-accent font-mono">
-            已选 {selectedKeys.length} 张
+            {t('bulkAction.selectedCount', { n: selectedKeys.length })}
           </span>
         )}
       </div>
 
-      {/* Hint row：进阶快捷键拆到第二行，避免单行 50+ 字过密 */}
       <div className="text-fg-tertiary text-[11px] flex flex-col gap-0.5">
-        <span>点击图片 = 查看大图并编辑 · 勾选 = 多选</span>
-        <span>Shift / Ctrl / ⌘ + 点击 = 快速多选</span>
+        <span>{t('bulkAction.hintClick')}</span>
+        <span>{t('bulkAction.hintShift')}</span>
       </div>
 
-      {/* Popover row */}
       {openOp && openOp !== 'dedupe' && (
         <div
           className="rounded-sm border border-subtle bg-sunken px-2.5 py-1.5 flex flex-wrap items-center gap-1.5"
@@ -209,7 +204,7 @@ export default function BulkActionBar({
         >
           {(openOp === 'add' || openOp === 'remove') && (
             <TagsField value={tagsInput} onChange={setTagsInput}
-              placeholder="tag1, tag2 (逗号分隔)" suggestions={tagSuggestions} />
+              placeholder={t('bulkAction.tagPlaceholder')} suggestions={tagSuggestions} />
           )}
           {openOp === 'add' && (
             <select
@@ -218,8 +213,8 @@ export default function BulkActionBar({
               className="input"
               style={{ fontSize: 'var(--t-xs)', padding: '2px 6px' }}
             >
-              <option value="front">插到开头</option>
-              <option value="back">追加到末尾</option>
+              <option value="front">{t('bulkAction.insertFront')}</option>
+              <option value="back">{t('bulkAction.appendBack')}</option>
             </select>
           )}
           {openOp === 'replace' && (
@@ -229,8 +224,8 @@ export default function BulkActionBar({
               <TagsField value={newTag} onChange={setNewTag} placeholder="new" suggestions={tagSuggestions} />
             </>
           )}
-          <button onClick={() => apply(openOp)} className="btn btn-primary btn-sm">执行</button>
-          <button onClick={closePopover} className="btn btn-ghost btn-sm" aria-label="关闭">✕</button>
+          <button onClick={() => apply(openOp)} className="btn btn-primary btn-sm">{t('common.execute')}</button>
+          <button onClick={closePopover} className="btn btn-ghost btn-sm" aria-label={t('common.close')}>✕</button>
         </div>
       )}
     </div>

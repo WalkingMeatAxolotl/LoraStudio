@@ -15,6 +15,40 @@ def _touch_image(folder: Path, name: str, size: int = 8) -> Path:
     return p
 
 
+def test_cached_latent_invalidates_when_resolution_bucket_changes(tmp_path: Path) -> None:
+    pytest.importorskip("torch")
+    from PIL import Image
+    import numpy as np
+
+    from runtime.training.dataset import BucketManager, CachedLatentDataset, ImageDataset
+
+    img_path = tmp_path / "0001.png"
+    Image.new("RGB", (1536, 1536), color=(255, 255, 255)).save(img_path)
+    img_path.with_suffix(".txt").write_text("1girl", encoding="utf-8")
+    npz_path = img_path.with_suffix(".npz")
+    np.savez(npz_path, latent=np.zeros((16, 1, 192, 192), dtype=np.float32), bucket_w=1536, bucket_h=1536)
+
+    bucket_mgr = BucketManager(1440)
+    expected_bucket = bucket_mgr.get_bucket(1536, 1536)
+    dataset = ImageDataset(tmp_path, 1440, bucket_mgr)
+    cached = object.__new__(CachedLatentDataset)
+    cached.base_dataset = dataset
+    cached.base_image_dataset = dataset
+    cached.np = np
+    cached.samples = dataset.samples
+    cached.cache_dir = None
+    cached.bucket_for_index = []
+
+    assert cached._is_cache_valid(img_path, npz_path) is False
+    np.savez(
+        npz_path,
+        latent=np.zeros((16, 1, expected_bucket[1] // 8, expected_bucket[0] // 8), dtype=np.float32),
+        bucket_w=expected_bucket[0],
+        bucket_h=expected_bucket[1],
+    )
+    assert cached._is_cache_valid(img_path, npz_path) is True
+
+
 def test_parse_repeat_kohya_prefix() -> None:
     assert datasets.parse_repeat("5_concept") == (5, "concept")
     assert datasets.parse_repeat("12_a_long_name") == (12, "a_long_name")

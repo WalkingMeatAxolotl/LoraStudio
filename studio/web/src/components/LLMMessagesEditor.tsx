@@ -16,6 +16,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { LLMMessage } from '../api/client'
 
 interface Props {
@@ -32,13 +33,14 @@ const roleStyles: Record<string, { bg: string; fg: string }> = {
   image:     { bg: 'var(--warn-soft)',   fg: 'var(--warn)' },
 }
 
-const roleHint: Record<string, string> = {
-  system:    '指令性 · 一般写一次',
-  user:      'few-shot 示例 / 任务描述',
-  assistant: 'few-shot 期望答案',
+const roleHintKeys: Record<string, string> = {
+  system: 'llmMessages.roleHintSystem',
+  user: 'llmMessages.roleHintUser',
+  assistant: 'llmMessages.roleHintAssistant',
 }
 
 export default function LLMMessagesEditor({ messages, onChange, disabled }: Props) {
+  const { t } = useTranslation()
   const idRefs = useRef<WeakMap<LLMMessage, string>>(new WeakMap())
   const seq = useRef(0)
   const idOf = (m: LLMMessage): string => {
@@ -97,6 +99,7 @@ export default function LLMMessagesEditor({ messages, onChange, disabled }: Prop
               disabled={disabled}
               onChange={(patch) => updateMsg(i, patch)}
               onDelete={() => deleteMsg(i)}
+              t={t}
             />
           ))}
         </SortableContext>
@@ -112,7 +115,7 @@ export default function LLMMessagesEditor({ messages, onChange, disabled }: Prop
           fontFamily: 'var(--font-mono)',
         }}
       >
-        + 添加消息
+        {t('llmMessages.addMessage')}
       </button>
     </div>
   )
@@ -124,12 +127,14 @@ function SortableMessage({
   onChange,
   onDelete,
   disabled,
+  t,
 }: {
   id: string
   message: LLMMessage
   onChange: (patch: Partial<LLMMessage>) => void
   onDelete: () => void
   disabled?: boolean
+  t: ReturnType<typeof useTranslation>['t']
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
   const style: React.CSSProperties = {
@@ -159,7 +164,7 @@ function SortableMessage({
           {...attributes}
           {...listeners}
           type="button"
-          aria-label="拖动调整位置"
+          aria-label={t('llmMessages.dragHandle')}
           disabled={disabled}
           className="cursor-grab text-fg-disabled select-none"
           style={{ fontFamily: 'var(--font-mono)', fontSize: 14 }}
@@ -179,7 +184,7 @@ function SortableMessage({
               letterSpacing: '0.06em',
             }}
           >
-            🖼 当前图片
+            {t('llmMessages.currentImage')}
           </span>
         ) : (
           <select
@@ -206,7 +211,7 @@ function SortableMessage({
           className="text-2xs text-fg-tertiary"
           style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}
         >
-          {isImage ? '打标时把图片塞入此位置 · 可拖动' : roleHint[message.role]}
+          {isImage ? t('llmMessages.imageHint') : t(roleHintKeys[message.role] ?? 'llmMessages.roleHintUser')}
         </span>
 
         {!isImage && (
@@ -216,8 +221,8 @@ function SortableMessage({
             disabled={disabled}
             className="ml-auto text-fg-tertiary hover:text-err hover:bg-err-soft border-0 bg-transparent"
             style={{ padding: '4px 6px', borderRadius: 'var(--r-sm)', fontSize: 12 }}
-            title="删除消息"
-            aria-label="删除消息"
+            title={t('llmMessages.deleteMessage')}
+            aria-label={t('llmMessages.deleteMessage')}
           >
             ✕
           </button>
@@ -247,9 +252,9 @@ function SortableMessage({
             style={{ fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}
           >
             <div>
-              占位：<b className="font-medium text-fg-secondary">current_image</b>
+              {t('llmMessages.placeholderLabel')}<b className="font-medium text-fg-secondary">current_image</b>
             </div>
-            <div>每次打标时被替换为正在处理的图片</div>
+            <div>{t('llmMessages.imageReplaceHint')}</div>
           </div>
         </div>
       ) : (
@@ -268,10 +273,10 @@ function SortableMessage({
           }}
           placeholder={
             message.role === 'system'
-              ? '系统提示，例如：You are an image captioning assistant...'
+              ? t('llmMessages.placeholderSystem')
               : message.role === 'user'
-                ? '（可选）用户内容 — few-shot 示例 / 任务描述'
-                : 'assistant 期望输出（few-shot 示例答案）'
+                ? t('llmMessages.placeholderUser')
+                : t('llmMessages.placeholderAssistant')
           }
         />
       )}

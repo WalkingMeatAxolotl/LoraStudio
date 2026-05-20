@@ -222,7 +222,7 @@ def test_put_config_invalid_data_400(client: TestClient, env) -> None:
         json={"name": "tpl"},
     )
     cfg = client.get(f"/api/projects/{pid}/versions/{vid}/config").json()["config"]
-    cfg["lora_rank"] = 99999  # 超出范围
+    cfg["lora_rank"] = 0  # ge=4 → 下限越界（lora_rank 故意没设上限，LoKr 全维度走大数）
     r = client.put(f"/api/projects/{pid}/versions/{vid}/config", json=cfg)
     assert r.status_code == 400
 

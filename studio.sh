@@ -130,6 +130,7 @@ else
     echo "[studio] No venv found. Creating venv/ via $BOOTSTRAP_PY ..."
     "$BOOTSTRAP_PY" -m venv venv || { echo "studio.sh: failed to create venv" >&2; exit 1; }
     PYTHON="venv/bin/python"
+
     _pip_install --upgrade pip || { echo "studio.sh: failed to upgrade pip" >&2; exit 1; }
 
     # GPU-aware torch first install (PR-S1a). Without this, requirements.txt's

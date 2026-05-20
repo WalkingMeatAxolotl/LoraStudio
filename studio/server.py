@@ -37,7 +37,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, model_validator
 
@@ -433,17 +433,33 @@ def download_preset(name: str) -> FileResponse:
 
 @app.post("/api/presets/import")
 async def import_preset(file: UploadFile = File(...)) -> dict[str, Any]:
-    """接 .yaml/.yml/.json 上传 → 解析 + schema 校验 → 返回 config + suggested_name。
+    """接 .yaml/.yml/.json 上传 → 解析 + schema 校验 → 落盘到 `suggested_name`。
 
-    不写盘 —— 让前端 draftSeed flow 拿 config + suggested 进新建模式，
-    用户确认名字 + 编辑后再走 PUT /api/presets/{name}。
+    无冲突 → write_preset 直接写,返回 200 `{name, path}`。
+    冲突(`suggested_name.yaml` 已存在)→ 409 + 结构化 detail
+    `{message, config, suggested_name}`,前端 ImportConflictDialog 让用户选
+    覆盖 / 另存为 / 取消,选定后走 PUT /api/presets/{name} 完成落盘。
+    解析/校验失败 → 400/422。
     """
     raw = await file.read()
     try:
         config, suggested = presets_io.parse_preset_bytes(raw, file.filename or "")
     except presets_io.PresetError as exc:
         raise HTTPException(status_code=_err_code(exc), detail=str(exc)) from exc
-    return {"config": config, "suggested_name": suggested}
+    if presets_io.preset_path(suggested).exists():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"预设已存在: {suggested}",
+                "config": config,
+                "suggested_name": suggested,
+            },
+        )
+    try:
+        path = presets_io.write_preset(suggested, config)
+    except presets_io.PresetError as exc:
+        raise HTTPException(status_code=_err_code(exc), detail=str(exc)) from exc
+    return {"name": suggested, "path": str(path)}
 
 
 def _err_code(exc: presets_io.PresetError) -> int:
@@ -508,6 +524,17 @@ class ModelDownloadRequest(BaseModel):
 def get_models_catalog() -> dict[str, Any]:
     """前端设置页 Models 区块用：列已知模型 + 各自磁盘状态 + 当前下载状态。"""
     return model_downloader.build_catalog()
+
+
+@app.get("/api/models/path-defaults")
+def get_models_path_defaults() -> dict[str, str]:
+    """当前 Settings 算出的 4 个模型字段绝对路径。
+
+    给预设页 reset 按钮和「新建预设」初始填充用——这两个场景没有 project
+    上下文，拿不到 /api/projects/{pid}/versions/{vid}/config 里的
+    project_specific_defaults，所以单独开一个端点。
+    """
+    return model_downloader.default_paths_for_new_version()
 
 
 @app.post("/api/models/download")
@@ -621,6 +648,7 @@ class VersionUpdate(BaseModel):
     note: Optional[str] = None
     stage: Optional[str] = None
     config_name: Optional[str] = None
+    trigger_word: Optional[str] = None
 
 
 def _project_payload(p: dict[str, Any]) -> dict[str, Any]:
@@ -856,6 +884,10 @@ def export_version_train_zip(
 
     实现：写到临时文件再 FileResponse；响应发完后 BackgroundTasks 清理。
     与 outputs.zip 一致用 ZIP_STORED（PNG/jpg 已压缩，再压只是浪费 CPU）。
+
+    打包完成 / 失败 publish version_train_zip_ready / _failed —— 前端用 <a>
+    直链触发下载（浏览器原生进度条），SSE 事件用于清 app-side "打包中..." 状态
+    + 失败时弹 toast。和 outputs.zip 一套范式。
     """
     import tempfile
 
@@ -873,11 +905,28 @@ def export_version_train_zip(
             train_io.export_train(conn, vid, tmp_path)
         except train_io.TrainIOError as exc:
             tmp_path.unlink(missing_ok=True)
+            bus.publish({
+                "type": "version_train_zip_failed",
+                "project_id": pid,
+                "version_id": vid,
+                "error": str(exc),
+            })
             raise HTTPException(400, str(exc)) from exc
-        except Exception:
+        except Exception as exc:
             tmp_path.unlink(missing_ok=True)
+            bus.publish({
+                "type": "version_train_zip_failed",
+                "project_id": pid,
+                "version_id": vid,
+                "error": str(exc),
+            })
             raise
 
+    bus.publish({
+        "type": "version_train_zip_ready",
+        "project_id": pid,
+        "version_id": vid,
+    })
     background.add_task(lambda: tmp_path.unlink(missing_ok=True))
     archive_name = f"{p['slug']}-{v['label']}.train.zip"
     return FileResponse(
@@ -1622,6 +1671,9 @@ class LLMTaggerOverrides(BaseModel):
     max_tokens: Optional[int] = None
     timeout: Optional[int] = None
     max_retries: Optional[int] = None
+    concurrency: Optional[int] = None
+    requests_per_second: Optional[float] = None
+    max_requests_per_minute: Optional[int] = None
     max_side: Optional[int] = None
     jpeg_quality: Optional[int] = None
     max_image_mb: Optional[float] = None
@@ -1633,6 +1685,9 @@ class TagJobRequest(BaseModel):
     wd14_overrides: Optional[Wd14Overrides] = None
     cltagger_overrides: Optional[CLTaggerOverrides] = None
     llm_overrides: Optional[LLMTaggerOverrides] = None
+    # 触发词；空串 / None = 不启用。打标时作为第一个 tag prepend 到 caption；
+    # 同时持久化到 version.trigger_word，后续 train 阶段从私有 yaml 读出。
+    trigger_word: Optional[str] = None
 
 
 class LLMModelsRefreshRequest(BaseModel):
@@ -1949,11 +2004,18 @@ def start_tag(pid: int, vid: int, body: TagJobRequest) -> dict[str, Any]:
         raise HTTPException(400, "output_format must be txt|json")
     _, v, _ = _version_train_dir_or_404(pid, vid)
 
+    # 触发词：先 strip，落到 version 表（持久化，TagEdit / Train 都能读），再
+    # 顺手放进 worker params。body.trigger_word=None 表示前端没传字段（不改
+    # version 现有值）；空串 "" 表示用户主动清空。
+    trigger_word = body.trigger_word.strip() if body.trigger_word is not None else None
+
     params: dict[str, Any] = {
         "tagger": body.tagger,
         "version_id": vid,
         "output_format": body.output_format,
     }
+    if trigger_word:
+        params["trigger_word"] = trigger_word
     # 通用：按 tagger 名取 `<name>_overrides` 字段并落到 params 同名键。
     # 仅保留用户实际填写的字段；空 dict 也不写。
     overrides_field = getattr(body, f"{body.tagger}_overrides", None)
@@ -1963,6 +2025,10 @@ def start_tag(pid: int, vid: int, body: TagJobRequest) -> dict[str, Any]:
             params[f"{body.tagger}_overrides"] = ov
 
     with db.connection_for() as conn:
+        if trigger_word is not None and trigger_word != (v.get("trigger_word") or ""):
+            updated = versions.update_version(conn, vid, trigger_word=trigger_word)
+            _publish_version_state(updated)
+            v = updated
         job = project_jobs.create_job(
             conn,
             project_id=pid,
@@ -2812,8 +2878,16 @@ class ImportRequest(BaseModel):
 
 
 @app.get("/api/queue/export")
-def export_queue(ids: str = "") -> dict[str, Any]:
-    """`?ids=1,2,3` 指定导出的任务，缺省导出全部。"""
+def export_queue(ids: str = "") -> Response:
+    """`?ids=1,2,3` 指定导出的任务，缺省导出全部。
+
+    响应带 `Content-Disposition: attachment` —— 前端 <a download> 直链就能触发
+    浏览器原生下载（和 train.zip / outputs.zip 一套范式）。导出/失败 publish
+    queue_export_ready / _failed SSE，前端用来清 app-side spinner + 弹 toast。
+    body 仍是合法 JSON，tests / 程序化调用方拿 resp.json() 不受影响。
+    """
+    import json as _json
+
     if ids.strip():
         try:
             id_list = [int(x) for x in ids.split(",") if x.strip()]
@@ -2822,7 +2896,20 @@ def export_queue(ids: str = "") -> dict[str, Any]:
     else:
         with db.connection_for() as conn:
             id_list = [t["id"] for t in db.list_tasks(conn)]
-    return queue_io.export_tasks(id_list)
+    try:
+        payload = queue_io.export_tasks(id_list)
+    except Exception as exc:
+        bus.publish({"type": "queue_export_failed", "error": str(exc)})
+        raise
+
+    body = _json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    filename = f"queue_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+    bus.publish({"type": "queue_export_ready"})
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.post("/api/queue/import")
@@ -2850,6 +2937,14 @@ def list_queue(
         items = db.list_tasks(conn, status=status)
     if not include_generate:
         items = db.filter_out_task_types(items, ("generate",))
+    # ADR 0006 PR-4 — is_pausable 信号每行注入（§8.1 / 上面 get_queue_item 注释）
+    try:
+        sup = _supervisor()
+        for it in items:
+            it["is_pausable"] = sup.is_task_pausable(int(it["id"]))
+    except HTTPException:
+        for it in items:
+            it["is_pausable"] = False
     return {"items": items}
 
 
@@ -2876,6 +2971,12 @@ def get_queue_item(task_id: int) -> dict[str, Any]:
         task = db.get_task(conn, task_id)
     if not task:
         raise HTTPException(404)
+    # ADR 0006 PR-4 — is_pausable 信号让 UI 决定是否显示暂停按钮（§8.1）。
+    # 仅 supervisor 跑得起来时计算；空载（test / 启动期）默认 False。
+    try:
+        task["is_pausable"] = _supervisor().is_task_pausable(task_id)
+    except HTTPException:
+        task["is_pausable"] = False
     return task
 
 
@@ -2891,6 +2992,110 @@ def cancel_task(task_id: int) -> dict[str, Any]:
             raise HTTPException(400, f"task already {task['status']}")
         raise HTTPException(409, "cancel rejected (state mismatch)")
     return {"task_id": task_id, "canceled": True}
+
+
+# ---------------------------------------------------------------------------
+# ADR 0006 — pause / resume / hold endpoints。
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/queue/{task_id}/pause")
+def pause_task(task_id: int) -> dict[str, Any]:
+    """暂停 running task（ADR §4.1 / §4.3）。
+
+    异步：立即返回；UI 端 modal 订阅 SSE 看保存进度。supervisor 收到子进程
+    `__EVENT__:pause_state` 后把 status 写为 paused 并 publish task_state_changed。
+    """
+    ok, reason = _supervisor().pause(task_id)
+    if not ok:
+        # 区分客户端错误（404/409）vs 状态机不允许（409）
+        with db.connection_for() as conn:
+            task = db.get_task(conn, task_id)
+        if not task:
+            raise HTTPException(404, "task not found")
+        raise HTTPException(409, reason or "pause rejected")
+    return {"task_id": task_id, "pause_pending": True}
+
+
+@app.get("/api/queue/hold")
+def get_queue_hold() -> dict[str, Any]:
+    """查看当前队列挂起状态 + 等待恢复调度的 pending task 数（UI banner 用）。"""
+    with db.connection_for() as conn:
+        held = db.get_queue_held(conn)
+        pending = db.list_tasks(conn, status="pending")
+    return {"held": held, "pending_waiting": len(pending)}
+
+
+@app.post("/api/queue/hold")
+def hold_queue() -> dict[str, Any]:
+    """挂起队列：dispatcher 不再拉新 task。已 running 的不受影响（ADR §3.2）。
+
+    "同时暂停 running task" 由前端 modal 拆成两步：先调本 endpoint，再
+    单独调 `/api/queue/{id}/pause`。后端不做合一操作。
+    """
+    with db.connection_for() as conn:
+        db.set_queue_held(conn, True)
+    bus.publish({"type": "queue_hold_changed", "held": True})
+    return {"held": True}
+
+
+@app.post("/api/queue/release")
+def release_queue() -> dict[str, Any]:
+    """恢复调度：dispatcher 重新按 priority + created_at 拉 pending。"""
+    with db.connection_for() as conn:
+        db.set_queue_held(conn, False)
+    bus.publish({"type": "queue_hold_changed", "held": False})
+    return {"held": False}
+
+
+@app.post("/api/queue/{task_id}/resume")
+def resume_task(task_id: int) -> dict[str, Any]:
+    """恢复 paused task（ADR 0006 §6 路径 A）。
+
+    流程：
+      1. 校验 status == 'paused' + paused_state_path 文件存在
+      2. task → pending（**保留 paused_* 字段**，cmd_builder 下轮 dispatch 读它）
+      3. supervisor 下次 _tick 自然 pick up，cmd 加 `--resume-state <pt>`，
+         bootstrap_phase 读 sibling .config.json snapshot 覆盖 args
+      4. 子进程 load_training_state 成功后 emit `resume_state_loaded` →
+         supervisor `_clear_pause_artifacts` 清文件对 + db 字段
+
+    文件丢失 → 409（ADR §5.5：引导用户走 ResumeFieldPicker 起新 task）。
+    """
+    with db.connection_for() as conn:
+        task = db.get_task(conn, task_id)
+        if not task:
+            raise HTTPException(404, "task not found")
+        if task["status"] != "paused":
+            raise HTTPException(
+                409, f"task status is {task['status']!r}, not paused"
+            )
+        state_path = task.get("paused_state_path")
+        config_path = task.get("paused_config_path")
+        if not state_path or not Path(state_path).exists():
+            raise HTTPException(
+                409,
+                f"paused state file missing: {state_path!r}; "
+                f"use ResumeFieldPicker to start a fresh task from another .pt",
+            )
+        if config_path and not Path(config_path).exists():
+            # snapshot 缺失虽然不致命（bootstrap_phase 会沿用 args.config yaml），
+            # 但 resume 语义会漂；按 ADR §5.7 严格 freeze 原则，拒绝继续。
+            raise HTTPException(
+                409,
+                f"paused config snapshot missing: {config_path!r}; "
+                f"cannot guarantee config freeze, refusing to resume",
+            )
+        db.update_task(
+            conn, task_id,
+            status="pending",
+            started_at=None,
+            finished_at=None,
+            exit_code=None,
+            error_msg=None,
+        )
+    bus.publish({"type": "task_state_changed", "task_id": task_id, "status": "pending"})
+    return {"task_id": task_id, "status": "pending"}
 
 
 @app.post("/api/queue/{task_id}/retry")
@@ -3191,12 +3396,17 @@ def get_datasets(path: str = "") -> dict[str, Any]:
 
 @app.get("/api/browse")
 def browse_dir(path: str = "") -> dict[str, Any]:
-    """目录浏览（给前端 path picker 用）。缺省 = REPO_ROOT。"""
+    """目录浏览（给前端 path picker 用）。缺省 = REPO_ROOT。
+
+    PathPicker 设计本就是给用户选外部模型路径用的（云端机器把模型放数据盘），
+    所以这里 allow_outside_repo=True；安全边界在 list_dir 本身（只读 entries
+    名字+类型，不返回内容）。
+    """
     target = Path(path) if path else REPO_ROOT
     if not target.is_absolute():
         target = (REPO_ROOT / target).resolve()
     try:
-        return browse.list_dir(target)
+        return browse.list_dir(target, allow_outside_repo=True)
     except browse.BrowseError as exc:
         raise HTTPException(404, str(exc)) from exc
 

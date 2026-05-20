@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api, type DaemonStatus } from '../../../api/client'
 import { useEventStream } from '../../../lib/useEventStream'
 import { useToast } from '../../../components/Toast'
@@ -9,6 +10,7 @@ import { useToast } from '../../../components/Toast'
  * 不要时刻显示状态文字，需要释放 VRAM 时按按钮就行。
  */
 export default function DaemonControls() {
+  const { t } = useTranslation()
   const { toast } = useToast()
   const [status, setStatus] = useState<DaemonStatus | null>(null)
   const [unloading, setUnloading] = useState(false)
@@ -35,9 +37,9 @@ export default function DaemonControls() {
     try {
       const r = await api.unloadDaemon()
       if (r.noop) {
-        toast('显存已释放（模型未加载）', 'info')
+        toast(t('generate.vramAlreadyFree'), 'info')
       } else {
-        toast('已请求清理显存', 'success')
+        toast(t('generate.vramUnloadRequested'), 'success')
       }
     } catch (e) {
       toast(String(e), 'error')
@@ -54,13 +56,13 @@ export default function DaemonControls() {
       onClick={handleUnload}
       disabled={!canUnload || unloading}
       title={
-        !status ? '加载状态中…'
-          : status.busy ? '生成中不可清理'
-            : !status.model_loaded ? '模型未加载，无需清理'
-              : '释放推理 daemon 占用的 VRAM；下次出图按需重 load'
+        !status ? t('generate.daemonLoading')
+          : status.busy ? t('generate.daemonBusy')
+            : !status.model_loaded ? t('generate.daemonNoModel')
+              : t('generate.daemonUnloadTitle')
       }
     >
-      {unloading ? '清理中…' : '清理显存'}
+      {unloading ? t('generate.unloadingVram') : t('generate.unloadVram')}
     </button>
   )
 }

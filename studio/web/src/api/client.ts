@@ -40,6 +40,8 @@ export interface SchemaProperty {
    * 表达式语法与 show_when 一致：`key==value` / `key!=value`。
    * 例：lr_scheduler 在 optimizer_type=prodigy_plus_schedulefree 时被 disable。 */
   disable_when?: string
+  /** disable_when 触发时写回的值；缺省回退到 default。 */
+  disable_value?: unknown
   /** disable_when 触发时显示的提示徽章文本。 */
   disable_hint?: string
   /** 条件说明文字：当 alt_description_when 表达式为真时，替换 description 显示。 */
@@ -162,6 +164,9 @@ export interface LLMPreset {
   max_image_mb: number
   timeout: number
   max_retries: number
+  concurrency: number
+  requests_per_second: number
+  max_requests_per_minute: number
 }
 
 export interface LLMTaggerConfig {
@@ -317,6 +322,10 @@ export const DEFAULT_WD14_MODELS: readonly string[] = [
 ]
 
 export interface ModelsConfig {
+  /** fork 预设到 version 时是否自动用全局模型路径覆盖 4 个模型字段。
+   * ON（默认）：多数用户场景，4 字段在 UI 上 disabled；fork 始终用 Settings 全局。
+   * OFF：独立模型用户，fork 尊重预设值，4 字段可编辑 + picker。 */
+  auto_sync_paths: boolean
   /** 训练模型根目录；null/空 → 回退 REPO_ROOT/models/（云端机改这里） */
   root: string | null
   /** 当前默认主模型 variant（1.0 / preview3-base / preview2 / preview）。
@@ -545,6 +554,8 @@ export interface Version {
   created_at: number
   output_lora_path: string | null
   note: string | null
+  /** 触发词；由 Step 4 (Tagging) 写入，打标时 prepend 到每张 caption；空串=未启用。 */
+  trigger_word: string
   stats?: VersionStats
 }
 
@@ -922,7 +933,13 @@ export interface XformersInstallResult {
   restart_required: boolean
 }
 
-export type TaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'canceled'
+export type TaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'canceled' | 'paused'
+
+/** Terminal task statuses — UI 一般禁用这些上的操作按钮（cancel / pause 等）。
+ *  `paused` **不**进 terminal — 它可被 resume 复活。 */
+export const TERMINAL_TASK_STATUSES: ReadonlyArray<TaskStatus> = [
+  'done', 'failed', 'canceled',
+]
 
 export interface Task {
   id: number
@@ -945,6 +962,24 @@ export interface Task {
   config_path?: string | null
   /** PP6.1 — per-task monitor state.json 路径。 */
   monitor_state_path?: string | null
+  /** ADR 0006 PR-2 — paused task 的 .pt 文件路径（pause_step_<N>.pt）。 */
+  paused_state_path?: string | null
+  /** ADR 0006 PR-2 — paused task 的 config snapshot 路径（pause_step_<N>.config.json）。 */
+  paused_config_path?: string | null
+  /** ADR 0006 PR-2 — paused 时的 global_step（UI "在 step N 暂停于 …" 显示）。 */
+  paused_step?: number | null
+  /** ADR 0006 PR-2 — paused 时间（unix 秒）。 */
+  paused_at?: number | null
+  /** ADR 0006 PR-4 — is_pausable 信号（§8.1）：UI 用来决定是否显示暂停
+   *  按钮。supervisor 跑得起来时由 server enrich；空载默认 false。 */
+  is_pausable?: boolean
+}
+
+/** ADR 0006 PR-2 — GET /api/queue/hold 返回。`held=true` 时 UI 顶部
+ *  banner sticky 显示；`pending_waiting` 是当前 pending 队列长度（提示用）。 */
+export interface QueueHoldState {
+  held: boolean
+  pending_waiting: number
 }
 
 export interface LogResponse {
@@ -1011,17 +1046,6 @@ export interface DatasetScan {
   weighted_steps_per_epoch?: number
 }
 
-export interface QueueExport {
-  version: number
-  exported_at: number
-  tasks: Array<{
-    name: string
-    config_name: string
-    priority: number
-    config: Record<string, unknown> | null
-  }>
-}
-
 export interface ImportResult {
   imported_count: number
   task_ids: number[]
@@ -1074,37 +1098,6 @@ async function req<T>(
   return (await resp.json()) as T
 }
 
-/**
- * 下载二进制为浏览器附件。fetch + blob，让调用方能用 setLoading 包起来显示进度。
- *
- * 用 `<a href download>` 直链虽然简单但点击瞬间就让浏览器接管，前端无法
- * 显示「打 zip 中...」之类的 loading 状态 —— 训练集 / output 几百 MB 时
- * 后端打 zip 要几秒到几十秒，loading 反馈很有必要。
- */
-export async function downloadBlob(url: string, filename: string): Promise<void> {
-  const resp = await fetch(url, { headers: { Accept: 'application/zip,application/octet-stream' } })
-  if (!resp.ok) {
-    let detail = `${resp.status} ${resp.statusText}`
-    try {
-      const body = await resp.json()
-      if (body?.detail) detail = body.detail
-    } catch {
-      // ignore
-    }
-    throw new Error(detail)
-  }
-  const blob = await resp.blob()
-  const objectUrl = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = objectUrl
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  // 让浏览器有机会发起下载后再 revoke
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
-}
-
 export const api = {
   health: () => req<HealthResponse>('/api/health'),
   systemStats: () => req<SystemStats>('/api/system/stats'),
@@ -1128,22 +1121,35 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ new_name: newName }),
     }),
-  /** 端到端文件上传：把 .yaml/.yml/.json 文件给后端 yaml + pydantic 校验，
-   *  返回 config + suggested_name，前端走 draftSeed flow 让用户改名 + 编辑后保存。
-   *  绕过 req() 的 JSON header，让浏览器自加 multipart boundary。 */
-  importPreset: async (file: File): Promise<{ config: ConfigData; suggested_name: string }> => {
+  /** 端到端文件上传：把 .yaml/.yml/.json 文件给后端解析 + schema 校验 + 直接落盘,
+   *  返回 {name, path}。前端拿到 name 直接 refreshList + setSelected(name) 即可。
+   *
+   *  冲突(同名 preset 已存在)→ 抛 ApiError(status=409),err.detail =
+   *  {message, config, suggested_name},call site 据此弹 ImportConflictDialog
+   *  让用户选覆盖 / 另存为,再走 PUT /api/presets/{name}。
+   *  绕过 req() 的 JSON header,让浏览器自加 multipart boundary。 */
+  importPreset: async (file: File): Promise<{ name: string; path: string }> => {
     const fd = new FormData()
     fd.append('file', file, file.name)
     const resp = await fetch('/api/presets/import', { method: 'POST', body: fd })
     if (!resp.ok) {
-      let detail = `${resp.status} ${resp.statusText}`
+      let message = `${resp.status} ${resp.statusText}`
+      let rawDetail: unknown = null
       try {
         const body = await resp.json()
-        if (body?.detail) detail = body.detail
-      } catch { /* ignore */ }
-      throw new Error(detail)
+        if (typeof body?.detail === 'string') {
+          message = body.detail
+        } else if (body?.detail && typeof body.detail === 'object') {
+          rawDetail = body.detail
+          message = (body.detail as { message?: string }).message ?? JSON.stringify(body.detail)
+        }
+      } catch { /* body 非 JSON,保留 statusText */ }
+      const err = new Error(message) as ApiError
+      err.status = resp.status
+      err.detail = rawDetail
+      throw err
     }
-    return (await resp.json()) as { config: ConfigData; suggested_name: string }
+    return (await resp.json()) as { name: string; path: string }
   },
 
   // 兼容别名：PP0 之前叫 listConfigs / getConfig / ...。保留一段时间。
@@ -1168,6 +1174,8 @@ export const api = {
 
   // Models management (PP7) ------------------------------------------------
   getModelsCatalog: () => req<ModelsCatalog>('/api/models/catalog'),
+  /** 当前 Settings 算出的 4 个模型字段绝对路径。预设页 reset / 新建用。 */
+  getModelPathDefaults: () => req<Record<string, string>>('/api/models/path-defaults'),
   startModelDownload: (body: { model_id: string; variant?: string }) =>
     req<{ key: string; status: string }>('/api/models/download', {
       method: 'POST',
@@ -1448,6 +1456,11 @@ export const api = {
       llm_overrides?:
         & { current_preset?: string }
         & Partial<Omit<LLMPreset, 'id' | 'label' | 'builtin' | 'api_key' | 'model_ids'>>
+      /**
+       * 触发词；空串 / undefined = 不启用。worker 端写 caption 时 prepend 为
+       * 第一个 tag，并同步落库到 version.trigger_word，后续 train 读出。
+       */
+      trigger_word?: string
     }
   ) =>
     req<Job>(`/api/projects/${pid}/versions/${vid}/tag`, {
@@ -1670,6 +1683,29 @@ export const api = {
     }),
   retryTask: (id: number) =>
     req<Task>(`/api/queue/${id}/retry`, { method: 'POST' }),
+  /** ADR 0006 — 暂停 running task。返回时 task 还在 running，需订阅 SSE
+   *  task_state_changed 看 status 转 paused。状态不对（非 running / train_loop
+   *  未启动）抛 409。 */
+  pauseTask: (id: number) =>
+    req<{ task_id: number; pause_pending: boolean }>(
+      `/api/queue/${id}/pause`,
+      { method: 'POST' },
+    ),
+  /** ADR 0006 PR-3 — 恢复 paused task。pause 文件缺失返 409 引导走
+   *  ResumeFieldPicker 起新 task。 */
+  resumeTask: (id: number) =>
+    req<{ task_id: number; status: string }>(
+      `/api/queue/${id}/resume`,
+      { method: 'POST' },
+    ),
+  /** ADR 0006 PR-2 — 查队列挂起状态 + 等待恢复调度的 pending 数。 */
+  getQueueHold: () => req<QueueHoldState>('/api/queue/hold'),
+  /** 挂起队列：dispatcher 不拉新 task，已 running 的不受影响。 */
+  holdQueue: () =>
+    req<{ held: boolean }>('/api/queue/hold', { method: 'POST' }),
+  /** 恢复调度：dispatcher 重新按优先级拉 pending。 */
+  releaseQueue: () =>
+    req<{ held: boolean }>('/api/queue/release', { method: 'POST' }),
   deleteTask: (id: number) =>
     req<{ deleted: number }>(`/api/queue/${id}`, { method: 'DELETE' }),
   /** 列 task 关联的 output 目录里所有文件（含 size/mtime/是否 lora）。
@@ -1734,7 +1770,8 @@ export const api = {
     req<XformersInstallResult>('/api/xformers/install', { method: 'POST' }),
 
   // PP7 — 训练集导出 / 导入 -----------------------------------------------
-  /** 当前 version 的 train/ 打包 zip 直链。用 downloadBlob() 调它显示 loading。 */
+  /** 当前 version 的 train/ 打包 zip 直链。<a href download> 触发即可,
+   * 后端 publish version_train_zip_ready/_failed SSE 供前端清 "打包中..." 状态。 */
   versionTrainZipUrl: (pid: number, vid: number) =>
     `/api/projects/${pid}/versions/${vid}/train.zip`,
   /** 上传训练集 zip → 新建 project + v1，返回新项目。 */
@@ -1782,9 +1819,12 @@ export const api = {
     `/samples/${filename}?task_id=${taskId}${w ? `&w=${w}` : ''}`,
 
   // Queue import / export ---------------------------------------------
-  exportQueue: (ids?: number[]) => {
+  /** 队列导出直链。响应带 Content-Disposition: attachment,<a href download>
+   * 触发就走浏览器原生下载。后端 publish queue_export_ready/_failed SSE
+   * 供前端清 app-side "导出中..." 状态。 */
+  queueExportUrl: (ids?: ReadonlyArray<number>) => {
     const qs = ids && ids.length ? `?ids=${ids.join(',')}` : ''
-    return req<QueueExport>(`/api/queue/export${qs}`)
+    return `/api/queue/export${qs}`
   },
   importQueue: (payload: unknown) =>
     req<ImportResult>('/api/queue/import', {
@@ -2008,4 +2048,6 @@ export interface BrowseResult {
   path: string
   parent: string | null
   entries: BrowseEntry[]
+  /** 若传入的是文件路径，后端会回退到父目录，并把文件名放在这里供 picker 高亮。 */
+  selected?: string | null
 }

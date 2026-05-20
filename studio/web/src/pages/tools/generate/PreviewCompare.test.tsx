@@ -72,7 +72,7 @@ describe('PreviewCompare', () => {
     expect(screen.getByText('B')).toBeInTheDocument()
   })
 
-  it('triggers onBack when 返回网格 clicked', async () => {
+  it('triggers onBack when Back to grid clicked', async () => {
     const user = userEvent.setup()
     const { onBack } = renderCompare()
     await user.click(screen.getByText(/返回网格/))

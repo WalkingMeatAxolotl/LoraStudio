@@ -218,6 +218,156 @@ def test_run_unknown_job(env) -> None:
     assert tag_worker.run(99999) == 1
 
 
+# ---------------------------------------------------------------------------
+# trigger_word (PR #102): tag worker 把 trigger 写为 caption 第一个 tag。
+# ---------------------------------------------------------------------------
+
+
+def _set_trigger(env, trigger: str) -> None:
+    with db.connection_for(env["db"]) as conn:
+        conn.execute(
+            "UPDATE project_jobs SET params = json_set(params, '$.trigger_word', ?) "
+            "WHERE id = ?",
+            (trigger, env["job_id"]),
+        )
+        conn.commit()
+
+
+def test_trigger_word_prepended_to_txt(env) -> None:
+    _set_trigger(env, "ohwx")
+    rc = tag_worker.run(env["job_id"])
+    assert rc == 0
+    # trigger 是第一个 tag；原始 tagger 给的 ["tag_a", "common"] 跟在后面
+    assert (env["train"] / "a.txt").read_text(encoding="utf-8") == "ohwx, tag_a, common"
+    assert (env["train"] / "b.txt").read_text(encoding="utf-8") == "ohwx, tag_b, common"
+
+
+def test_trigger_word_writes_meta_in_simple_json(env) -> None:
+    """fmt=json + tagger 只给 tags list（无 caption_json）→ meta.trigger 写入。"""
+    _set_trigger(env, "ohwx")
+    with db.connection_for(env["db"]) as conn:
+        conn.execute(
+            "UPDATE project_jobs SET params = json_set(params, '$.output_format', 'json') "
+            "WHERE id = ?",
+            (env["job_id"],),
+        )
+        conn.commit()
+    rc = tag_worker.run(env["job_id"])
+    assert rc == 0
+    data = json.loads((env["train"] / "a.json").read_text(encoding="utf-8"))
+    assert data["tags"] == ["ohwx", "tag_a", "common"]
+    assert data["meta"]["trigger"] == "ohwx"
+
+
+def test_trigger_word_writes_meta_in_llm_json(env, monkeypatch) -> None:
+    """LLM tagger + fmt=json → documented_full 增加顶层 meta.trigger。"""
+    _set_trigger(env, "ohwx")
+    monkeypatch.setattr(
+        "studio.workers.tag_worker.get_tagger",
+        lambda name, overrides=None: _FakeLLMTagger(),
+    )
+    with db.connection_for(env["db"]) as conn:
+        conn.execute(
+            "UPDATE project_jobs SET params = json_set(params, "
+            "'$.tagger', 'llm', '$.output_format', 'json') WHERE id = ?",
+            (env["job_id"],),
+        )
+        conn.commit()
+    rc = tag_worker.run(env["job_id"])
+    assert rc == 0
+    data = json.loads((env["train"] / "a.json").read_text(encoding="utf-8"))
+    # documented_full 主体不变
+    assert data["ai_output"]["count"] == "1girl"
+    # 顶层 meta.trigger 注入
+    assert data["meta"]["trigger"] == "ohwx"
+
+
+def test_trigger_word_prepended_to_llm_txt(env, monkeypatch) -> None:
+    """LLM tagger + fmt=txt → caption_text 前 prepend trigger。"""
+    _set_trigger(env, "ohwx")
+    monkeypatch.setattr(
+        "studio.workers.tag_worker.get_tagger",
+        lambda name, overrides=None: _FakeLLMTagger(),
+    )
+    with db.connection_for(env["db"]) as conn:
+        conn.execute(
+            "UPDATE project_jobs SET params = json_set(params, '$.tagger', 'llm') "
+            "WHERE id = ?",
+            (env["job_id"],),
+        )
+        conn.commit()
+    rc = tag_worker.run(env["job_id"])
+    assert rc == 0
+    assert (env["train"] / "a.txt").read_text(encoding="utf-8") == (
+        "ohwx, 1girl, watercolor, blue background. Soft watercolor style."
+    )
+
+
+def test_trigger_word_idempotent_when_already_present(env) -> None:
+    """tagger 已经返回了 trigger（边界情况）→ 不重复 prepend（case-insensitive）。"""
+
+    class _TaggerWithTrigger:
+        name = "wd14"
+        requires_service = False
+
+        def is_available(self):
+            return True, "ok"
+
+        def prepare(self):
+            pass
+
+        def tag(self, paths, on_progress=lambda d, t: None):
+            for p in paths:
+                yield {"image": p, "tags": ["OHWX", "common"]}  # 大小写不同
+
+    _set_trigger(env, "ohwx")
+    import studio.workers.tag_worker as _tw
+    orig = _tw.get_tagger
+    _tw.get_tagger = lambda name, overrides=None: _TaggerWithTrigger()
+    try:
+        rc = tag_worker.run(env["job_id"])
+    finally:
+        _tw.get_tagger = orig
+    assert rc == 0
+    # 原 "OHWX" 保留（不替换大小写），不再前置一份小写的 "ohwx"
+    assert (env["train"] / "a.txt").read_text(encoding="utf-8") == "OHWX, common"
+
+
+def test_trigger_word_empty_string_no_op(env) -> None:
+    """trigger_word="" → 与不传等效，输出和老行为一致。"""
+    _set_trigger(env, "")
+    rc = tag_worker.run(env["job_id"])
+    assert rc == 0
+    assert (env["train"] / "a.txt").read_text(encoding="utf-8") == "tag_a, common"
+
+
+def test_trigger_word_dataset_loader_sees_meta(env, tmp_path: Path) -> None:
+    """端到端：worker 写 meta.trigger → utils.caption_utils.build_caption_from_json
+    把 trigger 输出在第一位。验证 dataset 训练时确实拿到 trigger。"""
+    import sys
+
+    # 把仓库根加进 sys.path 让 `import utils.caption_utils` 工作
+    repo_root = Path(__file__).resolve().parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from utils.caption_utils import load_and_build_caption
+
+    _set_trigger(env, "ohwx")
+    with db.connection_for(env["db"]) as conn:
+        conn.execute(
+            "UPDATE project_jobs SET params = json_set(params, '$.output_format', 'json') "
+            "WHERE id = ?",
+            (env["job_id"],),
+        )
+        conn.commit()
+    rc = tag_worker.run(env["job_id"])
+    assert rc == 0
+    caption = load_and_build_caption(env["train"] / "a.json", shuffle=False)
+    assert caption is not None
+    # trigger 在第一位，后面跟原 tags
+    assert caption.startswith("ohwx,")
+
+
 def test_worker_imports_onnxruntime_setup_at_module_level() -> None:
     """worker 是独立 subprocess —— 必须在任何 `import onnxruntime` 之前触发
     onnxruntime_setup 的顶层 preload。回归测试：防止有人删掉那行 import 后

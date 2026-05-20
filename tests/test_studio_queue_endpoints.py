@@ -46,6 +46,9 @@ class _StubSupervisor:
             db.update_task(conn, task_id, status="canceled")
         self.canceled.append(task_id)
         return True
+    def is_task_pausable(self, task_id: int) -> bool:
+        # stub 不真启 supervisor 线程，所以也没机会收 train_loop_started 事件。
+        return False
 
 
 @pytest.fixture

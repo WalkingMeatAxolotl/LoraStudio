@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import i18n from '../i18n'
 
 interface State { error: Error | null }
 
@@ -18,7 +19,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
       return (
         <div className="min-h-screen flex items-center justify-center p-8 bg-canvas">
           <div className="card max-w-[560px] w-full p-6">
-            <h1 className="text-err font-semibold text-lg mb-2">应用初始化失败</h1>
+            <h1 className="text-err font-semibold text-lg mb-2">{i18n.t('errorBoundary.title')}</h1>
             <pre className="text-sm text-fg-secondary whitespace-pre-wrap break-all">
               {this.state.error.message}
             </pre>
@@ -26,7 +27,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
               className="btn btn-primary btn-sm mt-4"
               onClick={() => window.location.reload()}
             >
-              重新加载
+              {i18n.t('errorBoundary.reload')}
             </button>
           </div>
         </div>

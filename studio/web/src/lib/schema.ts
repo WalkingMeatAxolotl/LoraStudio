@@ -1,4 +1,5 @@
 // schema.ts —— 把 FastAPI 返回的 JSON Schema 解释成前端表单需要的形态。
+import type { TFunction } from 'i18next'
 import type { SchemaProperty } from '../api/client'
 
 export type ControlKind =
@@ -42,14 +43,17 @@ export function controlKind(prop: SchemaProperty): ControlKind {
 }
 
 /**
- * show_when 简单解析器：支持 `key==value` / `key!=value`。
- * 复杂表达式以后再加。
+ * show_when 简单解析器：支持 `key==value` / `key!=value`，以及 `||` 组合。
  */
 export function evalShowWhen(
   expr: string | undefined,
   values: Record<string, unknown>
 ): boolean {
   if (!expr) return true
+  const branches = expr.split('||').map((part) => part.trim()).filter(Boolean)
+  if (branches.length > 1) {
+    return branches.some((branch) => evalShowWhen(branch, values))
+  }
   const eq = expr.split('==')
   if (eq.length === 2) {
     return String(values[eq[0].trim()]) === eq[1].trim()
@@ -67,4 +71,83 @@ export function fieldLabel(name: string): string {
     .split('_')
     .map((w) => (w.length > 0 ? w[0].toUpperCase() + w.slice(1) : w))
     .join(' ')
+}
+
+export const SCHEMA_GROUP_LABEL_KEYS: Record<string, string> = {
+  model: 'schema.groups.model',
+  dataset: 'schema.groups.dataset',
+  caption: 'schema.groups.caption',
+  lora: 'schema.groups.lora',
+  training: 'schema.groups.training',
+  noise_schedule: 'schema.groups.noiseSchedule',
+  system: 'schema.groups.system',
+  output: 'schema.groups.output',
+  sample: 'schema.groups.sample',
+  monitor: 'schema.groups.monitor',
+}
+
+export const SCHEMA_ENUM_LABEL_KEYS: Record<string, Record<string, string>> = {
+  lora_type: {
+    lora: 'schema.enums.loraType.lora',
+    lokr: 'schema.enums.loraType.lokr',
+    loha: 'schema.enums.loraType.loha',
+  },
+  lr_scheduler: {
+    none: 'schema.enums.lrScheduler.none',
+    cosine: 'schema.enums.lrScheduler.cosine',
+    cosine_with_restart: 'schema.enums.lrScheduler.cosineWithRestart',
+  },
+  optimizer_type: {
+    adamw: 'schema.enums.optimizerType.adamw',
+    prodigy: 'schema.enums.optimizerType.prodigy',
+    prodigy_plus_schedulefree: 'schema.enums.optimizerType.prodigyPlusSchedulefree',
+  },
+  timestep_sampling: {
+    logit_normal: 'schema.enums.timestepSampling.logitNormal',
+    uniform: 'schema.enums.timestepSampling.uniform',
+    logit_normal_low: 'schema.enums.timestepSampling.logitNormalLow',
+    mode: 'schema.enums.timestepSampling.mode',
+  },
+  loss_weighting: {
+    none: 'schema.enums.lossWeighting.none',
+    min_snr: 'schema.enums.lossWeighting.minSnr',
+    detail_inv_t: 'schema.enums.lossWeighting.detailInvT',
+    cosmap: 'schema.enums.lossWeighting.cosmap',
+  },
+  mixed_precision: {
+    bf16: 'schema.enums.mixedPrecision.bf16',
+    fp16: 'schema.enums.mixedPrecision.fp16',
+    no: 'schema.enums.mixedPrecision.no',
+  },
+  attention_backend: {
+    none: 'schema.enums.attentionBackend.none',
+    xformers: 'schema.enums.attentionBackend.xformers',
+    flash_attn: 'schema.enums.attentionBackend.flashAttn',
+  },
+}
+
+export function schemaGroupLabel(key: string, fallback: string, t: TFunction): string {
+  const labelKey = SCHEMA_GROUP_LABEL_KEYS[key]
+  return labelKey ? t(labelKey) : fallback
+}
+
+export function schemaEnumLabel(fieldName: string, value: unknown, t: TFunction): string {
+  const raw = String(value)
+  const labelKey = SCHEMA_ENUM_LABEL_KEYS[fieldName]?.[raw]
+  return labelKey ? t(labelKey) : raw
+}
+
+export function schemaDescription(name: string, fallback: string | undefined, t: TFunction): string | undefined {
+  const translated = t(`schema.descriptions.${name}`, { defaultValue: '' })
+  return translated || fallback
+}
+
+export function schemaAltDescription(name: string, fallback: string | undefined, t: TFunction): string | undefined {
+  const translated = t(`schema.altDescriptions.${name}`, { defaultValue: '' })
+  return translated || fallback
+}
+
+export function schemaDisableHint(name: string, fallback: string | undefined, t: TFunction): string | undefined {
+  const translated = t(`schema.disableHints.${name}`, { defaultValue: '' })
+  return translated || fallback
 }

@@ -226,8 +226,10 @@ def test_cancel_running_returns_immediately(env) -> None:
         t0 = time.time()
         assert sup.cancel(tid) is True
         elapsed = time.time() - t0
-        # cancel 必须在 1s 内返回（远小于 grace）
-        assert elapsed < 1.0, f"cancel blocked for {elapsed:.1f}s"
+        # cancel 必须远小于 grace（3s）：Windows 上 _send_terminate_signal 同步走
+        # `taskkill /T /F` 子进程（~0.5-1.5s），不走 grace timer，所以阈值 2s
+        # 留出 buffer 仍然能验证「不阻塞 grace 期」的核心断言。
+        assert elapsed < 2.0, f"cancel blocked for {elapsed:.1f}s"
         # supervisor 主循环 poll 到进程退出后会把 status 改成 canceled。
         # grace 3s + 主循环 poll 0.05s + 容错 buffer
         assert _wait_for(

@@ -21,6 +21,12 @@ from training.model_loading import forward_with_optional_checkpoint
 from training.noise import make_noise
 from training.observability import render_curve_panel
 from training.sample_runner import run_sample
+from training.snapshot import (
+    build_auto_epoch_config_path,
+    build_auto_epoch_state_path,
+    emit_event,
+    write_config_snapshot,
+)
 from training.state import save_training_state
 from training.text_encoding import (
     _build_qwen_text_from_prompt,
@@ -119,12 +125,17 @@ def run(ctx: TrainingContext) -> None:
                     ctx.model, noisy, t.view(-1, 1), cross, pad_mask,
                     use_checkpoint=args.grad_checkpoint,
                 )
-                loss_per_sample = F.mse_loss(pred.float(), target.float(), reduction="none")
-                # 自适应采样器（如 InfoNoise）记录原始 per-sample MSE（加权前）；
+                # 训练 loss 通过 losses/ plugin registry 派发（mse / huber / ...）
+                loss_per_sample = ctx.loss_fn.compute(pred.float(), target.float(), t)
+                # 自适应采样器（如 InfoNoise）记录原始 per-sample MSE（不受 huber/loss_weighting 等
+                # 加工影响）；跟训练 loss 解耦保证 InfoNoise 论文一致性。
                 # baseline 采样器是 no-op，无需 if 守卫。
-                _raw_mse = loss_per_sample.detach().mean(
-                    dim=list(range(1, loss_per_sample.dim()))
-                )
+                # 用 no_grad 避免构造 autograd 元数据（比 .detach() 少一份 grad_fn 开销）。
+                with torch.no_grad():
+                    _raw_mse_per_sample = F.mse_loss(pred.float(), target.float(), reduction="none")
+                    _raw_mse = _raw_mse_per_sample.mean(
+                        dim=list(range(1, _raw_mse_per_sample.dim()))
+                    )
                 ctx.timestep_sampler.record(t.detach(), _raw_mse)
                 # 按样本加权（正则集可降低权重）
                 if "loss_weight" in batch:
@@ -138,6 +149,8 @@ def run(ctx: TrainingContext) -> None:
                         scheme=lw_scheme,
                         min_snr_gamma=float(getattr(args, "min_snr_gamma", 5.0) or 5.0),
                         weight_cap_ratio=float(getattr(args, "weight_cap_ratio", 0.0) or 0.0),
+                        detail_inv_t_min=float(getattr(args, "detail_inv_t_min", 1.0) or 1.0),
+                        detail_inv_t_max=float(getattr(args, "detail_inv_t_max", 5.0) or 5.0),
                     ).to(device=ctx.device, dtype=torch.float32)
                     loss_per_sample = loss_per_sample * lw.view(-1, *([1] * (loss_per_sample.dim() - 1)))
                 loss = loss_per_sample.mean()
@@ -263,7 +276,7 @@ def run(ctx: TrainingContext) -> None:
                 # 定期保存训练状态（断点续训）
                 save_state_every = getattr(args, "save_state_every", 0)
                 if save_state_every > 0 and ctx.global_step % save_state_every == 0:
-                    state_path = ctx.output_dir / f"training_state_step{ctx.global_step}.pt"
+                    state_path = ctx.state_dir() / f"training_state_step{ctx.global_step}.pt"
                     # 获取监控面板数据用于恢复 loss 曲线
                     monitor_data = None
                     if ctx.monitor_server:
@@ -277,6 +290,7 @@ def run(ctx: TrainingContext) -> None:
                         save_training_state(
                             state_path, ctx.injector, ctx.optimizer, epoch, ctx.global_step,
                             ctx.loss_history, monitor_state=monitor_data, scheduler=ctx.scheduler,
+                            timestep_sampler=ctx.timestep_sampler,
                         )
                         # 同时保存 LoRA 权重
                         lora_path = ctx.output_dir / f"{args.output_name}_step{ctx.global_step}.safetensors"
@@ -320,9 +334,12 @@ def run(ctx: TrainingContext) -> None:
                 )
 
             # 定期保存训练状态（epoch 版）
+            # ADR 0006 Addendum 1：epoch 字段顺手修 off-by-one（dev current_epoch 在 L297
+            # 已推进 = epoch+1，这里传 ctx.current_epoch 而非 epoch，避免 resume `for epoch
+            # in range(start, N)` inclusive 重训整个 epoch）。
             save_state_every_epochs = int(getattr(args, "save_state_every_epochs", 0) or 0)
             if save_state_every_epochs > 0 and ctx.current_epoch % save_state_every_epochs == 0:
-                state_path = ctx.output_dir / f"training_state_epoch{ctx.current_epoch}.pt"
+                state_path = ctx.state_dir() / f"training_state_epoch{ctx.current_epoch}.pt"
                 monitor_data = None
                 if ctx.monitor_server:
                     try:
@@ -332,13 +349,48 @@ def run(ctx: TrainingContext) -> None:
                         pass
                 with optimizer_eval_mode(ctx.optimizer):
                     save_training_state(
-                        state_path, ctx.injector, ctx.optimizer, epoch, ctx.global_step,
+                        state_path, ctx.injector, ctx.optimizer, ctx.current_epoch, ctx.global_step,
                         ctx.loss_history, monitor_state=monitor_data, scheduler=ctx.scheduler,
+                        timestep_sampler=ctx.timestep_sampler,
                     )
                     lora_path = ctx.output_dir / f"{args.output_name}_epoch{ctx.current_epoch}.safetensors"
                     if not lora_path.exists():
                         ctx.injector.save(lora_path)
                 ctx.emit(f"Saved training state: training_state_epoch{ctx.current_epoch}.pt")
+
+            # ADR 0006 Addendum 1 方案 Δ：每 epoch 末尾**强制**写 auto_epoch_state.pt（覆盖式）。
+            # 跟用户主动开的 save_state_every_epochs（多份历史归档）独立，无 args gate ——
+            # 这是系统级 pause 后盾，给 handle_interrupt 暂停时引用。
+            # 时机：放在 user-opt epoch save 之后，确保即使 user-opt 没开也有 backup。
+            auto_state_path = build_auto_epoch_state_path(ctx.state_dir())
+            auto_config_path = build_auto_epoch_config_path(ctx.state_dir())
+            monitor_data = None
+            if ctx.monitor_server:
+                try:
+                    from train_monitor import get_state
+                    monitor_data = get_state()
+                except Exception:
+                    pass
+            # config snapshot 先写 — 体积小、失败概率低
+            write_config_snapshot(auto_config_path, args, ctx.sample_prompts)
+            with optimizer_eval_mode(ctx.optimizer):
+                save_training_state(
+                    auto_state_path, ctx.injector, ctx.optimizer,
+                    ctx.current_epoch, ctx.global_step, ctx.loss_history,
+                    monitor_state=monitor_data, scheduler=ctx.scheduler,
+                    timestep_sampler=ctx.timestep_sampler,
+                )
+            # 更新 ctx 字段供 handle_interrupt emit pause_state 用
+            ctx.last_auto_epoch_state_path = auto_state_path
+            ctx.last_auto_epoch_config_path = auto_config_path
+            # supervisor 端 `_on_line` 抓此 event → 标 slot.last_auto_epoch_state_path
+            # → is_pausable 升级条件满足 → SSE 解锁 UI 暂停按钮（ADR Addendum 1 §UI）
+            emit_event("auto_epoch_backup_written", {
+                "state_path": str(auto_state_path),
+                "config_path": str(auto_config_path),
+                "epoch": ctx.current_epoch,
+                "step": ctx.global_step,
+            })
 
         # 检查 max_steps
         if args.max_steps and ctx.global_step >= args.max_steps:

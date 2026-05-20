@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 /**
  * click-toggle 弹层。给字段名 / section title / 卡片角加帮助说明，不在主流
@@ -39,7 +40,9 @@ function InfoIcon() {
   )
 }
 
-export function InfoButton({ children, ariaLabel = '更多信息' }: InfoButtonProps) {
+export function InfoButton({ children, ariaLabel }: InfoButtonProps) {
+  const { t } = useTranslation()
+  const resolvedAriaLabel = ariaLabel ?? t('infoButton.label')
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLSpanElement>(null)
 
@@ -70,7 +73,7 @@ export function InfoButton({ children, ariaLabel = '更多信息' }: InfoButtonP
           setOpen((v) => !v)
         }}
         aria-expanded={open}
-        aria-label={ariaLabel}
+        aria-label={resolvedAriaLabel}
       >
         <InfoIcon />
       </button>

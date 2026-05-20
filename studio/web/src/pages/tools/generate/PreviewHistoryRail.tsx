@@ -8,6 +8,7 @@
  *   （单图：拉原图覆盖主预览；XY/对比：弹封面缩略图 modal）
  */
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { HistoryEntry, HistoryMode } from './useGenerateHistory'
 
 interface Props {
@@ -23,6 +24,7 @@ interface Props {
 export default function PreviewHistoryRail({
   entries, mode, onSelect, onRemove, onClear, onPruneStale,
 }: Props) {
+  const { t } = useTranslation()
   const list = entries.filter((e) => e.mode === mode)
   const [pruning, setPruning] = useState(false)
   const [pruneResult, setPruneResult] = useState<string | null>(null)
@@ -33,7 +35,7 @@ export default function PreviewHistoryRail({
     setPruneResult(null)
     try {
       const n = await onPruneStale()
-      setPruneResult(n > 0 ? `清了 ${n} 条` : '都还在')
+      setPruneResult(n > 0 ? t('generate.prunedCount', { n }) : t('generate.historyAllAlive'))
       setTimeout(() => setPruneResult(null), 3000)
     } finally {
       setPruning(false)
@@ -50,9 +52,9 @@ export default function PreviewHistoryRail({
           className="btn btn-ghost text-2xs"
           style={{ padding: '1px 4px' }}
           onClick={onClear}
-          title={`清空当前 ${mode} 历史`}
+          title={t('generate.clearCurrentHistoryTitle', { mode })}
         >
-          清空
+          {t('common.delete')}
         </button>
       )}
       {list.length > 0 && onPruneStale && (
@@ -61,13 +63,13 @@ export default function PreviewHistoryRail({
           style={{ padding: '1px 4px' }}
           onClick={() => void handlePrune()}
           disabled={pruning}
-          title="检查并删除失效的历史（原图已被 server 释放的）"
+          title={t('generate.pruneStaleTitle')}
         >
-          {pruning ? '查…' : pruneResult ?? '清失效'}
+          {pruning ? t('generate.checkingShort') : pruneResult ?? t('generate.pruneStale')}
         </button>
       )}
       {list.length === 0 ? (
-        <div className="text-fg-tertiary text-2xs text-center pt-3">暂无历史</div>
+        <div className="text-fg-tertiary text-2xs text-center pt-3">{t('generate.noHistory')}</div>
       ) : (
         list.map((entry) => (
           <HistoryItem
@@ -89,6 +91,7 @@ interface ItemProps {
 }
 
 function HistoryItem({ entry, onSelect, onRemove }: ItemProps) {
+  const { t } = useTranslation()
   return (
     <div
       className="relative rounded-sm border border-subtle hover:border-strong cursor-pointer overflow-hidden"
@@ -118,7 +121,7 @@ function HistoryItem({ entry, onSelect, onRemove }: ItemProps) {
             e.stopPropagation()
             onRemove()
           }}
-          title="删除"
+          title={t('common.delete')}
         >
           ×
         </button>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useOutletContext } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { useOutletContext } from 'react-router-dom'
 import {
   api,
   type Job,
@@ -58,23 +59,9 @@ const STATUS_COLOR: Record<Job['status'], string> = {
 const FALLBACK_MODEL = '4x-AnimeSharp'
 const TILE_OPTIONS = [128, 192, 256, 384, 512] as const
 type Device = 'auto' | 'cuda' | 'cpu'
-const DEVICE_OPTIONS: { value: Device; label: string }[] = [
-  { value: 'auto', label: '自动（优先 CUDA）' },
-  { value: 'cuda', label: 'CUDA' },
-  { value: 'cpu', label: 'CPU' },
-]
 
 // 目标分辨率预设 — LoRA 训练桶常用面积。
 // value=null 是「关闭智能」模式，直接 4× 模型输出（老路径，盘费高）。
-type TargetPreset = { label: string; edge: number | null }
-const TARGET_PRESETS: TargetPreset[] = [
-  { label: '768²',  edge: 768 },
-  { label: '1024² (推荐)', edge: 1024 },
-  { label: '1536²', edge: 1536 },
-  { label: '2048²', edge: 2048 },
-  { label: '自定义', edge: 0 },     // edge=0 触发自定义 input
-  { label: '关闭 (4× 输出)', edge: null },
-]
 const DEFAULT_TARGET_EDGE = 1024
 
 /** stem 工具（去扩展名）—— 前端 product name 拼装用。 */
@@ -84,6 +71,7 @@ function fileStem(name: string): string {
 }
 
 export default function PreprocessPage() {
+  const { t } = useTranslation()
   const { project, reload } = useOutletContext<Ctx>()
   const { toast } = useToast()
   const { confirm } = useDialog()
@@ -138,8 +126,6 @@ export default function PreprocessPage() {
       const variants = cat.upscalers?.variants ?? []
       setAllUpscalers(variants)
       const current = cat.upscalers?.current
-      // 后端兜底逻辑已经保证 current 合法（预设 or 已存在 custom）；前端只在
-      // 后端返回空时回退 FALLBACK_MODEL。setSelectedModel 是 idempotent。
       setSelectedModel(current || FALLBACK_MODEL)
     } catch {
       /* ignore */
@@ -152,7 +138,7 @@ export default function PreprocessPage() {
       await api.selectUpscaler(label)
     } catch (e) {
       toast(String(e), 'error')
-      void refreshUpscaler()  // 失败回滚
+      void refreshUpscaler()
     }
   }, [refreshUpscaler, toast])
 
@@ -162,9 +148,6 @@ export default function PreprocessPage() {
     void refreshUpscaler()
   }, [refreshFiles, refreshStatus, refreshUpscaler])
 
-  // SSE：日志 / job 状态 / 每图完成 / 模型下载 完成都即时反映。
-  // 不轮询 — worker 每张图后通过 stdout 标记行 → supervisor publish
-  // `preprocess_progress` 事件，前端收到后刷新 files。
   const jobIdRef = useRef<number | null>(null)
   jobIdRef.current = status?.job?.id ?? null
   useEventStream((evt) => {
@@ -172,7 +155,6 @@ export default function PreprocessPage() {
     if (evt.type === 'job_log_appended' && jid && evt.job_id === jid) {
       setLogs((prev) => [...prev, String(evt.text ?? '')])
     } else if (evt.type === 'preprocess_progress' && jid && evt.job_id === jid) {
-      // 每张图完成都刷一下 files —— grid / 进度条 / 盘占用 全部跟着动
       void refreshFiles()
     } else if (evt.type === 'job_state_changed' && jid && evt.job_id === jid) {
       void refreshStatus()
@@ -197,25 +179,15 @@ export default function PreprocessPage() {
   const modelReady = !!upscaler?.exists
 
   // ADR 0004：合并 pending + processed 成单一带状态的列表。
-  // 用 download 文件名作为 row key（产物名跟 download 文件名仅扩展名差异）。
   const rows = useMemo<ImageRow[]>(() => {
     if (!files) return []
     const out: ImageRow[] = []
-    // processed 项以 productName 索引；用它的 source 字段（缺失时退回 productName 的 stem.png）找回 download 名
-    const processedByStem = new Map<string, PreprocessedItem>()
-    for (const p of files.processed) {
-      processedByStem.set(fileStem(p.name), p)
-    }
-    // pending 是 download 文件名，能直接用
     for (const it of files.pending) {
       out.push({
         name: it.name, productName: `${fileStem(it.name)}.png`,
         status: 'pending', size: it.size,
       })
     }
-    // 已处理的图：用 source 字段拿原 download 名（迁移自老 sidecar 的可能没 source，
-    // 退回 productName 当作"近似" download 名 —— 不会精准命中 .webp 之类，但这就是
-    // 数据丢失，不是逻辑错误）
     for (const p of files.processed) {
       const downloadName = p.source ?? p.name
       out.push({
@@ -233,7 +205,6 @@ export default function PreprocessPage() {
   )
   const visibleNames = useMemo(() => visibleRows.map((r) => r.name), [visibleRows])
 
-  // 行 → ImageGrid items，徽章走 meta 字段（ImageGrid 已支持 meta 显示）
   const gridItems = useMemo(
     () =>
       visibleRows.map((r) => ({
@@ -242,12 +213,11 @@ export default function PreprocessPage() {
         meta:
           r.status === 'processed'
             ? `✓ ${r.processed?.action ?? 'upscale'}`
-            : '⊘ 未处理',
+            : t('preprocess.statusPending'),
       })),
-    [visibleRows, project.id],
+    [visibleRows, project.id, t],
   )
 
-  // 选中里 pending / processed 的拆分 —— 行动按钮按此启用
   const { selPending, selProcessed } = useMemo(() => {
     const byName = new Map(rows.map((r) => [r.name, r]))
     let p = 0, q = 0
@@ -266,17 +236,14 @@ export default function PreprocessPage() {
   // ----- 操作 ---------------------------------------------------------------
   const downloadModel = async () => {
     if (downloadingModel) return
-    // custom（kind='custom'）的不能从这里再下载——它本来就是用户手动下来的；
-    // 走自定义下载流程在 Settings 页里处理。
     if (upscaler?.kind === 'custom') {
-      toast('自定义模型请前往设置 → 预处理重新下载', 'error')
+      toast(t('preprocess.customModelGoSettings'), 'error')
       return
     }
     setDownloadingModel(true)
     try {
       await api.startModelDownload({ model_id: 'upscaler', variant: selectedModel })
-      toast(`开始下载 ${selectedModel}`, 'success')
-      // 让 SSE 推 model_download_changed；这里也立即刷一下兜底
+      toast(t('preprocess.downloadingModel', { model: selectedModel }), 'success')
       setTimeout(() => void refreshUpscaler(), 1500)
     } catch (e) {
       toast(String(e), 'error')
@@ -290,17 +257,16 @@ export default function PreprocessPage() {
     names?: string[],
   ) => {
     if (!modelReady) {
-      toast(`请先下载放大器：${selectedModel}`, 'error')
+      toast(t('preprocess.needModelFirst', { model: selectedModel }), 'error')
       return
     }
-    // 解析 targetEdge → target_area。0 走 customEdge；null 关闭智能；正数平方
     let target_area: number | null = null
     if (targetEdge === null) {
       target_area = null
     } else if (targetEdge === 0) {
       const n = Number(customEdge)
       if (!Number.isFinite(n) || n < 256 || n > 4096) {
-        toast('自定义边长需在 256-4096 之间', 'error')
+        toast(t('preprocess.customEdgeRange'), 'error')
         return
       }
       target_area = Math.round(n) * Math.round(n)
@@ -323,7 +289,7 @@ export default function PreprocessPage() {
         log_tail: '',
         summary: prev?.summary ?? summary,
       }))
-      toast(`开始预处理 #${j.id}`, 'success')
+      toast(t('preprocess.started', { id: j.id }), 'success')
       setSel(new Set())
       setSelAnchor(null)
     } catch (e) {
@@ -337,7 +303,7 @@ export default function PreprocessPage() {
     if (!job) return
     try {
       await api.cancelJob(job.id)
-      toast('已取消', 'success')
+      toast(t('preprocess.canceled'), 'success')
     } catch (e) {
       toast(String(e), 'error')
     }
@@ -346,13 +312,14 @@ export default function PreprocessPage() {
   const restoreSelected = async () => {
     if (selProcessed.count === 0) return
     if (!(await confirm(
-      `还原 ${selProcessed.count} 张已处理图（删 preprocess/ 副本，回到「未处理」状态）？`,
-      { tone: 'danger', okText: '还原' },
+      t('preprocess.confirmRestore', { n: selProcessed.count }),
+      { tone: 'danger', okText: t('preprocess.confirmRestoreOk') },
     ))) return
     try {
       const r = await api.restorePreprocessFiles(project.id, selProcessed.productNames)
       toast(
-        `已还原 ${r.restored.length} 张${r.missing.length ? ` · 跳过 ${r.missing.length}` : ''}`,
+        t('preprocess.restoredToast', { restored: r.restored.length }) +
+          (r.missing.length ? t('preprocess.restoredSkipped', { skipped: r.missing.length }) : ''),
         'success',
       )
       setSel(new Set())
@@ -367,13 +334,8 @@ export default function PreprocessPage() {
   return (
     <StepShell
       idx={2}
-      title="预处理"
-      subtitle="放大 / 裁剪 / 涂抹 — 第一阶段：放大"
-      actions={
-        <Link to="/tools/settings" className="btn btn-ghost btn-sm">
-          设置
-        </Link>
-      }
+      title={t('steps.preprocess.title')}
+      subtitle={t('steps.preprocess.subtitle')}
     >
       <div className="flex flex-col h-full gap-3 min-h-0">
         <div className="grid gap-3 flex-1 min-h-0" style={{ gridTemplateColumns: '1fr 260px' }}>
@@ -412,7 +374,6 @@ export default function PreprocessPage() {
               />
             )}
 
-            {/* 单图 grid + 状态徽章 + filter chips */}
             <ImagesPanel
               summary={summary}
               filter={filter}
@@ -441,6 +402,7 @@ export default function PreprocessPage() {
                 setSelAnchor(null)
               }}
               onRestore={() => void restoreSelected()}
+              filterMode={filter}
             />
           </div>
 
@@ -522,7 +484,24 @@ function OperationPanel({
   onStartAll,
   onStartSelected,
 }: OperationPanelProps) {
-  // 当前下拉选中哪一档：用 edge 作为 value（null→'off', 0→'custom', 正数→str）
+  const { t } = useTranslation()
+
+  const DEVICE_OPTIONS: { value: Device; label: string }[] = [
+    { value: 'auto', label: t('preprocess.deviceAuto') },
+    { value: 'cuda', label: 'CUDA' },
+    { value: 'cpu', label: 'CPU' },
+  ]
+
+  type TargetPreset = { label: string; edge: number | null }
+  const TARGET_PRESETS: TargetPreset[] = [
+    { label: '768²',  edge: 768 },
+    { label: `1024²${t('preprocess.targetRecommended')}`, edge: 1024 },
+    { label: '1536²', edge: 1536 },
+    { label: '2048²', edge: 2048 },
+    { label: t('preprocess.targetCustomLabel'), edge: 0 },
+    { label: t('preprocess.targetOffLabel'),    edge: null },
+  ]
+
   const selectValue =
     targetEdge === null ? 'off' : targetEdge === 0 ? 'custom' : String(targetEdge)
   const handlePresetChange = (v: string) => {
@@ -530,25 +509,26 @@ function OperationPanel({
     else if (v === 'custom') setTargetEdge(0)
     else setTargetEdge(Number(v))
   }
-  // 在 model panel 上方加一条"目标分辨率"说明，紧凑
+
   const targetHint = targetEdge === null
-    ? '关闭：所有图都走 4× 模型（盘费高）'
+    ? t('preprocess.targetHintOff')
     : targetEdge === 0
-      ? `自定义：约 ${customEdge}² 像素`
-      : `${targetEdge}² ≈ ${(targetEdge * targetEdge / 1e6).toFixed(2)}M px`
+      ? t('preprocess.targetHintCustom', { edge: customEdge })
+      : t('preprocess.targetHintEdge', { edge: targetEdge, mpx: (targetEdge * targetEdge / 1e6).toFixed(2) })
+
   return (
     <section className="flex flex-col gap-1.5 rounded-md border border-subtle bg-surface px-3 py-2.5 shrink-0">
       <h3 className="caption flex items-center gap-1.5">
         <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-accent" />
-        放大设置
+        {t('preprocess.panelTitle')}
       </h3>
 
       {!modelReady && (
         <div className="flex items-center gap-2 text-sm px-2 py-1.5 rounded-sm bg-warn-soft border border-warn">
-          <span className="text-warn font-medium">需要下载模型</span>
+          <span className="text-warn font-medium">{t('preprocess.needDownload')}</span>
           <span className="text-fg-secondary text-xs flex-1 truncate">
             {upscaler?.kind === 'custom'
-              ? '自定义模型未在本地（请到设置 → 预处理）'
+              ? t('preprocess.customModelLocal')
               : `${upscaler?.hf_repo ?? upscaler?.ms_repo ?? '—'} · ~${upscaler?.size_mb ?? 64} MB`}
           </span>
           <button
@@ -556,15 +536,15 @@ function OperationPanel({
             disabled={downloadingModel || upscaler?.kind === 'custom'}
             className="btn btn-primary btn-sm"
           >
-            {downloadingModel ? '下载中...' : `下载 ${selectedModel}`}
+            {downloadingModel ? t('preprocess.modelDownloading') : t('preprocess.downloadModel', { model: selectedModel })}
           </button>
         </div>
       )}
 
-      {/* 目标分辨率行：决定每张图最终输出多少像素（按训练桶面积估的） */}
+      {/* 目标分辨率行 */}
       <div className="flex items-center gap-2 text-sm flex-wrap">
         <label className="flex items-center gap-1.5">
-          <span className="text-fg-tertiary">目标分辨率</span>
+          <span className="text-fg-tertiary">{t('preprocess.targetRes')}</span>
           <select
             value={selectValue}
             onChange={(e) => handlePresetChange(e.target.value)}
@@ -590,7 +570,7 @@ function OperationPanel({
               disabled={busy}
               className="input input-mono text-sm"
               style={{ width: 80, padding: '2px 6px' }}
-              placeholder="边长"
+              placeholder={t('preprocess.edgePlaceholder')}
             />
           )}
           <span className="text-fg-tertiary text-xs">{targetHint}</span>
@@ -599,7 +579,7 @@ function OperationPanel({
 
       <div className="flex items-center gap-2 text-sm flex-wrap">
         <label className="flex items-center gap-1.5">
-          <span className="text-fg-tertiary">模型</span>
+          <span className="text-fg-tertiary">{t('preprocess.modelLabel')}</span>
           <select
             value={selectedModel}
             onChange={(e) => onSelectedModelChange(e.target.value)}
@@ -610,8 +590,8 @@ function OperationPanel({
             {allUpscalers.map((v) => (
               <option key={v.label} value={v.label}>
                 {v.label}
-                {!v.exists ? ' · 未下载' : ''}
-                {v.kind === 'custom' ? ' · 自定义' : ''}
+                {!v.exists ? t('preprocess.notDownloaded') : ''}
+                {v.kind === 'custom' ? t('preprocess.customModel') : ''}
               </option>
             ))}
             {allUpscalers.length === 0 && (
@@ -640,7 +620,7 @@ function OperationPanel({
         <span className="text-dim">·</span>
 
         <label className="flex items-center gap-1.5">
-          <span className="text-fg-tertiary">设备</span>
+          <span className="text-fg-tertiary">{t('preprocess.deviceLabel')}</span>
           <select
             value={device}
             onChange={(e) => setDevice(e.target.value as Device)}
@@ -660,35 +640,37 @@ function OperationPanel({
           onClick={onStartSelected}
           disabled={busy || !modelReady || pendingSelCount === 0}
           className="btn btn-secondary btn-sm"
-          title={pendingSelCount === 0 ? '在列表中选择"未处理"的图才启用' : ''}
+          title={pendingSelCount === 0 ? t('preprocess.upscaleSelectedHint') : ''}
         >
-          {`放大选中 ${pendingSelCount}`}
+          {t('preprocess.upscaleSelected', { n: pendingSelCount })}
         </button>
         <button
           onClick={onStartAll}
           disabled={busy || !modelReady || pendingCount === 0}
           className="btn btn-primary btn-sm"
         >
-          {pendingCount > 0 ? `放大全部 ${pendingCount}` : '没有待处理'}
+          {pendingCount > 0 ? t('preprocess.upscaleAll', { n: pendingCount }) : t('preprocess.noPending')}
         </button>
       </div>
 
       {/* 智能流水说明 + 未来 tabs 占位 */}
       <div className="flex items-center gap-2 mt-1 text-xs text-fg-tertiary flex-wrap">
-        <span className="font-medium text-fg-secondary">阶段</span>
-        <span className="px-1.5 py-0.5 rounded bg-accent-soft text-accent text-xs font-medium">放大</span>
+        <span className="font-medium text-fg-secondary">{t('preprocess.stageLabel')}</span>
+        <span className="px-1.5 py-0.5 rounded bg-accent-soft text-accent text-xs font-medium">
+          {t('preprocess.stageUpscale')}
+        </span>
         <span
           className="px-1.5 py-0.5 rounded bg-overlay opacity-50 cursor-not-allowed"
-          title="未来阶段：交互式裁剪"
-        >裁剪</span>
+          title={t('preprocess.stageCropTitle')}
+        >{t('preprocess.stageCrop')}</span>
         <span
           className="px-1.5 py-0.5 rounded bg-overlay opacity-50 cursor-not-allowed"
-          title="未来阶段：画笔涂抹（取色 + 高斯）"
-        >涂抹</span>
+          title={t('preprocess.stageInpaintTitle')}
+        >{t('preprocess.stageInpaint')}</span>
         <span className="flex-1" />
         {targetEdge !== null && (
-          <span title="像素够目标的图直接 LANCZOS 缩，省掉昂贵的 4× 推理">
-            智能：像素够 → 跳过模型直接 LANCZOS 缩
+          <span title={t('preprocess.smartHint')}>
+            {t('preprocess.smartHint')}
           </span>
         )}
       </div>
@@ -713,6 +695,7 @@ function ImagesPanel({
   onSelectAll,
   onClear,
   onRestore,
+  filterMode,
 }: {
   summary: Status['summary']
   filter: FilterMode
@@ -726,7 +709,9 @@ function ImagesPanel({
   onSelectAll: () => void
   onClear: () => void
   onRestore: () => void
+  filterMode: FilterMode
 }) {
+  const { t } = useTranslation()
   const chip = (key: FilterMode, label: string, count: number) => (
     <button
       onClick={() => setFilter(key)}
@@ -740,43 +725,51 @@ function ImagesPanel({
       {label} {count}
     </button>
   )
+
+  const emptyHint =
+    filterMode === 'pending'
+      ? t('preprocess.emptyPending')
+      : filterMode === 'processed'
+        ? t('preprocess.emptyProcessed')
+        : t('preprocess.emptyAll')
+
   return (
     <section className="flex flex-col flex-1 min-h-0 rounded-md border border-subtle bg-surface overflow-hidden">
       <header className="flex items-center gap-2 shrink-0 px-2.5 py-1.5 border-b border-subtle text-sm flex-wrap">
-        <h3 className="font-semibold">图片</h3>
-        <span className="text-fg-tertiary">共 {summary.download_count} 张</span>
+        <h3 className="font-semibold">{t('preprocess.imagesTitle')}</h3>
+        <span className="text-fg-tertiary">{t('preprocess.totalCount', { n: summary.download_count })}</span>
         {selected.size > 0 && (
-          <span className="text-accent">· 已选 {selected.size}</span>
+          <span className="text-accent">{t('preprocess.selectedCount', { n: selected.size })}</span>
         )}
         <span className="mx-1 text-dim">·</span>
         <div className="flex items-center gap-1">
-          {chip('all',       '全部',   summary.download_count)}
-          {chip('pending',   '未处理', summary.pending_count)}
-          {chip('processed', '已处理', summary.processed_count)}
+          {chip('all',       t('preprocess.filterAll'),       summary.download_count)}
+          {chip('pending',   t('preprocess.filterPending'),   summary.pending_count)}
+          {chip('processed', t('preprocess.filterProcessed'), summary.processed_count)}
         </div>
         <span className="flex-1" />
         <button
           onClick={onSelectAll}
           disabled={items.length === 0}
           className="btn btn-ghost btn-sm"
-        >全选</button>
+        >{t('common.selectAll')}</button>
         <button
           onClick={onClear}
           disabled={selected.size === 0}
           className="btn btn-ghost btn-sm"
-        >清空</button>
+        >{t('common.deselect')}</button>
         <button
           onClick={onRestore}
           disabled={selProcessedCount === 0}
           className="btn btn-sm bg-err-soft text-err"
           title={selProcessedCount === 0
-            ? '选中含已处理图时启用——还原 = 删 preprocess 副本，回到「未处理」'
-            : `还原 ${selProcessedCount} 张（删 preprocess 副本回到未处理）`}
-        >⟲ 还原 {selProcessedCount}</button>
+            ? t('preprocess.restoreHintDisabled')
+            : t('preprocess.restoreHint', { n: selProcessedCount })}
+        >{t('preprocess.restoreBtn', { n: selProcessedCount })}</button>
       </header>
       {selected.size > 0 && selPendingCount > 0 && selProcessedCount > 0 && (
         <div className="px-2.5 py-1 bg-warn-soft text-warn text-xs">
-          选中包含 {selPendingCount} 未处理 + {selProcessedCount} 已处理；行动按钮各自只作用于对应状态。
+          {t('preprocess.mixedSelectionWarning', { pending: selPendingCount, processed: selProcessedCount })}
         </div>
       )}
       <div className="flex-1 min-h-0 overflow-y-auto p-2">
@@ -788,13 +781,7 @@ function ImagesPanel({
           onPreview={onPreview}
           clickMode="activate"
           ariaLabel="preprocess-grid"
-          emptyHint={
-            filter === 'pending'
-              ? '没有待处理图（全部已处理 ✓）'
-              : filter === 'processed'
-                ? '还没有产物 — 点上面「放大全部」'
-                : '没有图（先到「下载」拉一些图）'
-          }
+          emptyHint={emptyHint}
         />
       </div>
     </section>
@@ -814,6 +801,7 @@ function JobStrip({
   logs: string[]
   onCancel?: () => void
 }) {
+  const { t } = useTranslation()
   const elapsed =
     job.started_at && (job.finished_at ?? Date.now() / 1000) - job.started_at
   const isLive = job.status === 'running' || job.status === 'pending'
@@ -840,11 +828,11 @@ function JobStrip({
               onCancel()
             }}
             className="btn btn-ghost btn-sm text-err"
-          >取消</button>
+          >{t('common.cancel')}</button>
         )}
       </summary>
       <pre className="px-3 py-2 text-xs font-mono text-fg-secondary bg-sunken max-h-[224px] overflow-auto whitespace-pre-wrap border-t border-subtle m-0">
-        {logs.length === 0 ? '(等待日志...)' : logs.slice(-1000).join('\n')}
+        {logs.length === 0 ? t('jobProgress.waitingLogs') : logs.slice(-1000).join('\n')}
       </pre>
     </details>
   )
@@ -869,12 +857,11 @@ function PreprocessSidebar({
   processed: PreprocessedItem[]
   targetEdge: number | null
 }) {
+  const { t } = useTranslation()
   const { download_count, processed_count, pending_count } = summary
   const pct = download_count > 0 ? Math.round((processed_count / download_count) * 100) : 0
-  // 粗略 VRAM 估算：tile²×scale²×2byte (fp16)×7倍中间张量，单位 MB。给个量级。
   const estVramMB = Math.round((tileSize * tileSize * 16 * 2 * 7) / (1024 * 1024))
 
-  // action 分布：让用户看到智能流水的实际收益（有多少图根本没走模型）
   const actionStats = useMemo(() => {
     const stats = { resize: 0, upscale: 0, 'upscale+resize': 0, unknown: 0 }
     for (const it of processed) {
@@ -885,7 +872,6 @@ function PreprocessSidebar({
     return stats
   }, [processed])
 
-  // 产物总盘占 — 云端硬盘费才是真该警惕的
   const processedBytes = useMemo(
     () => processed.reduce((s, it) => s + (it.size ?? 0), 0),
     [processed],
@@ -903,11 +889,11 @@ function PreprocessSidebar({
       <div className="rounded-md border border-subtle bg-surface px-3 py-2.5">
         <h3 className="caption flex items-center gap-1.5">
           <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-accent" />
-          预处理进度
+          {t('preprocess.sidebarProgress')}
         </h3>
-        <StatRow label="源 download/" value={`${download_count} 张`} />
-        <StatRow label="已处理" value={`${processed_count} 张`} accent="ok" />
-        <StatRow label="待处理" value={`${pending_count} 张`} accent={pending_count > 0 ? 'warn' : undefined} />
+        <StatRow label={t('preprocess.sidebarSource')} value={t('preprocess.sidebarNImages', { n: download_count })} />
+        <StatRow label={t('preprocess.sidebarProcessed')} value={t('preprocess.sidebarNImages', { n: processed_count })} accent="ok" />
+        <StatRow label={t('preprocess.sidebarPending')} value={t('preprocess.sidebarNImages', { n: pending_count })} accent={pending_count > 0 ? 'warn' : undefined} />
         <div className="mt-2 h-1.5 rounded bg-sunken overflow-hidden">
           <div
             className="h-full bg-accent rounded transition-[width] duration-300 ease-out"
@@ -917,67 +903,62 @@ function PreprocessSidebar({
         <p className="text-xs text-fg-tertiary mt-1 text-right">{pct}%</p>
       </div>
 
-      {/* action 分布：跳过模型的图越多，整体越快 */}
       {processed.length > 0 && (
         <div className="rounded-md border border-subtle bg-surface px-3 py-2.5">
           <h3 className="caption flex items-center gap-1.5">
             <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-accent" />
-            处理方式分布
+            {t('preprocess.sidebarActionDist')}
           </h3>
           {actionStats.resize > 0 && (
-            <StatRow label="直接缩 (大图)" value={`${actionStats.resize} 张`} accent="ok" />
+            <StatRow label={t('preprocess.actionResize')} value={t('preprocess.sidebarNImages', { n: actionStats.resize })} accent="ok" />
           )}
           {actionStats['upscale+resize'] > 0 && (
-            <StatRow label="放大 + 缩" value={`${actionStats['upscale+resize']} 张`} accent="warn" />
+            <StatRow label={t('preprocess.actionUpscaleResize')} value={t('preprocess.sidebarNImages', { n: actionStats['upscale+resize'] })} accent="warn" />
           )}
           {actionStats.upscale > 0 && (
-            <StatRow label="纯 4× 放大" value={`${actionStats.upscale} 张`} />
+            <StatRow label={t('preprocess.actionUpscale')} value={t('preprocess.sidebarNImages', { n: actionStats.upscale })} />
           )}
           {actionStats.unknown > 0 && (
-            <StatRow label="旧数据" value={`${actionStats.unknown} 张`} />
+            <StatRow label={t('preprocess.actionUnknown')} value={t('preprocess.sidebarNImages', { n: actionStats.unknown })} />
           )}
           <p className="text-[11px] text-fg-tertiary mt-1.5 leading-snug">
-            「直接缩」走 LANCZOS 不调用模型，秒级；「放大+缩」才是慢的那条路。
-            {targetEdge === null && '（关闭目标模式时所有图都走 4× 路径）'}
+            {t('preprocess.actionNote')}
+            {targetEdge === null && t('preprocess.actionNoteOff')}
           </p>
         </div>
       )}
 
-      {/* 盘占用 — 云端关注的真指标 */}
       <div className="rounded-md border border-subtle bg-surface px-3 py-2.5">
         <h3 className="caption flex items-center gap-1.5">
           <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-ok" />
-          盘占用
+          {t('preprocess.sidebarDisk')}
         </h3>
         <StatRow
-          label="产物总大小"
+          label={t('preprocess.diskTotal')}
           value={processed.length > 0 ? fmtBytes(processedBytes) : '—'}
           accent={processedBytes > 5 * 1024 ** 3 ? 'warn' : undefined}
         />
         {processed.length > 0 && (
-          <StatRow label="均值 / 张" value={fmtBytes(avgBytes)} />
+          <StatRow label={t('preprocess.diskAvg')} value={fmtBytes(avgBytes)} />
         )}
         <p className="text-[11px] text-fg-tertiary mt-1.5 leading-snug">
-          {targetEdge === null
-            ? '关闭目标模式：每张 4× PNG 巨大，盘费高。'
-            : '智能模式：缩到目标面积后单张 PNG 通常 1-3 MB。'}
+          {targetEdge === null ? t('preprocess.diskNoteOff') : t('preprocess.diskNoteSmart')}
         </p>
       </div>
 
-      {/* 设备 / 模型就绪 */}
       <div className="rounded-md border border-subtle bg-surface px-3 py-2.5">
         <h3 className="caption flex items-center gap-1.5">
           <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-accent opacity-60" />
-          设备 / 模型
+          {t('preprocess.sidebarDevice')}
         </h3>
         <StatRow
           label={selectedModel}
-          value={upscaler?.exists ? '已就绪' : '未下载'}
+          value={upscaler?.exists ? t('preprocess.modelReady') : t('preprocess.modelNotDownloaded')}
           accent={upscaler?.exists ? 'ok' : 'warn'}
         />
-        <StatRow label="估算 VRAM 峰值" value={`~${estVramMB} MB`} />
+        <StatRow label={t('preprocess.vramEst')} value={`~${estVramMB} MB`} />
         <p className="text-[11px] text-fg-tertiary mt-1.5 leading-snug">
-          tile 越大显存占用越高；OOM 时降到 128/192。
+          {t('preprocess.vramNote')}
         </p>
       </div>
     </div>

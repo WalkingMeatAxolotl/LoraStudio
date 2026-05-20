@@ -175,8 +175,8 @@ class TrainingConfig(BaseModel):
         json_schema_extra=_meta("lora"),
     )
     lora_rank: int = Field(
-        32, ge=4, le=256,
-        description="rank（推荐 8/16/32/64）",
+        32, ge=4,
+        description="rank（推荐 8/16/32/64；LoKr 可设足够大触发 full dimension）",
         json_schema_extra=_meta("lora"),
     )
     lora_alpha: float = Field(
@@ -244,15 +244,22 @@ class TrainingConfig(BaseModel):
     learning_rate: float = Field(
         1e-4, gt=0.0,
         description="学习率（Prodigy 必须为 1.0）",
-        json_schema_extra=_meta("training", cli_alias="--lr"),
+        json_schema_extra=_meta(
+            "training",
+            cli_alias="--lr",
+            disable_when="optimizer_type==prodigy||optimizer_type==prodigy_plus_schedulefree",
+            disable_value=1.0,
+            disable_hint="Prodigy 接管学习率",
+        ),
     )
     lr_scheduler: Literal["none", "cosine", "cosine_with_restart"] = Field(
         "none",
-        description="学习率调度（选 prodigy_plus_schedulefree 时必须 none）",
+        description="学习率调度（none = 常数；Prodigy / PPSF 固定为 none）",
         json_schema_extra=_meta(
             "training",
-            disable_when="optimizer_type==prodigy_plus_schedulefree",
-            disable_hint="Schedule-Free 自带调度",
+            disable_when="optimizer_type==prodigy||optimizer_type==prodigy_plus_schedulefree",
+            disable_value="none",
+            disable_hint="Prodigy 固定为常数学习率",
         ),
     )
     lr_scheduler_t0: int = Field(
@@ -358,13 +365,22 @@ class TrainingConfig(BaseModel):
         description="【噪声增强】金字塔每层衰减系数（仅 pyramid_noise_iters > 0）",
         json_schema_extra=_meta("noise_schedule", show_when="pyramid_noise_iters!=0", advanced=True),
     )
-    timestep_sampling: Literal["logit_normal", "uniform", "logit_normal_low", "mode"] = Field(
+    timestep_sampling: Literal[
         "logit_normal",
-        description="【时间步采样】分布（logit_normal 为 SD3/Anima 默认）",
+        "uniform",
+        "logit_normal_low",
+        "mode",
+        "mixed_uniform_low",
+        "mixed_uniform_logit",
+    ] = Field(
+        "logit_normal",
+        description="【时间步采样】分布（logit_normal 为 SD3/Anima 默认；mixed_* 模式混合 uniform 与偏置端，按 timestep_mix_low_prob 控制比例）",
         json_schema_extra=_meta(
             "noise_schedule",
             alt_description="【时间步采样】分布；InfoNoise 启用时作为热身期 baseline，正式阶段由自适应 CDF 接管",
             alt_description_when="infonoise_enabled==true",
+            disable_when="infonoise_enabled==true",
+            disable_hint="InfoNoise 接管时间步采样",
             advanced=True,
         ),
     )
@@ -375,6 +391,29 @@ class TrainingConfig(BaseModel):
             "noise_schedule",
             show_when="timestep_sampling!=uniform",
             alt_description="【InfoNoise 热身期】InfoNoise 开启时作为热身阶段的 baseline shift，正式阶段由自适应 CDF 接管",
+            alt_description_when="infonoise_enabled==true",
+            disable_when="infonoise_enabled==true",
+            disable_hint="InfoNoise 接管时间步采样",
+            advanced=True,
+        ),
+    )
+    timestep_mix_low_prob: float = Field(
+        0.0, ge=0.0, le=1.0,
+        description="【时间步采样】mixed_* 模式下走偏置端的样本比例（0 = 全 uniform；典型 0.15-0.30；仅 mixed_uniform_low / mixed_uniform_logit 生效，其他 mode 忽略）",
+        json_schema_extra=_meta(
+            "noise_schedule",
+            show_when="timestep_sampling!=uniform",
+            alt_description="【InfoNoise 热身期】InfoNoise 开启 + mixed_* baseline 时，热身阶段混合比例；正式阶段由自适应 CDF 接管",
+            alt_description_when="infonoise_enabled==true",
+            advanced=True,
+        ),
+    )
+    timestep_schedule_shift: float = Field(
+        1.0, ge=0.1, le=10.0,
+        description="【时间步采样】采样后对 t 做的额外 σ schedule 偏移（1.0 = 无偏移；与 timestep_shift 不同：后者作用于 logit-normal 内部，前者作用于最终 t）",
+        json_schema_extra=_meta(
+            "noise_schedule",
+            alt_description="【InfoNoise 热身期】InfoNoise 开启时仅热身期生效；正式阶段由自适应 CDF 接管",
             alt_description_when="infonoise_enabled==true",
             advanced=True,
         ),
@@ -414,6 +453,16 @@ class TrainingConfig(BaseModel):
         description="【InfoNoise】触发刷新所需的每 bin 最小样本数",
         json_schema_extra=_meta("noise_schedule", show_when="infonoise_enabled==true", advanced=True),
     )
+    loss_type: Literal["mse", "huber"] = Field(
+        "mse",
+        description="【损失函数】训练 loss 类型（mse 默认；huber 对 outlier 鲁棒）",
+        json_schema_extra=_meta("noise_schedule"),
+    )
+    huber_c: float = Field(
+        0.15, ge=0.01, le=5.0,
+        description="【Huber loss】delta 系数（典型 0.1–0.3；控制 quad/linear 转折点，|x|<δ 走二次，|x|≥δ 走线性）",
+        json_schema_extra=_meta("noise_schedule", show_when="loss_type==huber", advanced=True),
+    )
     loss_weighting: Literal["none", "min_snr", "detail_inv_t", "cosmap"] = Field(
         "none",
         description="【损失加权】方案（min_snr 推荐；detail_inv_t 细节强化；cosmap SD3 风格）",
@@ -428,6 +477,16 @@ class TrainingConfig(BaseModel):
         0.0, ge=0.0, le=50.0,
         description="【损失加权】Batch 内权重 max/min 比上限（0=禁用；小 batch+Prodigy 建议 5）",
         json_schema_extra=_meta("noise_schedule", show_when="loss_weighting!=none", advanced=True),
+    )
+    detail_inv_t_min: float = Field(
+        1.0, ge=1.0, le=20.0,
+        description="【损失加权】detail_inv_t 权重下限（默认 1.0；升至 1.5 可让高 t 步也被略微加权；<1.0 因 1/t>1 恒成立故无效）",
+        json_schema_extra=_meta("noise_schedule", show_when="loss_weighting==detail_inv_t", advanced=True),
+    )
+    detail_inv_t_max: float = Field(
+        5.0, ge=0.1, le=50.0,
+        description="【损失加权】detail_inv_t 权重上限（默认 5.0；雾蒙蒙画风建议降到 3，激进细节可升到 8）",
+        json_schema_extra=_meta("noise_schedule", show_when="loss_weighting==detail_inv_t", advanced=True),
     )
     grad_clip_max_norm: float = Field(
         0.0, ge=0.0,
@@ -457,13 +516,22 @@ class TrainingConfig(BaseModel):
         return migrate_legacy_attention(data)
 
     @model_validator(mode="after")
-    def _validate_ppsf_scheduler(self) -> "TrainingConfig":
-        """ProdigyPlusScheduleFree 内置 Schedule-Free，外面再叠 scheduler 会破坏
-        averaged weights 的收敛保证。UI/CLI/YAML 三个入口在这里统一拦下来。"""
-        if self.optimizer_type == "prodigy_plus_schedulefree" and self.lr_scheduler != "none":
+    def _validate_prodigy_scheduler(self) -> "TrainingConfig":
+        """Prodigy 系列固定使用常数学习率，外部 scheduler 统一拦截。"""
+        if self.optimizer_type in {"prodigy", "prodigy_plus_schedulefree"} and self.lr_scheduler != "none":
             raise ValueError(
-                "optimizer_type=prodigy_plus_schedulefree requires lr_scheduler=none "
-                "(Schedule-Free 不需要 scheduler；强行叠加会破坏 averaged weights)."
+                f"optimizer_type={self.optimizer_type} requires lr_scheduler=none "
+                "(Prodigy 系列固定使用常数学习率)."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_detail_inv_t_range(self) -> "TrainingConfig":
+        """detail_inv_t 加权曲线的 min 必须 <= max；fail-fast 取代历史的静默 swap。"""
+        if self.detail_inv_t_min > self.detail_inv_t_max:
+            raise ValueError(
+                f"detail_inv_t_min ({self.detail_inv_t_min}) 不能大于 "
+                f"detail_inv_t_max ({self.detail_inv_t_max})。"
             )
         return self
 
@@ -574,6 +642,13 @@ class TrainingConfig(BaseModel):
         default_factory=list,
         description="多 prompt 轮换（优先于 sample_prompt）",
         json_schema_extra=_meta("sample", "string-list"),
+    )
+    trigger_word: str = Field(
+        "",
+        description="触发词（version 级，由 Step 4 Tagging 页面写入；空串=不启用）。"
+                    "训练时 bootstrap_phase 会自动 prepend 到 sample_prompt / "
+                    "sample_prompts，确保采样图能反映 LoRA 是否激活。",
+        json_schema_extra=_meta("sample", hidden=True),
     )
 
     # ---------------------------------------------------------------- 监控/进度

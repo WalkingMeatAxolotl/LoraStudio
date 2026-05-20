@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 /** 数值列表输入：[输入框] [+ 添加] + 已加 chips（× 删除）。
  *
@@ -20,6 +21,7 @@ export default function NumberListInput({
   step?: number
   placeholder?: string
 }) {
+  const { t } = useTranslation()
   const [draft, setDraft] = useState('')
 
   const values = raw.split(',').map((s) => s.trim()).filter(Boolean)
@@ -76,7 +78,7 @@ export default function NumberListInput({
             whiteSpace: 'nowrap',
           }}
         >
-          + 添加
+          {t('generate.addValue')}
         </button>
       </div>
       {values.length > 0 && (
@@ -110,8 +112,8 @@ export default function NumberListInput({
                   lineHeight: 1,
                   padding: 0,
                 }}
-                title="删除"
-                aria-label="删除"
+                title={t('common.delete')}
+                aria-label={t('common.delete')}
               >
                 ×
               </button>

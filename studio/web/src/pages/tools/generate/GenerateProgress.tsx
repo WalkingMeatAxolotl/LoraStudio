@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 /** 生成进度条：单图采样 step / 多图 batch 进度 + phase 文字。
  *
  * 来源：daemon 推 SSE
@@ -22,6 +24,7 @@ export default function GenerateProgressBar({
   busy: boolean
   progress: GenerateProgress
 }) {
+  const { t } = useTranslation()
   if (!busy && progress.currentStep == null) return null
 
   const showBatch =
@@ -36,16 +39,18 @@ export default function GenerateProgressBar({
       : 0
 
   // phase 文字
-  let phase = '加载模型 / 准备中…'
+  let phase = t('generate.progressPreparing')
   if (progress.currentStep != null && progress.totalSteps) {
-    phase = `采样: step ${progress.currentStep} / ${progress.totalSteps}`
+    phase = t('generate.progressSampling', { step: progress.currentStep, total: progress.totalSteps })
   }
   if (showBatch && progress.batchIdx != null && progress.batchTotal) {
-    phase = `第 ${progress.batchIdx + 1} / ${progress.batchTotal} 张 · ${
-      progress.currentStep != null && progress.totalSteps
+    phase = t('generate.progressBatch', {
+      current: progress.batchIdx + 1,
+      total: progress.batchTotal,
+      detail: progress.currentStep != null && progress.totalSteps
         ? `step ${progress.currentStep} / ${progress.totalSteps}`
-        : '准备中…'
-    }`
+        : t('generate.progressPreparingShort'),
+    })
   }
 
   return (
@@ -54,7 +59,7 @@ export default function GenerateProgressBar({
         <span className="text-fg-secondary font-mono">{phase}</span>
         {showBatch && (
           <span className="text-fg-tertiary font-mono text-2xs">
-            总进度 {batchPct.toFixed(0)}%
+            {t('generate.totalProgress', { pct: batchPct.toFixed(0) })}
           </span>
         )}
       </div>

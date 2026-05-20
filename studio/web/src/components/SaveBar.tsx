@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api, type CaptionSnapshot } from '../api/client'
 import { useDialog } from './Dialog'
 import { useToast } from './Toast'
@@ -28,6 +29,7 @@ function fmtSize(b: number): string {
 export default function SaveBar({
   pid, vid, dirtyCount, onSave, onAfterRestore,
 }: Props) {
+  const { t } = useTranslation()
   const { toast } = useToast()
   const { confirm } = useDialog()
   const [open, setOpen] = useState(false)
@@ -57,18 +59,18 @@ export default function SaveBar({
   }
 
   const restore = async (sid: string) => {
-    if (!(await confirm('还原会覆盖当前所有 caption（含未保存的本地改动）。确定？', { tone: 'warn', okText: '还原' }))) return
+    if (!(await confirm(t('saveBar.confirmRestore'), { tone: 'warn', okText: t('common.restore') }))) return
     setBusyId(sid)
     try {
       const r = await api.restoreCaptionSnapshot(pid, vid, sid)
-      toast(`已还原（写入 ${r.written}，删旧 ${r.removed_old}）`, 'success')
+      toast(t('saveBar.restoreDone', { n: r.written, m: r.removed_old }), 'success')
       await onAfterRestore()
     } catch (e) { toast(String(e), 'error') }
     finally { setBusyId(null) }
   }
 
   const del = async (sid: string) => {
-    if (!(await confirm(`删除还原点 ${sid}？此操作不可撤销。`, { tone: 'danger', okText: '删除' }))) return
+    if (!(await confirm(t('saveBar.confirmDeletePoint', { id: sid }), { tone: 'danger', okText: t('common.delete') }))) return
     setBusyId(sid)
     try { await api.deleteCaptionSnapshot(pid, vid, sid); await refresh() }
     catch (e) { toast(String(e), 'error') }
@@ -82,15 +84,19 @@ export default function SaveBar({
           onClick={save}
           disabled={saving || dirtyCount === 0}
           className={dirtyCount > 0 ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
-          title="把本地编辑写入磁盘；写之前自动生成还原点"
+          title={t('saveBar.tooltip')}
         >
-          {saving ? '保存中…' : dirtyCount > 0 ? `💾 保存（${dirtyCount}）` : '💾 已保存'}
+          {saving
+            ? t('common.saving')
+            : dirtyCount > 0
+              ? t('saveBar.save', { n: dirtyCount })
+              : t('saveBar.saved')}
         </button>
         <button
           onClick={() => setOpen(!open)}
           className="btn btn-ghost btn-sm"
         >
-          🕒 还原点
+          {t('saveBar.restorePoints')}
         </button>
       </div>
 
@@ -102,7 +108,7 @@ export default function SaveBar({
         >
           {items.length === 0 ? (
             <p className="px-3.5 py-3 text-xs text-fg-tertiary m-0">
-              还没有还原点。每次「保存」会自动生成一个。
+              {t('saveBar.noRestorePoints')}
             </p>
           ) : (
             <ul className="list-none p-0 m-0">
@@ -116,7 +122,7 @@ export default function SaveBar({
                       {fmtTime(s.created_at)}
                     </div>
                     <div className="text-fg-tertiary text-[10px] mt-0.5">
-                      {s.file_count} 文件 · {fmtSize(s.size)}
+                      {t('saveBar.restoreEntry', { n: s.file_count, size: fmtSize(s.size) })}
                     </div>
                   </div>
                   <button
@@ -124,13 +130,13 @@ export default function SaveBar({
                     disabled={busyId === s.id}
                     className="btn btn-primary btn-sm"
                   >
-                    还原
+                    {t('common.restore')}
                   </button>
                   <button
                     onClick={() => del(s.id)}
                     disabled={busyId === s.id}
                     className="btn btn-ghost btn-sm text-fg-tertiary hover:text-err"
-                    aria-label="删除"
+                    aria-label={t('common.delete')}
                   >
                     ✕
                   </button>

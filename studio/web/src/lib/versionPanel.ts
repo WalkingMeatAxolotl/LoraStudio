@@ -4,6 +4,7 @@
  * 与 React 组件解耦便于单测。所有文案**只用版本号 / 状态语言**，
  * 不出现 commits / sha / branch 等 git 词汇。
  */
+import type { TFunction } from 'i18next'
 import type { SystemUpdateCheck } from '../api/client'
 
 /** master（稳定版）通道的状态行文案。
@@ -15,17 +16,22 @@ import type { SystemUpdateCheck } from '../api/client'
  * - detached：当前 commit 不在稳定版历史上（feature branch）
  * - check=null：未检查
  */
-export function formatMasterStateText(check: SystemUpdateCheck | null): string {
-  if (!check) return '未检查'
+export function formatMasterStateText(check: SystemUpdateCheck | null, t?: TFunction): string {
+  const tr = (key: string, options?: Record<string, unknown>) => t ? t(key, options) : String(options?.defaultValue ?? key)
+  if (!check) return tr('settings.notChecked', { defaultValue: '未检查' })
   if (check.state === 'up_to_date') {
-    return check.latest_version ? `已是最新 ${check.latest_version}` : '已是最新'
+    return check.latest_version
+      ? tr('settings.upToDateVersion', { version: check.latest_version, defaultValue: `已是最新 ${check.latest_version}` })
+      : tr('settings.upToDatePlain', { defaultValue: '已是最新' })
   }
   if (check.state === 'update_available') {
     const target = check.latest_version ?? check.latest_tag ?? check.latest_commit?.slice(0, 8) ?? ''
-    return target ? `有新稳定版 ${target}` : '有新稳定版'
+    return target
+      ? tr('settings.stableUpdateAvailable', { version: target, defaultValue: `有新稳定版 ${target}` })
+      : tr('settings.stableUpdateAvailablePlain', { defaultValue: '有新稳定版' })
   }
-  if (check.state === 'ahead') return '本地领先稳定版'
-  return '当前 commit 不在稳定版历史上'
+  if (check.state === 'ahead') return tr('settings.stableAheadShort', { defaultValue: '本地领先稳定版' })
+  return tr('settings.stableDetached', { defaultValue: '当前 commit 不在稳定版历史上' })
 }
 
 /** dev（开发版）通道的状态行文案。
@@ -33,14 +39,17 @@ export function formatMasterStateText(check: SystemUpdateCheck | null): string {
  * dev 没有版本号语义（滚动），所以"N 项新更新"是合理表达；不暴露
  * commits 字眼给用户。
  */
-export function formatDevStateText(check: SystemUpdateCheck | null): string {
-  if (!check) return '未抓取'
-  if (check.state === 'up_to_date') return '与 dev HEAD 一致'
+export function formatDevStateText(check: SystemUpdateCheck | null, t?: TFunction): string {
+  const tr = (key: string, options?: Record<string, unknown>) => t ? t(key, options) : String(options?.defaultValue ?? key)
+  if (!check) return tr('settings.notFetched', { defaultValue: '未抓取' })
+  if (check.state === 'up_to_date') return tr('settings.devUpToDateHead', { defaultValue: '与 dev HEAD 一致' })
   if (check.state === 'update_available') {
-    return check.behind_count > 0 ? `有 ${check.behind_count} 项新更新` : '有新更新'
+    return check.behind_count > 0
+      ? tr('settings.devHasNewItems', { count: check.behind_count, defaultValue: `有 ${check.behind_count} 项新更新` })
+      : tr('settings.devHasUpdatePlain', { defaultValue: '有新更新' })
   }
-  if (check.state === 'ahead') return '本地领先 dev HEAD'
-  return '当前 commit 不在 dev 历史上'
+  if (check.state === 'ahead') return tr('settings.devAheadShort', { defaultValue: '本地领先 dev HEAD' })
+  return tr('settings.devDetached', { defaultValue: '当前 commit 不在 dev 历史上' })
 }
 
 /** master 通道"更新到 vX.Y.Z"按钮是否应该显示。

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api, type MonitorState } from '../../../api/client'
 import { exportXYMatrix } from './exportXY'
 import FullscreenViewer from './FullscreenViewer'
-import { AXIS_LABELS, formatAxisValue, type XYAxisDraft } from './xy'
+import { axisLabel, formatAxisValue, type XYAxisDraft } from './xy'
 
 // zoom = 单 cell 物理宽度（px）。固定列宽 → 滚轮 zoom 视觉立即生效；
 // 列总宽 > 容器时横滚（已有 overflow:auto 兜底）。
@@ -35,6 +36,7 @@ export default function PreviewXYGrid({
   onCellClick?: (sampleIdx: number) => void
   selectedIndices?: number[]
 }) {
+  const { t } = useTranslation()
   const [cellW, setCellW] = useState(ZOOM_DEFAULT)
   const [maxW, setMaxW] = useState(ZOOM_DEFAULT * 6) // 容器还没 mount 时的兜底值
   const [fullscreenIdx, setFullscreenIdx] = useState<number | null>(null)
@@ -58,10 +60,10 @@ export default function PreviewXYGrid({
         xValues,
         yValues,
       })
-      setExportMsg('已下载')
+      setExportMsg(t('generate.exportDownloaded'))
       setTimeout(() => setExportMsg(null), 3000)
     } catch (e) {
-      setExportMsg(`失败: ${e instanceof Error ? e.message : String(e)}`)
+      setExportMsg(t('generate.exportFailed', { error: e instanceof Error ? e.message : String(e) }))
     } finally {
       setExporting(false)
     }
@@ -189,17 +191,17 @@ export default function PreviewXYGrid({
     <div className="flex flex-col gap-2 flex-1 min-h-0">
       <div className="flex items-center justify-between shrink-0">
         <span className="caption">
-          {xLen}{yDraft ? ` × ${yLen}` : ''} = {xLen * yLen} 张
+          {t('generate.xyGridCount', { x: xLen, y: yLen, n: xLen * yLen, axis: yDraft ? ` × ${yLen}` : '' })}
           {samples.length < xLen * yLen && samples.length > 0 && (
-            <span className="text-fg-tertiary"> · 已出 {samples.length}</span>
+            <span className="text-fg-tertiary"> · {t('generate.generatedCount', { n: samples.length })}</span>
           )}
         </span>
         <div className="flex items-center gap-2 text-2xs text-fg-tertiary font-mono">
-          <span>滚轮缩放 · 拖动平移 · Ctrl+点击选中 · 双击全屏</span>
+          <span>{t('generate.xyGridHelp')}</span>
           <button
             onClick={() => setCellW(ZOOM_DEFAULT)}
             className="btn btn-ghost text-xs"
-            title="重置缩放"
+            title={t('generate.resetZoom')}
           >
             {Math.round((cellW / ZOOM_DEFAULT) * 100)}%
           </button>
@@ -207,12 +209,12 @@ export default function PreviewXYGrid({
             onClick={() => void handleExport()}
             disabled={exporting || samples.length === 0}
             className="btn btn-secondary text-xs"
-            title="把整个 XY 矩阵 + 轴标签合并成一张 PNG 下载"
+            title={t('generate.exportPngTitle')}
           >
-            {exporting ? '导出中…' : '导出 PNG'}
+            {exporting ? t('generate.exporting') : t('generate.exportPng')}
           </button>
           {exportMsg && (
-            <span className={`text-2xs ${exportMsg.startsWith('失败') ? 'text-err' : 'text-ok'}`}>
+            <span className={`text-2xs ${exportMsg.startsWith(t('generate.exportFailedPrefix')) ? 'text-err' : 'text-ok'}`}>
               {exportMsg}
             </span>
           )}
@@ -268,9 +270,9 @@ export default function PreviewXYGrid({
         const fn = s.path.split(/[\\/]/).pop() ?? ''
         const captionParts: string[] = []
         if (s.xy) {
-          captionParts.push(`${AXIS_LABELS[xDraft.axis]}=${formatAxisValue(xDraft.axis, String(s.xy.xv ?? ''))}`)
+          captionParts.push(`${axisLabel(xDraft.axis)}=${formatAxisValue(xDraft.axis, String(s.xy.xv ?? ''))}`)
           if (yDraft && s.xy.yv != null) {
-            captionParts.push(`${AXIS_LABELS[yDraft.axis]}=${formatAxisValue(yDraft.axis, String(s.xy.yv))}`)
+            captionParts.push(`${axisLabel(yDraft.axis)}=${formatAxisValue(yDraft.axis, String(s.xy.yv))}`)
           }
         }
         return (
@@ -320,6 +322,7 @@ function Row({
   onCellClick?: (sampleIdx: number) => void
   onCellDoubleClick?: (sampleIdx: number) => void
 }) {
+  const { t } = useTranslation()
   return (
     <>
       {yDraft && (
@@ -336,9 +339,11 @@ function Row({
         const sample = idx != null ? samples[idx] : null
         const filename = sample ? sample.path.split(/[\\/]/).pop() ?? null : null
         const isSel = idx != null && selSet.has(idx)
-        const tooltip = (!yDraft
-          ? `${AXIS_LABELS[xDraft.axis]}=${formatAxisValue(xDraft.axis, xv)}`
-          : `${AXIS_LABELS[xDraft.axis]}=${formatAxisValue(xDraft.axis, xv)} · ${AXIS_LABELS[yDraft.axis]}=${formatAxisValue(yDraft.axis, yv ?? '')}`) + ' · 双击全屏 · Ctrl+点击选中'
+        const tooltip = t('generate.xyCellTooltip', {
+          label: !yDraft
+            ? `${axisLabel(xDraft.axis)}=${formatAxisValue(xDraft.axis, xv)}`
+            : `${axisLabel(xDraft.axis)}=${formatAxisValue(xDraft.axis, xv)} · ${axisLabel(yDraft.axis)}=${formatAxisValue(yDraft.axis, yv ?? '')}`,
+        })
         return (
           <GridCell
             key={`c-${yi}-${xi}`}
@@ -367,6 +372,7 @@ function GridCell({
   onClick?: (idx: number) => void
   onDoubleClick?: (idx: number) => void
 }) {
+  const { t } = useTranslation()
   const [errored, setErrored] = useState(false)
 
   // 切 task / filename 变（如点击历史回看）时 reset errored，让 img
@@ -382,7 +388,7 @@ function GridCell({
         className="grid place-items-center rounded-sm border border-subtle bg-sunken text-fg-tertiary text-2xs"
         style={{ minHeight: 80 }}
       >
-        {errored ? '原图已释放' : '…'}
+        {errored ? t('generate.originalReleased') : '…'}
       </div>
     )
   }

@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from ..presets_io import _absolutize_model_paths
 from ..schema import TrainingConfig
 from ..versions import version_dir
 from .. import projects as _projects
@@ -39,6 +40,7 @@ PROJECT_SPECIFIC_FIELDS: frozenset[str] = frozenset({
     "output_name",
     "resume_lora",
     "resume_state",
+    "trigger_word",
 })
 
 
@@ -50,6 +52,8 @@ def project_specific_overrides(
     `data_dir` / `output_dir` / `output_name` 永远确定地填上；
     `reg_data_dir` 只有 reg 集存在（meta.json）才填，否则空（让 trainer 走默认）。
     `resume_lora` / `resume_state` 默认空 —— 用户要接续训练时显式 PUT 改写。
+    `trigger_word` 来自 version 表（Step 4 Tagging 写入），保证 yaml 与 caption
+    同源，runtime bootstrap_phase 会据此把 trigger 注入 sample_prompt。
     """
     pid = int(project["id"])
     slug = str(project["slug"])
@@ -61,6 +65,7 @@ def project_specific_overrides(
         "output_name": f"{slug}_{label}",
         "resume_lora": None,
         "resume_state": None,
+        "trigger_word": str(version.get("trigger_word") or ""),
     }
     reg_meta = vdir / "reg" / "meta.json"
     if reg_meta.exists():
@@ -107,7 +112,7 @@ def read_version_config(
         cfg = TrainingConfig.model_validate(raw)
     except ValidationError as exc:
         raise VersionConfigError(f"config 校验失败: {exc}") from exc
-    return cfg.model_dump(mode="python")
+    return _absolutize_model_paths(cfg.model_dump(mode="python"))
 
 
 def write_version_config(

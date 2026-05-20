@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api } from '../../../api/client'
 
 /** 测试 task 的最新一张图大图预览。
@@ -11,6 +12,7 @@ export default function SampleGallery({ samples, taskId }: {
   samples: Array<{ path: string; step?: number }>
   taskId: number
 }) {
+  const { t } = useTranslation()
   const [errored, setErrored] = useState(false)
 
   if (!samples.length) return null
@@ -22,7 +24,7 @@ export default function SampleGallery({ samples, taskId }: {
   if (errored) {
     return (
       <div className="flex-1 grid place-items-center rounded-md border border-subtle bg-sunken text-fg-tertiary text-sm">
-        图正在生成…（cache 暂未就绪，等下一张 step 进度）
+        {t('generate.imageCachePending')}
       </div>
     )
   }
