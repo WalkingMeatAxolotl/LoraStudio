@@ -7,6 +7,7 @@ Optimizer Utils Module - 优化器创建
 3. Prodigy (prodigyopt) - 无需调 lr 的自适应优化器
 4. ProdigyPlusScheduleFree (prodigy-plus-schedule-free) - Schedule-Free + Prodigy，
    解决 Prodigy 在扩散 LoRA 训练中的 mutation ep / 风格突变问题。
+5. Pion - 矩阵参数用谱保持正交旋转，其他参数 AdamW fallback。
 """
 
 from __future__ import annotations
@@ -155,10 +156,20 @@ def create_optimizer(
             **kwargs,
         )
 
+    elif optimizer_type == "pion":
+        return create_pion(
+            params=params,
+            lr=learning_rate,
+            betas=betas,
+            weight_decay=weight_decay,
+            eps=eps,
+            **kwargs,
+        )
+
     else:
         raise ValueError(
             f"Unknown optimizer type: {optimizer_type}. "
-            f"Choose from: adamw, adamw8bit, prodigy, prodigy_plus_schedulefree"
+            f"Choose from: adamw, adamw8bit, pion, prodigy, prodigy_plus_schedulefree"
         )
 
 
@@ -280,6 +291,52 @@ def create_standard_adamw(
     print("  [OK] AdamW optimizer created")
 
     return optimizer
+
+
+def create_pion(
+    params: Iterator[nn.Parameter],
+    lr: float,
+    betas: tuple = (0.9, 0.99),
+    weight_decay: float = 0.0,
+    eps: float = 1e-8,
+    rms_scale: float = 1.0,
+    max_side: int = 256,
+    fallback_zero: bool = True,
+    use_second_moment: bool = True,
+    alternating: bool = True,
+    exp: str = "exact",
+    **kwargs,
+) -> Optimizer:
+    """创建 Pion 优化器。
+
+    Pion 对安全的二维矩阵参数执行正交等价变换，尽量保持奇异值谱；对
+    bias、norm、超大方阵侧以及 LoRA/LoKr 常见零初始化矩阵回退到 AdamW。
+    这样可以在当前 DiT LoRA 训练路径上作为实验优化器使用，不会把零奇异值
+    矩阵永久锁死。
+    """
+    from utils.pion_optimizer import Pion
+
+    param_list = params if _is_param_groups(params) else list(params)
+    logger.info(
+        "Creating Pion optimizer "
+        f"(lr={lr}, betas={tuple(betas)}, wd={weight_decay}, "
+        f"rms_scale={rms_scale}, max_side={max_side}, alternating={alternating}, "
+        f"second_moment={use_second_moment}, exp={exp})"
+    )
+    return Pion(
+        param_list,
+        lr=lr,
+        betas=tuple(betas),
+        eps=eps,
+        weight_decay=weight_decay,
+        rms_scale=rms_scale,
+        max_side=max_side,
+        fallback_zero=fallback_zero,
+        use_second_moment=use_second_moment,
+        alternating=alternating,
+        exp=exp,
+        **kwargs,
+    )
 
 
 def create_prodigy(

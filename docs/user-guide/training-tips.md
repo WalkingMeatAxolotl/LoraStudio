@@ -64,6 +64,7 @@
 | 优化器 | 何时用 | 关键参数 |
 |--------|--------|---------|
 | `adamw` | 默认。手调 lr 不嫌烦、想稳定可预期的训练 | `learning_rate` 1e-4 起步 |
+| `pion` | 实验选项。矩阵参数用谱保持旋转，零初始化/非矩阵参数自动回退 AdamW | `learning_rate` 1e-4 起步，先保持 Pion 高级项默认 |
 | `prodigy` | 不想调 lr。**注意**：扩散 LoRA 上易出"风格突变 ep" | `prodigy_d_coef` 小数据集设 0.5 |
 | `prodigy_plus_schedulefree` | **DiT LoRA 推荐**。在 Prodigy 基础上加 Schedule-Free averaged weights，sample/save 走 averaged 权重，**风格突变现象基本消失** | 见下方说明 |
 

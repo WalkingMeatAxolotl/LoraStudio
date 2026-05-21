@@ -16,6 +16,7 @@ import torch
 from torch import nn
 
 from utils.optimizer_utils import (
+    create_pion,
     create_prodigy_plus_schedulefree,
     optimizer_eval_mode,
 )
@@ -67,6 +68,60 @@ def test_eval_mode_skips_if_only_partial_methods() -> None:
     with optimizer_eval_mode(fake_opt):
         pass
     fake_opt.eval.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# create_pion
+# ---------------------------------------------------------------------------
+
+
+def test_pion_preserves_singular_values_for_matrix_parameter() -> None:
+    """Pion branch should update a matrix by orthogonal equivalence."""
+    torch.manual_seed(0)
+    param = nn.Parameter(torch.randn(4, 3))
+    before = torch.linalg.svdvals(param.detach().float())
+
+    optim = create_pion(
+        [param],
+        lr=1e-3,
+        betas=(0.0, 0.0),
+        use_second_moment=False,
+        alternating=False,
+        max_side=8,
+    )
+    param.grad = torch.randn_like(param)
+    optim.step()
+
+    after = torch.linalg.svdvals(param.detach().float())
+    assert torch.allclose(after, before, atol=1e-5, rtol=1e-5)
+    assert not torch.allclose(param.grad, torch.zeros_like(param.grad))
+
+
+def test_pion_falls_back_to_adamw_for_zero_matrix() -> None:
+    """LoRA/LoKr zero-init matrices must not be locked by spectrum preservation."""
+    param = nn.Parameter(torch.zeros(4, 3))
+    optim = create_pion(
+        [param],
+        lr=1e-2,
+        betas=(0.0, 0.0),
+        use_second_moment=False,
+        max_side=8,
+        fallback_zero=True,
+    )
+    param.grad = torch.ones_like(param)
+    optim.step()
+
+    assert torch.count_nonzero(param.detach()).item() == param.numel()
+
+
+def test_pion_falls_back_to_adamw_for_bias_parameter() -> None:
+    """Non-matrix trainables use the AdamW-compatible fallback path."""
+    param = nn.Parameter(torch.zeros(4))
+    optim = create_pion([param], lr=1e-2, betas=(0.0, 0.0))
+    param.grad = torch.ones_like(param)
+    optim.step()
+
+    assert torch.all(param.detach() < 0)
 
 
 # ---------------------------------------------------------------------------

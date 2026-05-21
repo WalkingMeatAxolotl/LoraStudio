@@ -99,6 +99,7 @@ export const SCHEMA_ENUM_LABEL_KEYS: Record<string, Record<string, string>> = {
   },
   optimizer_type: {
     adamw: 'schema.enums.optimizerType.adamw',
+    pion: 'schema.enums.optimizerType.pion',
     prodigy: 'schema.enums.optimizerType.prodigy',
     prodigy_plus_schedulefree: 'schema.enums.optimizerType.prodigyPlusSchedulefree',
   },
