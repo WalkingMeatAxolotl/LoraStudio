@@ -2,12 +2,15 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+export type BundleExportDestination = 'download' | 'data_exports'
+
 export interface BundleExportOpts {
   train: boolean
   trainCaptions: boolean
   reg: boolean
   regCaptions: boolean
   includeConfig: boolean
+  destination: BundleExportDestination
 }
 
 interface Props {
@@ -22,13 +25,14 @@ export default function ExportBundleDialog({ onConfirm, onCancel }: Props) {
   const [reg, setReg] = useState(false)
   const [regCaptions, setRegCaptions] = useState(false)
   const [includeConfig, setIncludeConfig] = useState(false)
+  const [destination, setDestination] = useState<BundleExportDestination>('download')
 
   const nothingSelected = !train && !reg && !includeConfig
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (nothingSelected) return
-    onConfirm({ train, trainCaptions, reg, regCaptions, includeConfig })
+    onConfirm({ train, trainCaptions, reg, regCaptions, includeConfig, destination })
   }
 
   return (
@@ -49,6 +53,34 @@ export default function ExportBundleDialog({ onConfirm, onCancel }: Props) {
           <p className="mt-1 mb-0 text-sm text-fg-secondary">
             {t('layout.exportBundleDestinationHint')}
           </p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-sm font-medium text-fg-primary">
+            {t('layout.exportBundleDestination')}
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="bundle-export-destination"
+              checked={destination === 'download'}
+              onChange={() => setDestination('download')}
+            />
+            <span className="text-sm text-fg-secondary">
+              {t('layout.exportBundleDownload')}
+            </span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="bundle-export-destination"
+              checked={destination === 'data_exports'}
+              onChange={() => setDestination('data_exports')}
+            />
+            <span className="text-sm text-fg-secondary">
+              {t('layout.exportBundleDataExports')}
+            </span>
+          </label>
         </div>
 
         {/* 训练集 */}

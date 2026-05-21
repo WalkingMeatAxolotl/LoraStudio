@@ -91,7 +91,7 @@ export default function ProjectLayout() {
     setShowExportDialog(true)
   }, [exporting])
 
-  const handleExportBundleConfirm = useCallback((opts: BundleExportOpts) => {
+  const handleExportBundleConfirm = useCallback(async (opts: BundleExportOpts) => {
     setShowExportDialog(false)
     if (!projectRef.current) return
     const av = projectRef.current.versions.find(
@@ -99,20 +99,32 @@ export default function ProjectLayout() {
     ) ?? projectRef.current.versions[0] ?? null
     if (!av) return
     setExporting(true)
-    const filename = `${projectRef.current.slug}-${av.label}.bundle.zip`
-    const a = document.createElement('a')
-    a.href = api.versionBundleZipUrl(projectRef.current.id, av.id, {
+    const bundleOpts = {
       train: opts.train,
       trainCaptions: opts.trainCaptions,
       reg: opts.reg,
       regCaptions: opts.regCaptions,
       includeConfig: opts.includeConfig,
-    })
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  }, [])
+    }
+    if (opts.destination === 'download') {
+      const filename = `${projectRef.current.slug}-${av.label}.bundle.zip`
+      const a = document.createElement('a')
+      a.href = api.versionBundleZipUrl(projectRef.current.id, av.id, bundleOpts)
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      return
+    }
+    try {
+      const result = await api.exportBundleToDataExports(projectRef.current.id, av.id, bundleOpts)
+      toast(t('layout.exportSavedToDataExports', { filename: result.filename, path: result.path }), 'success')
+      setExporting(false)
+    } catch (e) {
+      setExporting(false)
+      toast(t('layout.exportFailed', { error: String(e) }), 'error')
+    }
+  }, [t, toast])
 
   const handleDeleteVersion = useCallback(async (vid: number) => {
     if (!projectRef.current) return
