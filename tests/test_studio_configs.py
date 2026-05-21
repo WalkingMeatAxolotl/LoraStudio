@@ -36,7 +36,12 @@ def test_schema_is_complete() -> None:
     fields = TrainingConfig.model_fields
     for name in (
         "transformer_path", "data_dir", "lora_type", "lora_rank", "epochs",
-        "optimizer_type", "prodigy_d_coef", "prodigy_safeguard_warmup",
+        "optimizer_type",
+        # Pion 字段
+        "pion_rms_scale", "pion_max_side", "pion_beta1", "pion_beta2",
+        "pion_use_second_moment", "pion_alternating", "pion_fallback_zero",
+        "pion_exp",
+        "prodigy_d_coef", "prodigy_safeguard_warmup",
         # ProdigyPlusScheduleFree 字段
         "ppsf_d_coef", "ppsf_prodigy_steps", "ppsf_beta1", "ppsf_beta2",
         "ppsf_split_groups", "ppsf_split_groups_mean", "ppsf_use_speed",
@@ -45,9 +50,10 @@ def test_schema_is_complete() -> None:
     ):
         assert name in fields, f"missing: {name}"
     assert "wandb_enabled" not in fields
-    # optimizer_type Literal 包含 PPSF
+    # optimizer_type Literal 包含新增 optimizer
     optimizer_annotation = fields["optimizer_type"].annotation
     # Literal 的 __args__ 包含所有合法值
+    assert "pion" in getattr(optimizer_annotation, "__args__", ())
     assert "prodigy_plus_schedulefree" in getattr(optimizer_annotation, "__args__", ())
 
 
@@ -78,6 +84,14 @@ def test_schema_carries_ui_metadata(client: TestClient) -> None:
     assert props["transformer_path"]["control"] == "path"
     assert "show_when" in props["prodigy_d_coef"]
     assert "wandb_enabled" not in props
+    # Pion 字段都按 optimizer_type==pion 显示
+    for pion_field in (
+        "pion_rms_scale", "pion_max_side", "pion_beta1", "pion_beta2",
+        "pion_use_second_moment", "pion_alternating", "pion_fallback_zero",
+        "pion_exp",
+    ):
+        assert "show_when" in props[pion_field], f"{pion_field} missing show_when"
+        assert "optimizer_type==pion" in props[pion_field]["show_when"]
     # PPSF 字段都按 optimizer_type==prodigy_plus_schedulefree 显示
     for ppsf_field in (
         "ppsf_d_coef", "ppsf_prodigy_steps", "ppsf_beta1", "ppsf_beta2",

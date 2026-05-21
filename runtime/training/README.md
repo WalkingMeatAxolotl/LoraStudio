@@ -57,8 +57,8 @@ runtime/training/
     │   ├── lycoris.py      ← build_adapter for lokr/loha/lora
     │   └── __init__.py     ← BUILDERS dict + build_adapter + validate_schema_consistency
     │
-    ├── optimizers/         ← AdamW / Prodigy / PPSF
-    │   ├── adamw.py / prodigy.py / prodigy_plus_schedulefree.py
+    ├── optimizers/         ← AdamW / Pion / Prodigy / PPSF
+    │   ├── adamw.py / pion.py / prodigy.py / prodigy_plus_schedulefree.py
     │   └── __init__.py     ← BUILDERS + VALIDATORS + build_optimizer + validate_optimizer
     │
     ├── schedulers/         ← cosine / cosine_with_restart（"none" 是 schema-only 不开文件）

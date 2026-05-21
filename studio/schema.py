@@ -277,10 +277,53 @@ class TrainingConfig(BaseModel):
         description="最小学习率",
         json_schema_extra=_meta("training", show_when="lr_scheduler!=none", advanced=True),
     )
-    optimizer_type: Literal["adamw", "prodigy", "prodigy_plus_schedulefree"] = Field(
+    optimizer_type: Literal["adamw", "pion", "prodigy", "prodigy_plus_schedulefree"] = Field(
         "adamw",
-        description="优化器（prodigy_plus_schedulefree 是 DiT LoRA 训练推荐，averaged weights 解决 Prodigy 的风格突变 ep 问题）",
+        description="优化器（Pion 是实验性谱保持旋转优化器；prodigy_plus_schedulefree 是 DiT LoRA 训练推荐）",
         json_schema_extra=_meta("training"),
+    )
+    # ---------------- Pion 专属字段 ----------------
+    # Pion 对二维矩阵做正交等价变换。当前 DiT LoRA/LoKr 路径里，零初始化或
+    # 不适合旋转的参数会自动回退 AdamW，避免适配器训练被零谱锁死。
+    pion_rms_scale: float = Field(
+        1.0, gt=0.0,
+        description="Pion 更新 RMS 缩放（实验性；越大旋转步幅越激进）",
+        json_schema_extra=_meta("training", show_when="optimizer_type==pion", advanced=True),
+    )
+    pion_max_side: int = Field(
+        256, ge=1,
+        description="Pion 允许正交旋转的最大矩阵边长；更大矩阵侧回退 AdamW",
+        json_schema_extra=_meta("training", show_when="optimizer_type==pion", advanced=True),
+    )
+    pion_beta1: float = Field(
+        0.9, ge=0.0, lt=1.0,
+        description="Pion 李代数动量 β1",
+        json_schema_extra=_meta("training", show_when="optimizer_type==pion", advanced=True),
+    )
+    pion_beta2: float = Field(
+        0.99, ge=0.0, lt=1.0,
+        description="Pion 二阶动量 β2",
+        json_schema_extra=_meta("training", show_when="optimizer_type==pion", advanced=True),
+    )
+    pion_use_second_moment: bool = Field(
+        True,
+        description="Pion 使用二阶动量预条件",
+        json_schema_extra=_meta("training", show_when="optimizer_type==pion", advanced=True),
+    )
+    pion_alternating: bool = Field(
+        True,
+        description="Pion 交替更新输入/输出正交侧，降低每步开销",
+        json_schema_extra=_meta("training", show_when="optimizer_type==pion", advanced=True),
+    )
+    pion_fallback_zero: bool = Field(
+        True,
+        description="Pion 对零初始化矩阵回退 AdamW，避免 LoRA/LoKr 零谱被锁死",
+        json_schema_extra=_meta("training", show_when="optimizer_type==pion", advanced=True),
+    )
+    pion_exp: Literal["exact", "second_order"] = Field(
+        "exact",
+        description="Pion 正交映射：exact 使用 matrix_exp；second_order 使用二阶近似",
+        json_schema_extra=_meta("training", show_when="optimizer_type==pion", advanced=True),
     )
     prodigy_d_coef: float = Field(
         1.0, ge=0.1, le=10.0,
