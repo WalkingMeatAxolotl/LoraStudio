@@ -184,6 +184,13 @@ def run(ctx: TrainingContext) -> None:
 
                 if ctx.grad_clip > 0:
                     torch.nn.utils.clip_grad_norm_(ctx.trainable_params, max_norm=ctx.grad_clip)
+                if ctx.orthograd_config is not None and ctx.orthograd_config.enable:
+                    from utils.orthograd import apply_partial_orthograd_
+                    apply_partial_orthograd_(
+                        ctx.injector.network.named_parameters(),
+                        ctx.global_step,
+                        ctx.orthograd_config,
+                    )
                 ctx.optimizer.step()
                 if ctx.scheduler is not None and ctx.optimizer_type != "prodigy_plus_schedulefree":
                     ctx.scheduler.step()

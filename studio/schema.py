@@ -214,6 +214,12 @@ class TrainingConfig(BaseModel):
         description="层级 stochastic depth（整层级别随机跳过）",
         json_schema_extra=_meta("lora", advanced=True),
     )
+    lora_reg_dims: Optional[dict[str, int]] = Field(
+        None,
+        description="分层 rank：正则表达式 → rank 的字典，按模块名正则全匹配覆盖默认 rank（如 {\"lora_unet_.*double.*\": 16}）",
+        examples=[{"lora_unet_.*double.*": 16}],
+        json_schema_extra=_meta("lora", "code", advanced=True),
+    )
 
     # ------------------------------------------------------------------ 训练
     epochs: int = Field(
@@ -493,6 +499,44 @@ class TrainingConfig(BaseModel):
         description="梯度裁剪最大范数（0=禁用）",
         json_schema_extra=_meta("training", advanced=True),
     )
+
+    # ---------------------------------------------------------------- OrthoGrad
+    orthograd_mode: Literal["off", "manual"] = Field(
+        "off",
+        description="OrthoGrad 模式（off=禁用；manual=在 optimizer.step() 前手动应用，推荐同时关闭 optimizer_args.use_orthograd）",
+        json_schema_extra=_meta("training", advanced=True),
+    )
+    orthograd_enable_after: int = Field(
+        0, ge=0,
+        description="OrthoGrad 从第 N 步后启用（0=全程；建议先让前期结构学习以全梯度进行，再开启）",
+        json_schema_extra=_meta("training", show_when="orthograd_mode==manual", advanced=True),
+    )
+    orthograd_ramp_steps: int = Field(
+        0, ge=0,
+        description="OrthoGrad 启用后线性 ramp 步数（0=立即全强度；>0 在该步数内从 0 线性升至 strength）",
+        json_schema_extra=_meta("training", show_when="orthograd_mode==manual", advanced=True),
+    )
+    orthograd_strength: float = Field(
+        1.0, ge=0.0, le=1.0,
+        description="OrthoGrad 混合强度（1.0=完全正交梯度；<1.0 与原始梯度线性插值）",
+        json_schema_extra=_meta("training", show_when="orthograd_mode==manual", advanced=True),
+    )
+    orthograd_rescale: bool = Field(
+        True,
+        description="OrthoGrad 重缩放：将 ||g_orth|| 拉回 ||g||（与 ProdigyPlus 内置行为一致；False 则不重缩放）",
+        json_schema_extra=_meta("training", show_when="orthograd_mode==manual", advanced=True),
+    )
+    orthograd_exclude_param_keywords: list[str] = Field(
+        default_factory=lambda: ["lokr_w1", "lokr_w2_b", "lora_B"],
+        description="OrthoGrad 参数名关键词排除列表（含任一关键词的参数跳过；默认排除零初始化的幅度承载参数）",
+        json_schema_extra=_meta("training", "string-list", show_when="orthograd_mode==manual", advanced=True),
+    )
+    orthograd_exclude_module_keywords: list[str] = Field(
+        default_factory=list,
+        description="OrthoGrad 模块名关键词排除列表（可选，额外按模块名排除特定层）",
+        json_schema_extra=_meta("training", "string-list", show_when="orthograd_mode==manual", advanced=True),
+    )
+
     mixed_precision: Literal["bf16", "fp16", "no"] = Field(
         "bf16",
         description="混合精度",

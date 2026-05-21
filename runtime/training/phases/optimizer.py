@@ -76,3 +76,8 @@ def run(ctx: TrainingContext) -> None:
     # Timestep 采样器（baseline 或 InfoNoise；total_steps 确定后才能算 N_warm）
     from training.timestep_samplers import build_timestep_sampler
     ctx.timestep_sampler = build_timestep_sampler(args, ctx.total_steps)
+
+    # OrthoGrad：梯度正交化（Prieto et al. 2025）；optimizer.step() 前调用
+    from utils.orthograd import assert_no_double_orthograd, build_orthograd_config
+    assert_no_double_orthograd(args)
+    ctx.orthograd_config = build_orthograd_config(args)
