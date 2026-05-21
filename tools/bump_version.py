@@ -4,14 +4,18 @@
 
 Subcommands:
     validate         schema 校验整个 yaml
-    bump             同步 yaml top version 到 __init__.py / package.json + 重写 CHANGELOG.md
+    bump             同步 yaml top version 到 __init__.py / package.json / package-lock.json
+                     + 重写 CHANGELOG.md
     render-changelog 仅重写 CHANGELOG.md，不动版本号文件
+    verify-versions  跨文件 drift 检查：__init__.py / package.json / package-lock.json
+                     必须三者一致。CI 用，bump 完自检也调
 
 Examples:
     python tools/bump_version.py validate
     python tools/bump_version.py bump           # 读 yaml top version
     python tools/bump_version.py bump --version 0.6.1
     python tools/bump_version.py render-changelog
+    python tools/bump_version.py verify-versions
 """
 from __future__ import annotations
 
@@ -30,6 +34,7 @@ YAML_PATH = REPO_ROOT / "release_notes.yaml"
 CHANGELOG_PATH = REPO_ROOT / "CHANGELOG.md"
 STUDIO_INIT_PATH = REPO_ROOT / "studio" / "__init__.py"
 PACKAGE_JSON_PATH = REPO_ROOT / "studio" / "web" / "package.json"
+PACKAGE_LOCK_PATH = REPO_ROOT / "studio" / "web" / "package-lock.json"
 
 # ─── 校验规则（与 docs/release-notes-spec.md §8 一致） ──────────────────────
 
@@ -344,6 +349,49 @@ def _write_package_json_version(new_version: str) -> bool:
     return True
 
 
+def _read_package_lock_version() -> Optional[str]:
+    """读 package-lock.json 顶层 version。lockfile 里另有 packages[""].version
+    一处，正常应当与顶层一致；verify-versions 单独校验，这里只取顶层。"""
+    if not PACKAGE_LOCK_PATH.exists():
+        return None
+    data = json.loads(PACKAGE_LOCK_PATH.read_text(encoding="utf-8"))
+    return data.get("version")
+
+
+def _write_package_lock_version(new_version: str) -> bool:
+    """更新 lockfile 顶层 + packages[""] 两处 version 字段。
+
+    用正则替换前两处 `"version": "..."` —— 顶层 + packages[""] 段第一个。后面
+    deps 也有大量 version 字段，绝不能动；count=2 严格只改前两处。
+
+    v0.8.1 漏 bump 这个文件，结果 npm install 启动期自动改它，工作树 dirty
+    卡死 self-update preflight，是这个改动的直接动因。
+    """
+    if not PACKAGE_LOCK_PATH.exists():
+        return False
+    txt = PACKAGE_LOCK_PATH.read_text(encoding="utf-8")
+    new_txt, n = re.subn(
+        r'(\"version\"\s*:\s*\")([^\"]+)(\")',
+        rf'\g<1>{new_version}\g<3>',
+        txt,
+        count=2,
+    )
+    if n < 2:
+        return False
+    write_atomic(PACKAGE_LOCK_PATH, new_txt)
+    return True
+
+
+def _read_package_lock_packages_version() -> Optional[str]:
+    """读 lockfile 里 packages[""].version。verify-versions 跟顶层比对用。"""
+    if not PACKAGE_LOCK_PATH.exists():
+        return None
+    data = json.loads(PACKAGE_LOCK_PATH.read_text(encoding="utf-8"))
+    pkgs = data.get("packages") or {}
+    root = pkgs.get("") or {}
+    return root.get("version") if isinstance(root, dict) else None
+
+
 def cmd_bump(args: argparse.Namespace) -> int:
     try:
         versions = load_yaml()
@@ -374,19 +422,30 @@ def cmd_bump(args: argparse.Namespace) -> int:
     target_version = args.version or top_version
     cur_studio = _read_studio_version()
     cur_pkg = _read_package_json_version()
+    cur_lock = _read_package_lock_version()
 
     print(f"\n[bump] target version: {target_version}")
     print(f"[bump] studio/__init__.py: {cur_studio} → {target_version}")
     print(f"[bump] studio/web/package.json: {cur_pkg} → {target_version}")
+    print(f"[bump] studio/web/package-lock.json: {cur_lock} → {target_version}")
 
     if not _write_studio_version(target_version):
         print("[bump] WARN: studio/__init__.py 没找到 __version__ 字段，跳过", file=sys.stderr)
     if not _write_package_json_version(target_version):
         print("[bump] WARN: package.json 没找到 version 字段，跳过", file=sys.stderr)
+    if not _write_package_lock_version(target_version):
+        print("[bump] WARN: package-lock.json 没找到两处 version 字段，跳过", file=sys.stderr)
 
     content = render_changelog(versions)
     write_atomic(CHANGELOG_PATH, content)
     print(f"[bump] {CHANGELOG_PATH.relative_to(REPO_ROOT)} 重写完成")
+
+    # 自检：bump 完三个 version 文件必须一致。捕获自己写错的边角 case
+    # （e.g. lockfile 缺第二个 "version" → _write 返 False → 静默 drift）。
+    drift_rc = cmd_verify_versions(argparse.Namespace())
+    if drift_rc != 0:
+        print("[bump] FAIL: 自检发现 drift，请人工核对（上面已打印 verify-versions 详情）", file=sys.stderr)
+        return drift_rc
 
     print()
     print("next: 检查 git diff 后")
@@ -394,6 +453,40 @@ def cmd_bump(args: argparse.Namespace) -> int:
     print(f"  git tag v{target_version}")
     print(f"  git push --tags")
     return 0
+
+
+def cmd_verify_versions(args: argparse.Namespace) -> int:
+    """跨文件 version drift 校验。__init__.py / package.json / lockfile（顶层 +
+    packages[""]）四处必须一致；任一不等返 1 + 打印每处实际值。
+
+    bump 自检 + CI gate 两处用。文件缺失视为 drift（None ≠ 任何字符串）。
+    """
+    studio_v = _read_studio_version()
+    pkg_v = _read_package_json_version()
+    lock_top_v = _read_package_lock_version()
+    lock_pkg_v = _read_package_lock_packages_version()
+
+    rows = [
+        ("studio/__init__.py (__version__)", studio_v),
+        ("studio/web/package.json (version)", pkg_v),
+        ("studio/web/package-lock.json (top version)", lock_top_v),
+        ('studio/web/package-lock.json (packages[""].version)', lock_pkg_v),
+    ]
+    distinct = {v for _, v in rows}
+    if len(distinct) == 1 and None not in distinct:
+        print(f"[verify-versions] OK · 四处一致 = {distinct.pop()}")
+        return 0
+
+    print("[verify-versions] FAIL · 跨文件 version drift：", file=sys.stderr)
+    for label, value in rows:
+        print(f"  {label:<55} = {value!r}", file=sys.stderr)
+    print(
+        "\nv0.8.1 ZIP 用户卡 self-update 的根因就是这种 drift："
+        " npm install 启动期会自动修 lockfile → 工作树 dirty → preflight 拒绝更新。"
+        "\n修法：跑 `python tools/bump_version.py bump` 重新同步，或手动校准。",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -406,9 +499,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_r = sub.add_parser("render-changelog", help="从 yaml 重写 CHANGELOG.md")
     p_r.set_defaults(func=cmd_render_changelog)
 
-    p_b = sub.add_parser("bump", help="同步版本号到 __init__.py + package.json + CHANGELOG.md")
+    p_b = sub.add_parser("bump", help="同步版本号到 __init__.py + package.json + lockfile + CHANGELOG.md")
     p_b.add_argument("--version", help="期望的目标版本（与 yaml top 不符时报错）", default=None)
     p_b.set_defaults(func=cmd_bump)
+
+    p_vv = sub.add_parser("verify-versions", help="跨文件 version drift 检查（CI gate）")
+    p_vv.set_defaults(func=cmd_verify_versions)
 
     return p
 
