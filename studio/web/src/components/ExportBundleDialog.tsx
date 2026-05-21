@@ -1,4 +1,4 @@
-// ExportBundleDialog — 选择 bundle.zip 导出内容后写入 data_exports。
+// ExportBundleDialog — 选择 bundle.zip 导出内容后触发浏览器下载。
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 

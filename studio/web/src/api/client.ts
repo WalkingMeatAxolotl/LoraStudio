@@ -1775,9 +1775,8 @@ export const api = {
   versionTrainZipUrl: (pid: number, vid: number) =>
     `/api/projects/${pid}/versions/${vid}/train.zip`,
 
-  /** 将 bundle.zip（schema_version 2）写入 data_exports/，返回 {filename}。
-   * 同步完成；SSE version_bundle_zip_ready 也会在写完后触发。 */
-  exportBundle: (
+  /** 当前 version 的 bundle.zip 直链。<a href download> 触发浏览器下载。 */
+  versionBundleZipUrl: (
     pid: number,
     vid: number,
     opts: {
@@ -1787,24 +1786,18 @@ export const api = {
       regCaptions?: boolean
       includeConfig?: boolean
     },
-  ) =>
-    req<{ filename: string }>(`/api/projects/${pid}/versions/${vid}/export-bundle`, {
-      method: 'POST',
-      body: JSON.stringify({
-        train: opts.train !== false,
-        train_captions: opts.trainCaptions !== false,
-        reg: opts.reg ?? false,
-        reg_captions: opts.regCaptions ?? false,
-        include_config: opts.includeConfig ?? false,
-      }),
-    }),
+  ): string => {
+    const p = new URLSearchParams()
+    p.set('train', opts.train !== false ? '1' : '0')
+    p.set('train_captions', opts.trainCaptions !== false ? '1' : '0')
+    p.set('reg', opts.reg ? '1' : '0')
+    p.set('reg_captions', opts.regCaptions ? '1' : '0')
+    p.set('include_config', opts.includeConfig ? '1' : '0')
+    return `/api/projects/${pid}/versions/${vid}/bundle.zip?${p.toString()}`
+  },
 
-  /** 列出 data_exports/ 里的 .zip，按修改时间倒序。 */
-  listDataExports: () =>
-    req<{ filename: string; size: number; mtime: number }[]>('/api/data-exports'),
-
-  /** 从 data_exports/ 读取指定文件名导入（v1/v2 均支持）→ 新建 project + v1。 */
-  importBundleLocal: (filename: string) =>
+  /** 从 PathPicker 选中的 zip 路径导入 bundle（v1/v2 均支持）→ 新建 project + v1。 */
+  importBundleFromPath: (path: string) =>
     req<{
       project: ProjectDetail
       version: Version
@@ -1816,7 +1809,7 @@ export const api = {
       }
     }>('/api/projects/import-bundle', {
       method: 'POST',
-      body: JSON.stringify({ filename }),
+      body: JSON.stringify({ path }),
     }),
   /** 上传训练集 zip → 新建 project + v1，返回新项目。 */
   importTrainProject: async (file: File): Promise<{

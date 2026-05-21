@@ -47,16 +47,27 @@ export default function ProjectLayout() {
     ) {
       void reload()
     } else if (
-      (evt.type === 'version_train_zip_ready' || evt.type === 'version_train_zip_failed') &&
+      (
+        evt.type === 'version_train_zip_ready' ||
+        evt.type === 'version_train_zip_failed' ||
+        evt.type === 'version_bundle_zip_ready' ||
+        evt.type === 'version_bundle_zip_failed'
+      ) &&
       evt.project_id === projectId
     ) {
       setExporting(false)
-      if (evt.type === 'version_train_zip_failed') {
+      if (evt.type === 'version_train_zip_failed' || evt.type === 'version_bundle_zip_failed') {
         const err = typeof evt.error === 'string' ? evt.error : '?'
         toast(t('layout.exportFailed', { error: err }), 'error')
       }
     }
   })
+
+  useEffect(() => {
+    if (!exporting) return
+    const tid = window.setTimeout(() => setExporting(false), 60_000)
+    return () => window.clearTimeout(tid)
+  }, [exporting])
 
   const activeVersion = useMemo(() => {
     if (!project) return null
@@ -80,7 +91,7 @@ export default function ProjectLayout() {
     setShowExportDialog(true)
   }, [exporting])
 
-  const handleExportBundleConfirm = useCallback(async (opts: BundleExportOpts) => {
+  const handleExportBundleConfirm = useCallback((opts: BundleExportOpts) => {
     setShowExportDialog(false)
     if (!projectRef.current) return
     const av = projectRef.current.versions.find(
@@ -88,21 +99,20 @@ export default function ProjectLayout() {
     ) ?? projectRef.current.versions[0] ?? null
     if (!av) return
     setExporting(true)
-    try {
-      const { filename } = await api.exportBundle(projectRef.current.id, av.id, {
-        train: opts.train,
-        trainCaptions: opts.trainCaptions,
-        reg: opts.reg,
-        regCaptions: opts.regCaptions,
-        includeConfig: opts.includeConfig,
-      })
-      toast(t('layout.exportSaved', { filename }), 'success')
-    } catch (e) {
-      toast(t('layout.exportFailed', { error: String(e) }), 'error')
-    } finally {
-      setExporting(false)
-    }
-  }, [toast, t])
+    const filename = `${projectRef.current.slug}-${av.label}.bundle.zip`
+    const a = document.createElement('a')
+    a.href = api.versionBundleZipUrl(projectRef.current.id, av.id, {
+      train: opts.train,
+      trainCaptions: opts.trainCaptions,
+      reg: opts.reg,
+      regCaptions: opts.regCaptions,
+      includeConfig: opts.includeConfig,
+    })
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }, [])
 
   const handleDeleteVersion = useCallback(async (vid: number) => {
     if (!projectRef.current) return

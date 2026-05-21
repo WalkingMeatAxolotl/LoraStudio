@@ -937,29 +937,30 @@ def export_version_train_zip(
     )
 
 
-class _BundleExportBody(BaseModel):
-    train: bool = True
-    train_captions: bool = True
-    reg: bool = False
-    reg_captions: bool = False
-    include_config: bool = False
-
-
 class _BundleImportBody(BaseModel):
-    filename: str
+    path: str
 
 
-@app.post("/api/projects/{pid}/versions/{vid}/export-bundle")
-def export_version_bundle(pid: int, vid: int, body: _BundleExportBody) -> dict[str, Any]:
-    """将 bundle.zip（schema_version 2）写入 data_exports/ 并返回文件名。"""
-    from .paths import DATA_EXPORTS
+@app.get("/api/projects/{pid}/versions/{vid}/bundle.zip")
+def export_version_bundle(
+    pid: int,
+    vid: int,
+    background: BackgroundTasks,
+    train: bool = True,
+    train_captions: bool = True,
+    reg: bool = False,
+    reg_captions: bool = False,
+    include_config: bool = False,
+) -> FileResponse:
+    """按选项临时打包 bundle.zip（schema_version 2）并交给浏览器下载。"""
+    import tempfile
 
     opts = train_io.BundleOptions(
-        train=body.train,
-        train_captions=body.train_captions,
-        reg=body.reg,
-        reg_captions=body.reg_captions,
-        include_config=body.include_config,
+        train=train,
+        train_captions=train_captions,
+        reg=reg,
+        reg_captions=reg_captions,
+        include_config=include_config,
     )
 
     with db.connection_for() as conn:
@@ -969,48 +970,44 @@ def export_version_bundle(pid: int, vid: int, body: _BundleExportBody) -> dict[s
         p = projects.get_project(conn, pid)
         assert p is not None
 
-        DATA_EXPORTS.mkdir(parents=True, exist_ok=True)
-        filename = f"{p['slug']}-{v['label']}.bundle.zip"
-        dest = DATA_EXPORTS / filename
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        tmp.close()
+        tmp_path = Path(tmp.name)
         try:
-            train_io.export_bundle(conn, vid, dest, opts)
+            train_io.export_bundle(conn, vid, tmp_path, opts)
         except train_io.TrainIOError as exc:
-            dest.unlink(missing_ok=True)
+            tmp_path.unlink(missing_ok=True)
             bus.publish({"type": "version_bundle_zip_failed", "project_id": pid, "version_id": vid, "error": str(exc)})
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
-            dest.unlink(missing_ok=True)
+            tmp_path.unlink(missing_ok=True)
             bus.publish({"type": "version_bundle_zip_failed", "project_id": pid, "version_id": vid, "error": str(exc)})
             raise
 
-    bus.publish({"type": "version_bundle_zip_ready", "project_id": pid, "version_id": vid, "filename": filename})
-    return {"filename": filename}
-
-
-@app.get("/api/data-exports")
-def list_data_exports() -> list[dict[str, Any]]:
-    """列出 data_exports/ 目录下的 .zip 文件，按修改时间倒序。"""
-    from .paths import DATA_EXPORTS
-
-    if not DATA_EXPORTS.exists():
-        return []
-    files = []
-    for f in DATA_EXPORTS.glob("*.zip"):
-        stat = f.stat()
-        files.append({"filename": f.name, "size": stat.st_size, "mtime": stat.st_mtime})
-    return sorted(files, key=lambda x: x["mtime"], reverse=True)
+    bus.publish({"type": "version_bundle_zip_ready", "project_id": pid, "version_id": vid})
+    background.add_task(lambda: tmp_path.unlink(missing_ok=True))
+    return FileResponse(
+        tmp_path,
+        media_type="application/zip",
+        filename=f"{p['slug']}-{v['label']}.bundle.zip",
+        background=background,
+    )
 
 
 @app.post("/api/projects/import-bundle")
 def import_bundle_zip(body: _BundleImportBody) -> dict[str, Any]:
-    """从 data_exports/ 读取指定 zip 文件并导入（v1/v2 均支持）。"""
-    from .paths import DATA_EXPORTS, USER_PRESETS_DIR
-
-    dest = (DATA_EXPORTS / body.filename).resolve()
-    if dest.parent != DATA_EXPORTS.resolve():
-        raise HTTPException(400, "无效文件名")
+    """从 PathPicker 选中的 zip 路径导入 bundle（v1/v2 均支持）。"""
+    dest = Path(body.path)
+    if not dest.is_absolute():
+        dest = (REPO_ROOT / dest).resolve()
+    else:
+        dest = dest.resolve()
     if not dest.exists():
-        raise HTTPException(404, f"文件不存在: {body.filename}")
+        raise HTTPException(404, f"文件不存在: {body.path}")
+    if not dest.is_file():
+        raise HTTPException(400, "请选择 zip 文件")
+    if dest.suffix.lower() != ".zip":
+        raise HTTPException(400, "请选择 .zip 文件")
 
     with db.connection_for() as conn:
         try:
